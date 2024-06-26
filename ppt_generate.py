@@ -8,7 +8,7 @@ import google.generativeai as genai
 from datamodel import json_to_dataclass, DATACLASSES
 from pptx import Presentation
 from tenacity import retry, wait_fixed, stop_after_attempt, after_log
-from flask import Flask
+from flask import Flask, send_file
 
 app = Flask(__name__)
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -39,7 +39,7 @@ def hello():
 
 @app.route("/generate_ppt", methods=["POST"])
 @retry(wait=wait_fixed(30), stop=stop_after_attempt(5), after=after_log(logger, logging.DEBUG))
-def ppt_gen(filename, pdf_md, number_of_slides):
+def ppt_gen(filename:str, pdf_md:str, number_of_slides:str):
     model_input = prompt_head.replace(
         r"{{number_of_slides}}", str(number_of_slides)
     ).replace(r"{{{paper}}}", pdf_md)
@@ -61,9 +61,10 @@ def ppt_gen(filename, pdf_md, number_of_slides):
     ppt = Presentation("./MasterSlide.pptx")
     for page in json_to_dataclass(json_data):
         page.to_slide(ppt)
-    ppt.save(
-        f"output/ppts/{Path(filename).stem}-{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.pptx"
-    )
+    ppt_path = f"output/ppts/{Path(filename).stem}-{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.pptx"
+    ppt.save(ppt_path)
+    send_file(ppt_path, as_attachment=True)
+    return "ppt generated successfully"
 
 
 if __name__=="__main__":
