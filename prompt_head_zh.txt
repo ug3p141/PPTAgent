@@ -1,0 +1,141 @@
+你将会根据下方提供的 Markdown 格式的论文，将其内容转化为符合要求的 JSON 格式文件，以便转化为 PPT 展示。
+
+### 具体要求：
+
+1. **总页数**：根据以下模板，生成对应的 JSON 对象，总页数应在 {{number_of_slides}} ±1 页之间。
+2. **页面结构**：
+   - 开头：`Cover` 和 `TableOfContents`
+   - 结尾：`End`
+   - 中间：使用 `Section Page` 展示关联的 `SubSections`
+3. **Highlights Page**：
+   - 有且仅有 3 项数据，每条不能超过 10 个字符。
+4. **标题**：
+   - `Section`、`PicTopic`、`InformationTopic` 和 `SubSection` 应尽量简洁明了，不超过 10 个字符。
+5. **图片使用**：
+   - 我提供给你的每张图片都应被用于生成 `Display` 页
+   - 你只能使用我提供的图片，本次生成包含的图片为空
+   - 请注意，不要使用论文中提到的Figures或Tables
+6. **页面组织**：
+   - 整个 `Pages` 由 `Section -> SubSections -> SubSection` 下的内容页 (`Highlight`、`MultilevelBulletedList`、`Display`、`Information`) 组织。
+   - `Section` 下的内容页应被归类到多个 `SubSection` 下，内容页的 `SubSectionName` 应与之前保持一致。
+7. **样式丰富性**：
+   - 交替使用多种 `PageType`，防止视觉疲劳。
+   - 所有为列表类型的值（例如 `ContentsList`），不应只有一个元素。
+8. **受众**：PPT 的受众是同领域的专家，使用第一人称进行讲述。
+
+### JSON 模板：
+
+```json
+[
+    {
+        "PageType": "Cover",
+        "DepartmentName": "",
+        "Topic": "",
+        "Presenter": ""
+    },
+    {
+        "PageType": "TableOfContents",
+        "Sections": [
+            ""
+        ]
+    },
+    {
+        "PageType": "Section",
+        "SectionName": "",
+        "SubSections": [
+            ""
+        ]
+    },
+    {
+        "PageType": "Highlight",
+        "SubSectionName": "",
+        "Highlights": [
+            ""
+        ],
+        "Contents": ""
+    },
+    {
+        "PageType": "MultilevelBulletedList",
+        "SubSectionName": "",
+        "ContentsList": [
+            {
+                "topic": "",
+                "text": []
+            },
+            {
+                "topic": "",
+                "text": []
+            }
+        ]
+    },
+    {
+        "PageType": "Display",
+        "SubSectionName": "",
+        "PicturePath": "",
+        "PicTopic": "",
+        "Contents": [
+            ""
+        ]
+    },
+    {
+        "PageType": "Information",
+        "SubSectionName": "",
+        "InformationTopic": "",
+        "Information": [
+            ""
+        ]
+    },
+    {
+        "PageType": "End"
+    }
+]
+
+Markdown 论文内容：
+以下是提供的 Markdown 格式论文，请将其转换为符合要求的 JSON 对象：
+"""
+{{{paper}}}
+"""
+
+### 例子
+
+为了进一步帮助理解，以下是一个简化的示例 JSON 对象：
+
+```json
+[
+    {
+        "PageType": "Cover",
+        "DepartmentName": "Computer Science",
+        "Topic": "AI Research",
+        "Presenter": "Dr. John Doe"
+    },
+    {
+        "PageType": "TableOfContents",
+        "Sections": [
+            "Introduction",
+            "Methodology",
+            "Results"
+        ]
+    },
+    {
+        "PageType": "Section",
+        "SectionName": "Introduction",
+        "SubSections": [
+            "Background",
+            "Objective"
+        ]
+    },
+    {
+        "PageType": "Highlight",
+        "SubSectionName": "Background",
+        "Highlights": [
+            "AI history",
+            "Key concepts",
+            "Current trends"
+        ],
+        "Contents": "A brief overview of AI history, key concepts, and current trends."
+    },
+    {
+        "PageType": "End"
+    }
+]
+请根据上述模板和要求，转换提供的论文内容为 JSON 对象

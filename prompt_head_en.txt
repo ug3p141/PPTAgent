@@ -1,0 +1,139 @@
+You will transform the content of the provided Markdown format paper into a JSON format file according to the requirements, so it can be converted into a PPT presentation.
+
+Specific Requirements:
+Total Pages: Generate the corresponding JSON object based on the template below, with the total number of pages being {{number_of_slides}} ±1.
+Page Structure:
+Start with: Cover and TableOfContents
+End with: End
+Use Section Page to display related SubSections in between.
+Highlights Page:
+There must be exactly 3 items, each no longer than 10 characters.
+Titles:
+Section, PicTopic, InformationTopic, and SubSection should be concise, not exceeding 10 characters.
+Image Usage:
+Every image provided must be used to generate a Display page.
+You can only use the images I provide, and the images included in this generation are empty
+Please note that you should not use the Figures or Tables mentioned in the paper
+
+Page Organization:
+The entire Pages should be organized as Section -> SubSections -> Content pages (Highlight, MultilevelBulletedList, Display, Information) under SubSection.
+Content pages under a Section should be categorized into multiple SubSections, and the SubSectionName of the content pages should remain consistent.
+Variety in Styles:
+Use various PageType alternately to avoid visual fatigue.
+All list-type values (e.g., ContentsList) should not contain only one element.
+Audience: The PPT is for experts in the same field. You should narrate in the first person.
+JSON Template:
+```json
+[
+    {
+        "PageType": "Cover",
+        "DepartmentName": "",
+        "Topic": "",
+        "Presenter": ""
+    },
+    {
+        "PageType": "TableOfContents",
+        "Sections": [
+            ""
+        ]
+    },
+    {
+        "PageType": "Section",
+        "SectionName": "",
+        "SubSections": [
+            ""
+        ]
+    },
+    {
+        "PageType": "Highlight",
+        "SubSectionName": "",
+        "Highlights": [
+            ""
+        ],
+        "Contents": ""
+    },
+    {
+        "PageType": "MultilevelBulletedList",
+        "SubSectionName": "",
+        "ContentsList": [
+            {
+                "topic": "",
+                "text": []
+            },
+            {
+                "topic": "",
+                "text": []
+            }
+        ]
+    },
+    {
+        "PageType": "Display",
+        "SubSectionName": "",
+        "PicturePath": "",
+        "PicTopic": "",
+        "Contents": [
+            ""
+        ]
+    },
+    {
+        "PageType": "Information",
+        "SubSectionName": "",
+        "InformationTopic": "",
+        "Information": [
+            ""
+        ]
+    },
+    {
+        "PageType": "End"
+    }
+]
+```
+Markdown Paper Content:
+Below is the provided Markdown format paper. Please convert it into the required JSON object. Note that this request does not include images:
+"""
+{{{paper}}}
+"""
+
+Example
+To further aid understanding, here is a simplified example JSON object:
+
+```json
+[
+    {
+        "PageType": "Cover",
+        "DepartmentName": "Computer Science",
+        "Topic": "AI Research",
+        "Presenter": "Dr. John Doe"
+    },
+    {
+        "PageType": "TableOfContents",
+        "Sections": [
+            "Introduction",
+            "Methodology",
+            "Results"
+        ]
+    },
+    {
+        "PageType": "Section",
+        "SectionName": "Introduction",
+        "SubSections": [
+            "Background",
+            "Objective"
+        ]
+    },
+    {
+        "PageType": "Highlight",
+        "SubSectionName": "Background",
+        "Highlights": [
+            "AI history",
+            "Key concepts",
+            "Current trends"
+        ],
+        "Contents": "A brief overview of AI history, key concepts, and current trends."
+    },
+    {
+        "PageType": "End"
+    }
+]
+```
+Please convert the provided paper content into a JSON object based on the above template and requirements.
