@@ -1,2 +1,7 @@
 output
 __pycache__
+baselines
+data
+models
+*.ppt*
+*DS_Store*
