@@ -8,7 +8,14 @@ import google.generativeai as genai
 from datamodel import json_to_dataclass, DATACLASSES
 from pptx import Presentation
 from tenacity import retry, wait_fixed, stop_after_attempt, after_log
-from flask import Flask, send_file
+from flask import Flask, send_file, request
+
+# 代理
+proxy = "http://124.16.138.148:7890"
+os.environ["https_proxy"] = proxy
+os.environ["http_proxy"] = proxy
+os.environ["HTTP_PROXY"] = proxy
+os.environ["HTTPS_PROXY"] = proxy
 
 app = Flask(__name__)
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -37,9 +44,17 @@ prompt_head = open("prompt_head_en.txt", "r").read()
 def hello():
     return "ppt generation service running successfully"
 
+
 @app.route("/generate_ppt", methods=["POST"])
-@retry(wait=wait_fixed(30), stop=stop_after_attempt(5), after=after_log(logger, logging.DEBUG))
-def ppt_gen(filename:str, pdf_md:str, number_of_slides:str):
+@retry(
+    wait=wait_fixed(30),
+    stop=stop_after_attempt(5),
+    after=after_log(logger, logging.DEBUG),
+)
+def ppt_gen():
+    filename = request.form.get("filename")
+    pdf_md = request.form.get("pdf_md")
+    number_of_slides = request.form.get("number_of_slides")
     model_input = prompt_head.replace(
         r"{{number_of_slides}}", str(number_of_slides)
     ).replace(r"{{{paper}}}", pdf_md)
@@ -53,7 +68,10 @@ def ppt_gen(filename:str, pdf_md:str, number_of_slides:str):
         mode="w",
     ) as f:
         json.dump(
-            {"input": model_input, **response.to_dict()}, f, ensure_ascii=False, indent=4
+            {"input": model_input, **response.to_dict()},
+            f,
+            ensure_ascii=False,
+            indent=4,
         )
     json_data = json.loads(
         response.text[response.text.find("[") : response.text.rfind("]") + 1]
@@ -63,18 +81,14 @@ def ppt_gen(filename:str, pdf_md:str, number_of_slides:str):
         page.to_slide(ppt)
     ppt_path = f"output/ppts/{Path(filename).stem}-{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.pptx"
     ppt.save(ppt_path)
-    send_file(ppt_path, as_attachment=True)
-    return "ppt generated successfully"
+    return send_file(ppt_path, as_attachment=True)
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     import socket
+
     s = socket.socket()
     s.bind(("", 0))
     random_port = s.getsockname()[1]
     s.close()
-    app.run(debug=True, host="0.0.0.0", port=random_port)
-    # paper_md = open("./DOC2PPT.md").read()
-    # number_of_slides = 20
-    # filename = "DOC2PPT.md"
-    # ppt_gen(filename, paper_md, number_of_slides)
+    app.run(debug=False, host="0.0.0.0", port=50119)
