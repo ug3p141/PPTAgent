@@ -1,4 +1,5 @@
 from collections import Counter
+import pickle
 import os
 import re
 from rich import print
@@ -15,8 +16,16 @@ from pptx.text.text import _Run, TextFrame
 from pptx.shapes.placeholder import SlidePlaceholder
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from typing_extensions import Dict, Type
-from utils import Config, dict_to_object, xml_print, object_to_dict  # noqa
+from utils import (
+    Config,
+    dict_to_object,
+    parse_groupshape,
+    replace_xml_node,
+    xml_print,
+    object_to_dict,
+)  # noqa
 from pptx.dml.color import RGBColor
+from pptx.util import Emu
 
 base_config = Config()
 pjoin = os.path.join
@@ -28,7 +37,6 @@ pjoin = os.path.join
 # run: font, hyperlink, text
 # 以paragraphs 为单位处理文本框
 class TextFrame:
-
     def __init__(
         self,
         is_textframe: bool,
@@ -38,22 +46,18 @@ class TextFrame:
         self.is_textframe = is_textframe
         self.style = style
         self.data = data
+        self.descr = "".join([para.get("text", "") for para in data])
 
     @classmethod
     def from_shape(cls, shape: BaseShape):
         if not shape.has_text_frame:
             return cls(False, {}, [])
         shape = shape.text_frame
-        style = object_to_dict(shape)
-        style.pop("text")
+        # always set word wrap
+        style = object_to_dict(shape, exclude=["text"])
         data = []
         # 获取文本框内容
         for _, paragraph in enumerate(shape.paragraphs):
-            # 有些shape的text为空但也有用（例如一些矩形框），所以不对text做判断
-            if "支部基本情况(党员队伍建设)" in paragraph.text:
-                pass
-            if not paragraph.text:
-                continue
             runs = paragraph.runs
             if len(runs) == 0:  # 成功解析
                 runs = [
@@ -61,27 +65,20 @@ class TextFrame:
                     for r in parse_xml(paragraph._element.xml.replace("fld", "r")).r_lst
                 ]
             # 只有fill属性懒得解析了
-            content = {
-                "font": object_to_dict(
-                    Counter([run.font for run in runs]).most_common(1)[0][0]
-                ),
-            } | object_to_dict(paragraph)
-            content.pop("runs", None)
+            content = object_to_dict(paragraph, exclude=["runs"])
+            if len(runs) == 0:
+                data.append(content)
+                continue
+            runs_ronts = {run.font: 0 for run in runs}
+            for run in runs:
+                runs_ronts[run.font] += len(run.text)
+            content["font"] = object_to_dict(max(runs_ronts, key=runs_ronts.get))
+
+            # 设置language id会导致font name设置失败，fuck！
             if content["font"]["name"] == "+mj-ea":
                 content["font"]["name"] = "宋体"
 
             data.append(content)
-            # element_style = {}
-            # 获取Run对象的字体样式 由于runs的信息负责，我认为此处应该使用markdown进行解析，放置过多复杂信息
-            # assert len(paragraph.runs) == 1
-            # for run in paragraph.runs:
-            #     font = run.font
-            #     font_style = object_to_dict(font)
-            #     try:
-            #         font_style['color'] = font.color.rgb
-            #     except:
-            #         font_style["font_color"] = None
-            # content["element_style"] = element_style
         return cls(True, style, data)
 
     def build(self, shape: BaseShape):
@@ -93,28 +90,46 @@ class TextFrame:
             else shape.add_textbox(**self.style["shape_bounds"])
         )
         # 注意，只对textframe是无效的，还要设置一遍所有的runs
-        for para in self.data:
-            p = tf.add_paragraph()
+        for pid, para in enumerate(self.data):
+            text = para.pop("text")
+            font = para.pop("font") if "font" in para else None
+
+            p = tf.paragraphs[0]
+            if pid != 0:
+                p = tf.add_paragraph()
+            dict_to_object(para, p)
+
+            # 目前只有一个run，后续使用markdown的可能更多
+            if font is None:
+                continue
             run = p.add_run()
-            font = para.pop("font")
             if font["color"] is not None:
                 run.font.fill.solid()
                 run.font.fill.fore_color.rgb = RGBColor(*font.pop("color"))
-            dict_to_object(para, run)
+            run.text = text
             dict_to_object(font, run.font)
+        # always set word wrap to True
+        tf.word_wrap = True
 
 
-# TODO 判断build后的属性是否与解析前的一直
+# TODO 判断build后的属性是否与解析前的一致
 
 
 class UnsupportedShape:
     @classmethod
     def from_shape(
-        cls, shape_idx: int, shape: BaseShape, style: Dict, text_frame: TextFrame
+        cls,
+        slide_idx: int,
+        shape_idx: int,
+        shape: BaseShape,
+        style: Dict,
+        text_frame: TextFrame,
     ):
         print(f"Unsupport Shape --- {shape.__class__}\n", object_to_dict(shape))
         assert not any([shape.has_chart, shape.has_table, shape.has_text_frame])
-        return cls()
+        obj = cls()
+        obj.style = style
+        return obj
 
     def build(self, slide: Slide):
         pass
@@ -123,33 +138,53 @@ class UnsupportedShape:
 class ShapeElement:
     def __init__(
         self,
+        slide_idx: int,
         shape_idx: int,
         style: Dict,
         data: Dict,
         text_frame: TextFrame,
+        descr: str = "",
     ):
+        self.slide_idx = slide_idx
         self.shape_idx = shape_idx
         self.style = style
         self.data = data
         self.text_frame = text_frame
         self.validation = True
+        self.consumed = False
+        self.descr = descr
 
     @classmethod
-    def from_shape(cls, shape_idx: int, shape: BaseShape):
+    def from_shape(cls, slide_idx: int, shape_idx: int, shape: BaseShape):
+        # implement fill for shapes
         style = {
             "shape_bounds": {
-                "width": shape.width,
-                "height": shape.height,
-                "left": shape.left,
-                "top": shape.top,
+                "width": Emu(shape.width.emu),
+                "height": Emu(shape.height.emu),
+                "left": Emu(shape.left.emu),
+                "top": Emu(shape.top.emu),
             },
-            "shape_type": shape.shape_type,
+            "shape_type": str(shape.shape_type),
             "rotation": shape.rotation,
+            "fill": shape.fill._xPr.xml if "fill" in dir(shape) else None,
         }
         text_frame = TextFrame.from_shape(shape)
-        return SHAPECAST.get(shape.shape_type, UnsupportedShape).from_shape(
-            shape_idx, shape, style, text_frame
+        obj = SHAPECAST.get(shape.shape_type, UnsupportedShape).from_shape(
+            slide_idx, shape_idx, shape, style, text_frame
         )
+        return obj
+
+    def build(self, slide, shape):
+        assert not self.consumed, "Shape has been consumed"
+        self.consumed = True
+        self.text_frame.build(shape)
+        if self.style["fill"] is not None:
+            if "fill" in self.style["fill"].lower():
+                replace_xml_node(shape._element, shape.fill._xPr, self.style["fill"])
+                dict_to_object(self.style["shape_bounds"], shape)
+        if "rotation" in dir(shape):
+            shape.rotation = self.style["rotation"]
+        return shape
 
     def get_style(self):
         return self.style
@@ -157,84 +192,89 @@ class ShapeElement:
     def get_data(self):
         return self.data
 
-    def set_validation(self, validation: bool):
-        self.validation = validation
+    def __eq__(self, __value: object) -> bool:
+        if not isinstance(__value, ShapeElement) or self.consumed:
+            return False
+        return (
+            self.shape_idx == __value.shape_idx
+            and self.style == __value.style
+            and self.data == __value.data
+            and self.text_frame == __value.text_frame
+        )
 
-    def build(self, slide, shape):
-        self.text_frame.build(shape)
-        if "rotation" in self.style:
-            shape.rotation = self.style["rotation"]
-        if self.validation:
-            new_shape = ShapeElement.from_shape(self.shape_idx, shape)
-            assert self.data == new_shape.data
-            assert self.style == new_shape.style
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}: shape {self.shape_idx} of slide {self.slide_idx}, {self.descr}"
+
+    def pickle(self, path: str):
+        # pickle self for later use
+        with open(path, "wb") as f:
+            pickle.dump(self, f)
 
 
 class AutoShape(ShapeElement):
     @classmethod
     def from_shape(
         cls,
+        slide_idx: int,
         shape_idx: int,
         shape: PPTXAutoShape,
         style: Dict,
         text_frame: TextFrame,
     ):
-        data = {
-            "auto_shape_type": shape.auto_shape_type,
-            # "fill_color": shape.fill.fore_color.rgb,
-        }
-        return cls(shape_idx, style, data, text_frame)
+        data = shape.auto_shape_type.real
+        descr = str(shape.auto_shape_type)
+        return cls(slide_idx, shape_idx, style, data, text_frame, descr)
 
     def build(self, slide: Slide):
-        shape = slide.shapes.add_shape(
-            self.data["auto_shape_type"], **self.style["shape_bounds"]
-        )
-        super().build(slide, shape)
+        shape = slide.shapes.add_shape(self.data, **self.style["shape_bounds"])
+        return super().build(slide, shape)
 
 
 class TextBox(ShapeElement):
     @classmethod
     def from_shape(
         cls,
+        slide_idx: int,
         shape_idx: int,
         shape: TextFrame,
         style: Dict,
         text_frame: TextFrame,
     ):
-        return cls(shape_idx, style, None, text_frame)
+        return cls(slide_idx, shape_idx, style, None, text_frame, text_frame.descr)
 
     def build(self, slide: Slide):
         shape = slide.shapes.add_textbox(**self.style["shape_bounds"])
-        super().build(slide, shape)
+        return super().build(slide, shape)
 
 
 class Placeholder(ShapeElement):
     @classmethod
     def from_shape(
         cls,
+        slide_idx: int,
         shape_idx: int,
         shape: SlidePlaceholder,
         style: Dict,
         text_frame: TextFrame,
     ):
-
         style |= {
             "placeholder_type": shape.placeholder_format.type,
         }
         if not shape.has_text_frame or shape.has_chart or shape.has_table:
             print(f"Unsupported Shape: {shape}")
         data = []
-        return cls(shape_idx, style, data, text_frame)
+        return cls(slide_idx, shape_idx, style, data, text_frame)
 
     def build(self, slide: Slide):
         pass
-        # super().build(slide, shape)
+        # super().build(slide, self.shape)
 
 
 class Picture(ShapeElement):
     @classmethod
     def from_shape(
         cls,
+        slide_idx: int,
         shape_idx: int,
         shape: Picture,
         style: Dict,
@@ -250,11 +290,13 @@ class Picture(ShapeElement):
             "crop_top": shape.crop_top,
             "crop_left": shape.crop_left,
             "crop_right": shape.crop_right,
-            "auto_shape_type": shape.auto_shape_type,
+            "auto_shape_type": shape.auto_shape_type,  # most are rectangles
         }
         with open(img_path, "wb") as f:
             f.write(shape.image.blob)
-        return cls(shape_idx, style, [img_path, shape.name], text_frame)
+        return cls(
+            slide_idx, shape_idx, style, [img_path, shape.name], text_frame, shape.name
+        )
 
     def build(self, slide: Slide):
         shape = slide.shapes.add_picture(
@@ -263,34 +305,39 @@ class Picture(ShapeElement):
         )
         shape.name = self.data[1]
         dict_to_object(self.style["img_style"], shape.image)
-        super().build(slide, shape)
+        return super().build(slide, shape)
 
 
 class GroupShape(ShapeElement):
     @classmethod
     def from_shape(
         cls,
+        slide_idx: int,
         shape_idx: int,
         shape: GroupShape,
         style: Dict,
         text_frame: TextFrame,
     ):
         data = [
-            ShapeElement.from_shape(i, sub_shape)
+            ShapeElement.from_shape(slide_idx, f"{shape_idx}_{i}", sub_shape)
             for i, sub_shape in enumerate(shape.shapes)
         ]
-        return cls(shape_idx, style, data, text_frame)
+        for idx, shape_bounds in enumerate(parse_groupshape(shape)):
+            data[idx].style["shape_bounds"] = shape_bounds
+        return cls(slide_idx, shape_idx, style, data, text_frame, " group ")
 
     def build(self, slide: Slide):
+        shapes = []
         for sub_shape in self.data:
-            sub_shape.build(slide)
-        # super().build(slide, shape)
+            shapes.append(sub_shape.build(slide))
+        return super().build(slide, shapes)
 
 
 class Chart(ShapeElement):
     @classmethod
     def from_shape(
         cls,
+        slide_idx: int,
         shape_idx: int,
         shape: Chart,
         style: Dict,
@@ -312,7 +359,7 @@ class Chart(ShapeElement):
                 data_list.append(point)
             chart_item_data["data_list"] = data_list
             chart_data.append(chart_item_data)
-        obj = cls(shape_idx, style, chart_data, text_frame)
+        obj = cls(slide_idx, shape_idx, style, chart_data, text_frame)
         setattr(obj, "shape", shape)
         return obj
 
@@ -322,7 +369,7 @@ class Chart(ShapeElement):
         #     self.style["chart_style"]["chart_type"],
 
         # shape
-        # super().build(slide, shape)
+        # super().build(slide, self.shape)
 
 
 # 目前的问题，rows和cols的宽度或高度获取不到
@@ -330,6 +377,7 @@ class Table(ShapeElement):
     @classmethod
     def from_shape(
         cls,
+        slide_idx: int,
         shape_idx: int,
         shape: Table,
         style: Dict,
@@ -345,7 +393,7 @@ class Table(ShapeElement):
             row_list.append(cell_list)
         style["table_style"] = object_to_dict(shape.table)
 
-        obj = cls(shape_idx, style, row_list, text_frame)
+        obj = cls(slide_idx, shape_idx, style, row_list, text_frame)
         setattr(obj, "shape", shape)
         return obj
 
@@ -374,12 +422,15 @@ class SlidePage:
         self.shapes = shapes
         self.slide_layout_name = slide_layout_name
         self.slide_title = slide_title
+        self.consumed = False
 
     @classmethod
     def from_slide(cls, slide: Slide, slide_idx: int):
         shapes = [
-            ShapeElement.from_shape(i, shape) for i, shape in enumerate(slide.shapes)
+            ShapeElement.from_shape(slide_idx, i, shape)
+            for i, shape in enumerate(slide.shapes)
         ]
+        shapes.sort(key=lambda x: x.style["shape_bounds"]["top"])
         slide_layout_name = slide.slide_layout.name if slide.slide_layout else None
         # is shape a title
         slide_title = slide.shapes.title.text if slide.shapes.title else None
@@ -391,11 +442,23 @@ class SlidePage:
         return cls(shapes, slide_idx, slide_notes, slide_layout_name, slide_title)
 
     def build(self, prs: PPTXPre, slide_layout):
+        assert not self.consumed, "SlidePage has been consumed"
+        self.consumed = True
         slide = prs.slides.add_slide(slide_layout)
         for shape in self.shapes:
             shape.build(slide)
         # if self.slide_title:
         # slide.shapes.title.text = self.slide_title
+
+    def __eq__(self, __value) -> bool:
+        if not isinstance(__value, SlidePage) or self.consumed:
+            return False
+        return (
+            self.slide_idx == __value.slide_idx
+            and self.shapes == __value.shapes
+            and self.slide_layout_name == __value.slide_layout_name
+            and self.slide_title == __value.slide_title
+        )
 
 
 class Presentation:
@@ -404,6 +467,7 @@ class Presentation:
         slides: list[SlidePage],
         slide_width: float,
         slide_height: float,
+        file_path: str,
         num_pages: int,
         author: str,
     ) -> None:
@@ -411,32 +475,60 @@ class Presentation:
         self.slide_width = slide_width
         self.slide_height = slide_height
         self.num_pages = num_pages
+        self.source_file = file_path
         self.author = author
         self.consumed = False
 
     @classmethod
     def from_file(cls, file_path):
         prs = PPTXPre(file_path)
-        slides = [SlidePage.from_slide(slide, i) for i, slide in enumerate(prs.slides)]
-        slide_width = prs.slide_width
-        slide_height = prs.slide_height
+        slides = [
+            SlidePage.from_slide(slide, i) for i, slide in enumerate(list(prs.slides))
+        ]
+        slide_width = Emu(prs.slide_width.emu)
+        slide_height = Emu(prs.slide_height.emu)
         core_properties = prs.core_properties
         num_pages = len(slides)
         author = core_properties.author
-        return cls(slides, slide_width, slide_height, num_pages, author)
+        return cls(slides, slide_width, slide_height, file_path, num_pages, author)
 
-    def save(self, file_path):
-        if self.consumed:
-            raise Exception("Presentation has been consumed")
+    def save(self, file_path, validation=False):
+        assert not self.consumed, "Presentation has been consumed"
+        if validation:
+            copied_pr = Presentation.from_file(self.file_path)
         self.consumed = True
-        prs = PPTXPre()
-        prs.core_properties.author = "OminiPreGen" + self.author
-        prs.slide_width = self.slide_width
-        prs.slide_height = self.slide_height
-        blank_slide_layout = prs.slide_layouts[6]
+        prs = PPTXPre(self.source_file)
+        # delete all slides so we can rebuild them
+        while len(prs.slides) != 0:
+            rId = prs.slides._sldIdLst[0].rId
+            prs.part.drop_rel(rId)
+            del prs.slides._sldIdLst[0]
+
+        # prs.core_properties.author = "OminiPreGen" + self.author
+        # prs.slide_width = self.slide_width
+        # prs.slide_height = self.slide_height
+        layout_mapping = {layout.name: layout for layout in prs.slide_layouts}
         for slide in self.slides:
-            slide.build(prs, blank_slide_layout)
+            slide.build(prs, layout_mapping[slide.slide_layout_name])
+        if validation:
+            saved_prs = Presentation.from_file(file_path)
+            assert copied_pr == saved_prs, "Validation failed"
         prs.save(file_path)
+
+    def __eq__(self, __value: object) -> bool:
+        if not isinstance(__value, Presentation) or self.consumed:
+            return False
+        slides_eq = True
+        for i, slide in enumerate(self.slides):
+            if not slide == __value.slides[i]:
+                slides_eq = False
+                break
+        return (
+            slides_eq
+            and self.slide_width == __value.slide_width
+            and self.slide_height == __value.slide_height
+            and self.num_pages == __value.num_pages
+        )
 
 
 SHAPECAST: Dict[int, Type[ShapeElement]] = {

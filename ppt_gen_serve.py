@@ -76,7 +76,7 @@ def ppt_gen():
     json_data = json.loads(
         response.text[response.text.find("[") : response.text.rfind("]") + 1]
     )
-    ppt = Presentation("./MasterSlide.pptx")
+    ppt = Presentation("resource/MasterSlide.pptx")
     for page in json_to_dataclass(json_data):
         page.to_slide(ppt)
     ppt_path = f"output/ppts/{Path(filename).stem}-{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.pptx"

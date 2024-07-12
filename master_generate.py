@@ -1,6 +1,7 @@
 # 1. 根据master 去完成生成内容到slide的映射关系
 import pptx
 
+
 class MasterGenerator:
     def __init__(self, prs: pptx.Presentation):
         self.prs = prs
@@ -12,7 +13,9 @@ class MasterGenerator:
             ]
             for i in self.masters
         }
-        assert len(self.prs.slides) == sum(len(v) for v in self.layout_slides_mapping.values())
+        assert len(self.prs.slides) == sum(
+            len(v) for v in self.layout_slides_mapping.values()
+        )
         self.n_cluster = len(self.masters)
 
     def build_mapping(self):
@@ -24,4 +27,4 @@ if __name__ == "__main__":
     mg = MasterGenerator(prs)
     mg.build_mapping()
     for k, v in mg.layout_slides_mapping.items():
-        print(k, '  :  ',len(v))
+        print(k, "  :  ", len(v))

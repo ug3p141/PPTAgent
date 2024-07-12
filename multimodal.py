@@ -5,6 +5,7 @@ class ImageCaptioner:
     def caption_image(self, image_path):
         pass
 
+
 class ImageGenerator:
     def __init__(self):
         pass

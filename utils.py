@@ -1,8 +1,86 @@
+import copy
 import os
+from lxml import etree
+from pptx.oxml.ns import _nsmap as namespaces
+from pptx.oxml import parse_xml
+from pptx.shapes.autoshape import Shape
+from pptx.shapes.group import GroupShape
+
+
+# def clone_shape(shape):
+#     """Add a duplicate of `shape` to the slide on which it appears."""
+#     # ---access required XML elements---
+#     sp = shape._sp
+#     spTree = sp.getparent()
+#     # ---clone shape element---
+#     new_sp = copy.deepcopy(sp)
+#     # ---add it to slide---
+#     spTree.append(new_sp)
+#     # ---create a proxy object for the new sp element---
+#     new_shape = Shape(new_sp, None)
+#     # ---give it a unique shape-id---
+#     new_shape.shape_id = shape.shape_id + 1000
+#     # ---return the new proxy object---
+#     return new_shape
+
+
+def parse_groupshape(groupshape: GroupShape):
+    assert isinstance(groupshape, GroupShape)
+    group_top_left_x = groupshape.left
+    group_top_left_y = groupshape.top
+    group_width = groupshape.width
+    group_height = groupshape.height
+    # false size and xy
+    shape_top_left_x = min([sp.left for sp in groupshape.shapes])
+    shape_top_left_y = min([sp.top for sp in groupshape.shapes])
+    shape_width = (
+        max([sp.left + sp.width for sp in groupshape.shapes]) - shape_top_left_x
+    )
+    shape_height = (
+        max([sp.top + sp.height for sp in groupshape.shapes]) - shape_top_left_y
+    )
+    # scale xy
+    group_shape_xy = []
+    for sp in groupshape.shapes:
+        group_shape_left = (
+            sp.left - shape_top_left_x
+        ) * group_width / shape_width + group_top_left_x
+        group_shape_top = (
+            sp.top - shape_top_left_y
+        ) * group_height / shape_height + group_top_left_y
+        group_shape_width = sp.width * group_width / shape_width
+        group_shape_height = sp.height * group_height / shape_height
+        group_shape_xy.append(
+            {
+                "left": int(group_shape_left),
+                "top": int(group_shape_top),
+                "width": int(group_shape_width),
+                "height": int(group_shape_height),
+            }
+        )
+    return group_shape_xy
+
+
+# 这个xpr中包含了x:left, y:top, cx:widht, cy:height四个属性，用于描述矩形的位置和大小
+def replace_xml_node(root, old_element, new_xml):
+    # 用子节点替换旧节点
+    new_element = etree.fromstring(new_xml)
+    old_node = root.find(".//" + old_element.tag, namespaces)
+    root.replace(old_node, new_element)
+
+    # 检查替换是否成功
+    replaced_node = root.find(".//" + new_element.tag, namespaces)
+    assert replaced_node is not None and etree.tostring(
+        replaced_node
+    ) == etree.tostring(new_element)
+    return parse_xml(etree.tostring(root, pretty_print=True).decode())
+
 
 def xml_print(xml_str):
     import xml.dom.minidom
+
     print(xml.dom.minidom.parseString(xml_str).toprettyxml())
+
 
 def output_obj(obj):
     for attr in dir(obj):
@@ -14,7 +92,8 @@ def output_obj(obj):
                     print("obj.%s is a method" % attr)
             except Exception as e:
                 print("obj.%s error: %s" % (attr, e))
-            print('---***---')
+            print("---***---")
+
 
 def is_primitive(obj):
     """
@@ -33,7 +112,10 @@ def is_primitive(obj):
     )
 
 
-def object_to_dict(obj, result=None):
+DEFAULT_EXCLUDE = set(["element", "language_id", "ln", "placeholder_format"])
+
+
+def object_to_dict(obj, result=None, exclude=None):
     """
     将对象的非隐藏属性拷贝到一个字典中。
 
@@ -45,10 +127,15 @@ def object_to_dict(obj, result=None):
     """
     if result is None:
         result = {}
+    exclude = DEFAULT_EXCLUDE.union(exclude or set())
     for attr in dir(obj):
+        if attr in exclude:
+            continue
         try:
             if not attr.startswith("_") and not callable(getattr(obj, attr)):
                 attr_value = getattr(obj, attr)
+                if "real" in dir(attr_value):
+                    attr_value = attr_value.real
                 if is_primitive(attr_value):
                     result[attr] = attr_value
         except Exception as e:
@@ -56,7 +143,7 @@ def object_to_dict(obj, result=None):
     return result
 
 
-def dict_to_object(dict:dict, obj: object):
+def dict_to_object(dict: dict, obj: object):
     """
     从字典中恢复对象的属性。
 

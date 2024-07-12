@@ -858,7 +858,11 @@ class _ProgIdEnum(object):
             return self._width
 
     def __contains__(self, item):
-        return item in (self.DOCX, self.PPTX, self.XLSX,)
+        return item in (
+            self.DOCX,
+            self.PPTX,
+            self.XLSX,
+        )
 
     def __repr__(self):
         return "%s.PROG_ID" % __name__

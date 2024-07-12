@@ -258,7 +258,7 @@ class CT_GroupShapeNonVisual(BaseShapeElement):
 
 
 class CT_GroupShapeProperties(BaseOxmlElement):
-    """p:grpSpPr element """
+    """p:grpSpPr element"""
 
     _tag_seq = (
         "a:xfrm",

@@ -442,20 +442,22 @@ class Font(object):
             self.color,
             self.italic,
             self.name,
-            self.size.cm if self.size is not None else None,
+            self.size.pt if self.size is not None else None,
             self.underline,
         )
 
     def __hash__(self):
         return hash(self.get_attrs())
-    
+
     def __eq__(self, other):
         if not isinstance(other, Font):
             return False
         return self.get_attrs() == other.get_attrs()
-    
+
     def __repr__(self):
-        return "Font(%s)" % self.__hash__()
+        return f"Font: name={self.name}, size={self.size}"
+
+
 class _Hyperlink(Subshape):
     """
     Text run hyperlink object. Corresponds to ``<a:hlinkClick>`` child

@@ -90,7 +90,12 @@ class MultilevelBulletedList(Page):
 
         placeholders[0].text = self.SubSectionName
         for datapoint in self.ContentsList:
-            placeholders[1].text += "● " + datapoint["topic"]+'\n' + "".join([f"     {i}\n" for i in datapoint["text"]])
+            placeholders[1].text += (
+                "● "
+                + datapoint["topic"]
+                + "\n"
+                + "".join([f"     {i}\n" for i in datapoint["text"]])
+            )
         return ppt
 
 
@@ -143,7 +148,18 @@ class End(Page):
         ppt.slides.add_slide(ppt.slide_layouts[-1])
         return ppt
 
-DATACLASSES= [ Cover, TableOfContents, Section, Highlight, MultilevelBulletedList, Display, Information, End ]
+
+DATACLASSES = [
+    Cover,
+    TableOfContents,
+    Section,
+    Highlight,
+    MultilevelBulletedList,
+    Display,
+    Information,
+    End,
+]
+
 
 def json_to_dataclass(data: list) -> List[Page]:
     dataclass_list = []
