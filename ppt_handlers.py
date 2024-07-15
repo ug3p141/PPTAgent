@@ -1,4 +1,3 @@
-from collections import Counter
 import pickle
 import os
 import re
@@ -15,6 +14,7 @@ from pptx.table import Table
 from pptx.text.text import _Run, TextFrame
 from pptx.shapes.placeholder import SlidePlaceholder
 from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.dml.fill import _NoneFill, _NoFill
 from typing_extensions import Dict, Type
 from utils import (
     Config,
@@ -87,7 +87,7 @@ class TextFrame:
         tf = (
             shape.text_frame
             if shape.has_text_frame
-            else shape.add_textbox(**self.style["shape_bounds"])
+            else shape.add_textbox(**self.style.pop("shape_bounds"))
         )
         # 注意，只对textframe是无效的，还要设置一遍所有的runs
         for pid, para in enumerate(self.data):
@@ -108,8 +108,10 @@ class TextFrame:
                 run.font.fill.fore_color.rgb = RGBColor(*font.pop("color"))
             run.text = text
             dict_to_object(font, run.font)
-        # always set word wrap to True
-        tf.word_wrap = True
+        dict_to_object(self.style, tf)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}: {self.descr}"
 
 
 # TODO 判断build后的属性是否与解析前的一致
@@ -125,7 +127,7 @@ class UnsupportedShape:
         style: Dict,
         text_frame: TextFrame,
     ):
-        print(f"Unsupport Shape --- {shape.__class__}\n", object_to_dict(shape))
+        # print(f"Unsupport Shape --- {shape.__class__}\n", object_to_dict(shape))
         assert not any([shape.has_chart, shape.has_table, shape.has_text_frame])
         obj = cls()
         obj.style = style
@@ -157,6 +159,7 @@ class ShapeElement:
     @classmethod
     def from_shape(cls, slide_idx: int, shape_idx: int, shape: BaseShape):
         # implement fill for shapes
+
         style = {
             "shape_bounds": {
                 "width": Emu(shape.width.emu),
@@ -167,11 +170,24 @@ class ShapeElement:
             "shape_type": str(shape.shape_type),
             "rotation": shape.rotation,
             "fill": shape.fill._xPr.xml if "fill" in dir(shape) else None,
+            "line": (
+                {
+                    "line_xml": shape.line.fill._xPr.xml,
+                    "width": shape.line.width,
+                    "dash_style": shape.line.dash_style,
+                }
+                if "line" in dir(shape) and shape.line._ln is not None
+                else None
+            ),
         }
         text_frame = TextFrame.from_shape(shape)
         obj = SHAPECAST.get(shape.shape_type, UnsupportedShape).from_shape(
             slide_idx, shape_idx, shape, style, text_frame
         )
+        # ? mask to enable pickling
+        obj.from_shape = shape
+        if shape.is_placeholder:
+            print("placeholder", obj)
         return obj
 
     def build(self, slide, shape):
@@ -179,9 +195,15 @@ class ShapeElement:
         self.consumed = True
         self.text_frame.build(shape)
         if self.style["fill"] is not None:
-            if "fill" in self.style["fill"].lower():
-                replace_xml_node(shape._element, shape.fill._xPr, self.style["fill"])
-                dict_to_object(self.style["shape_bounds"], shape)
+            replace_xml_node(shape.fill._xPr, self.style["fill"])
+            dict_to_object(self.style["shape_bounds"], shape)
+        if self.style["line"] is not None:
+            # shape.line.fill.background()
+            replace_xml_node(
+                shape.line.fill._xPr,
+                self.style["line"].pop("line_xml"),
+            )
+            dict_to_object(self.style["line"], shape.line)
         if "rotation" in dir(shape):
             shape.rotation = self.style["rotation"]
         return shape
@@ -203,7 +225,7 @@ class ShapeElement:
         )
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}: shape {self.shape_idx} of slide {self.slide_idx}, {self.descr}"
+        return f"{self.__class__.__name__}: shape {self.shape_idx} of slide {self.slide_idx}, {self.descr or self.text_frame.descr}"
 
     def pickle(self, path: str):
         # pickle self for later use
@@ -221,13 +243,28 @@ class AutoShape(ShapeElement):
         style: Dict,
         text_frame: TextFrame,
     ):
-        data = shape.auto_shape_type.real
+        data = {
+            "auto_shape_type": shape.auto_shape_type.real,
+            "is_nofill": isinstance(shape.fill._fill, (_NoneFill, _NoFill)),
+            "is_line_nofill": isinstance(shape.line.fill._fill, (_NoneFill, _NoFill)),
+        }
         descr = str(shape.auto_shape_type)
         return cls(slide_idx, shape_idx, style, data, text_frame, descr)
 
     def build(self, slide: Slide):
-        shape = slide.shapes.add_shape(self.data, **self.style["shape_bounds"])
-        return super().build(slide, shape)
+        shape = slide.shapes.add_shape(
+            self.data["auto_shape_type"], **self.style["shape_bounds"]
+        )
+        if self.data["is_nofill"]:
+            shape.fill.background()
+            self.style["fill"] = None
+            for para in self.text_frame.data:
+                if "font" in para:
+                    para["font"]["color"] = (0, 0, 0)
+        if self.data["is_line_nofill"]:
+            shape.line.fill.background()
+            self.style["line"] = None
+        shape = super().build(slide, shape)
 
 
 class TextBox(ShapeElement):
@@ -240,7 +277,7 @@ class TextBox(ShapeElement):
         style: Dict,
         text_frame: TextFrame,
     ):
-        return cls(slide_idx, shape_idx, style, None, text_frame, text_frame.descr)
+        return cls(slide_idx, shape_idx, style, None, text_frame, False)
 
     def build(self, slide: Slide):
         shape = slide.shapes.add_textbox(**self.style["shape_bounds"])
@@ -430,7 +467,8 @@ class SlidePage:
             ShapeElement.from_shape(slide_idx, i, shape)
             for i, shape in enumerate(slide.shapes)
         ]
-        shapes.sort(key=lambda x: x.style["shape_bounds"]["top"])
+        #! cannot be sort because it will change the z-order
+        # shapes.sort(key=lambda x: x.style["shape_bounds"]["top"])
         slide_layout_name = slide.slide_layout.name if slide.slide_layout else None
         # is shape a title
         slide_title = slide.shapes.title.text if slide.shapes.title else None
@@ -482,8 +520,10 @@ class Presentation:
     @classmethod
     def from_file(cls, file_path):
         prs = PPTXPre(file_path)
+        # TODO set slide range here
         slides = [
-            SlidePage.from_slide(slide, i) for i, slide in enumerate(list(prs.slides))
+            SlidePage.from_slide(slide, i)
+            for i, slide in enumerate(list(prs.slides)[:])
         ]
         slide_width = Emu(prs.slide_width.emu)
         slide_height = Emu(prs.slide_height.emu)
@@ -504,9 +544,7 @@ class Presentation:
             prs.part.drop_rel(rId)
             del prs.slides._sldIdLst[0]
 
-        # prs.core_properties.author = "OminiPreGen" + self.author
-        # prs.slide_width = self.slide_width
-        # prs.slide_height = self.slide_height
+        prs.core_properties.author += "OminiPreGen with: "
         layout_mapping = {layout.name: layout for layout in prs.slide_layouts}
         for slide in self.slides:
             slide.build(prs, layout_mapping[slide.slide_layout_name])

@@ -1,9 +1,6 @@
-import copy
 import os
 from lxml import etree
 from pptx.oxml.ns import _nsmap as namespaces
-from pptx.oxml import parse_xml
-from pptx.shapes.autoshape import Shape
 from pptx.shapes.group import GroupShape
 
 
@@ -62,18 +59,10 @@ def parse_groupshape(groupshape: GroupShape):
 
 
 # 这个xpr中包含了x:left, y:top, cx:widht, cy:height四个属性，用于描述矩形的位置和大小
-def replace_xml_node(root, old_element, new_xml):
+def replace_xml_node(old_element, new_xml):
     # 用子节点替换旧节点
     new_element = etree.fromstring(new_xml)
-    old_node = root.find(".//" + old_element.tag, namespaces)
-    root.replace(old_node, new_element)
-
-    # 检查替换是否成功
-    replaced_node = root.find(".//" + new_element.tag, namespaces)
-    assert replaced_node is not None and etree.tostring(
-        replaced_node
-    ) == etree.tostring(new_element)
-    return parse_xml(etree.tostring(root, pretty_print=True).decode())
+    old_element.getparent().replace(old_element, new_element)
 
 
 def xml_print(xml_str):

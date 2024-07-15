@@ -2,6 +2,7 @@ output
 __pycache__
 baselines
 data
+.vscode
 models
 *.ppt*
 *DS_Store*
