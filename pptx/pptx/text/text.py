@@ -507,6 +507,18 @@ class _Paragraph(Subshape):
         super(_Paragraph, self).__init__(parent)
         self._element = self._p = p
 
+    @property
+    def bullet(self):
+        pPr = self._p.pPr
+        if pPr is None:
+            return None
+        return pPr.bullet
+
+    @bullet.setter
+    def bullet(self, value):
+        pPr = self._p.get_or_add_pPr()
+        pPr.bullet = value
+
     def add_line_break(self):
         """Add line break at end of this paragraph."""
         self._p.add_br()

@@ -28,6 +28,7 @@ from pptx.oxml.simpletypes import (
     ST_TextTypeface,
     ST_TextWrappingType,
     XsdBoolean,
+    XsdString,
 )
 from pptx.oxml.xmlchemy import (
     BaseOxmlElement,
@@ -459,10 +460,37 @@ class CT_TextParagraphProperties(BaseOxmlElement):
     lnSpc = ZeroOrOne("a:lnSpc", successors=_tag_seq[1:])
     spcBef = ZeroOrOne("a:spcBef", successors=_tag_seq[2:])
     spcAft = ZeroOrOne("a:spcAft", successors=_tag_seq[3:])
+    buNone = ZeroOrOne("a:buNone", successors=_tag_seq[11:])
+    buChar = ZeroOrOne("a:buChar", successors=_tag_seq[13:])
     defRPr = ZeroOrOne("a:defRPr", successors=_tag_seq[16:])
     lvl = OptionalAttribute("lvl", ST_TextIndentLevelType, default=0)
     algn = OptionalAttribute("algn", PP_PARAGRAPH_ALIGNMENT)
     del _tag_seq
+
+    @property
+    def bullet(self):
+        buNone = self.buNone
+        buChar = self.buChar
+        if buNone is not None:
+            return False
+        if buChar is not None:
+            return buChar.char
+
+    @bullet.setter
+    def bullet(self, value):
+        self._remove_buNone()
+        self._remove_buChar()
+        if value is None:
+            return
+        if isinstance(value, bool):
+            if value:
+                buChar = self._add_buChar()
+                buChar.char = "\u2022"
+            else:
+                self._add_buNone()
+        else:
+            buChar = self._add_buChar()
+            buChar.char = value
 
     @property
     def line_spacing(self):
@@ -575,3 +603,19 @@ class CT_TextSpacingPoint(BaseOxmlElement):
     """
 
     val = RequiredAttribute("val", ST_TextSpacingPoint)
+
+
+class CT_TextNoBullet(BaseOxmlElement):
+    """
+    <a:buNone> element, specifying that a paragraph should not be bulleted.
+    """
+
+    pass
+
+
+class CT_TextCharBullet(BaseOxmlElement):
+    """
+    <a:buChar> element, specifying that a paragraph should have a character bullet.
+    """
+
+    char = RequiredAttribute("char", XsdString)
