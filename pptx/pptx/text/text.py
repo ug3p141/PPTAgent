@@ -13,6 +13,7 @@ from pptx.shapes import Subshape
 from pptx.text.fonts import FontFiles
 from pptx.text.layout import TextFitter
 from pptx.util import Centipoints, Emu, lazyproperty, Pt
+from lxml import etree
 
 
 class TextFrame(Subshape):
@@ -517,6 +518,23 @@ class _Paragraph(Subshape):
     @bullet.setter
     def bullet(self, value):
         pPr = self._p.get_or_add_pPr()
+        if (
+            pPr.find(
+                "a:buFont",
+                namespaces={
+                    "a": "http://schemas.openxmlformats.org/drawingml/2006/main"
+                },
+            )
+            is None
+        ):
+            buFont = etree.Element(
+                "{http://schemas.openxmlformats.org/drawingml/2006/main}buFont",
+                typeface="Wingdings",
+                pitchFamily="0",
+                charset="2",
+                panose="05000000000000000000",
+            )
+            pPr.insert(0, buFont)  # 插入到第一个子元素位置，可以根据需要调整位置
         pPr.bullet = value
 
     def add_line_break(self):

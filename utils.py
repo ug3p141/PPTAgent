@@ -2,7 +2,7 @@ import os
 from lxml import etree
 from pptx.oxml.ns import _nsmap as namespaces
 from pptx.shapes.group import GroupShape
-
+import xml.etree.ElementTree as ET
 
 # def clone_shape(shape):
 #     """Add a duplicate of `shape` to the slide on which it appears."""
@@ -19,6 +19,12 @@ from pptx.shapes.group import GroupShape
 #     new_shape.shape_id = shape.shape_id + 1000
 #     # ---return the new proxy object---
 #     return new_shape
+
+
+def save_xml(xml_string: str, filename: str = "output.xml"):
+    root = ET.fromstring(xml_string)
+    tree = ET.ElementTree(root)
+    tree.write(filename, encoding="utf-8", xml_declaration=True)
 
 
 def parse_groupshape(groupshape: GroupShape):
@@ -132,7 +138,7 @@ def object_to_dict(obj, result=None, exclude=None):
     return result
 
 
-def dict_to_object(dict: dict, obj: object):
+def dict_to_object(dict: dict, obj: object, exclude=None):
     """
     从字典中恢复对象的属性。
 
@@ -143,8 +149,10 @@ def dict_to_object(dict: dict, obj: object):
     返回:
     恢复属性后的对象
     """
+    if exclude is None:
+        exclude = set()
     for key, value in dict.items():
-        if value is not None:
+        if key not in exclude:
             setattr(obj, key, value)
 
 

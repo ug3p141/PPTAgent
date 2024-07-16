@@ -472,7 +472,7 @@ class CT_TextParagraphProperties(BaseOxmlElement):
         buNone = self.buNone
         buChar = self.buChar
         if buNone is not None:
-            return False
+            return None
         if buChar is not None:
             return buChar.char
 

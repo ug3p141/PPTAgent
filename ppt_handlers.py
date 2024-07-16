@@ -4,14 +4,14 @@ import re
 from rich import print
 from pptx.oxml import parse_xml
 from pptx import Presentation as PPTXPre
-from pptx.slide import Slide
+from pptx.slide import Slide as PPTXSlide
 from pptx.shapes.autoshape import Shape as PPTXAutoShape
-from pptx.shapes.picture import Picture
+from pptx.shapes.picture import Picture as PPTXPicture
 from pptx.shapes.base import BaseShape
-from pptx.shapes.group import GroupShape
-from pptx.chart.chart import Chart
+from pptx.shapes.group import GroupShape as PPTXGroupShape
+from pptx.chart.chart import Chart as PPTXChart
 from pptx.table import Table
-from pptx.text.text import _Run, TextFrame
+from pptx.text.text import _Run, TextFrame as PPTXTextFrame
 from pptx.shapes.placeholder import SlidePlaceholder
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.dml.fill import _NoneFill, _NoFill
@@ -22,6 +22,7 @@ from utils import (
     parse_groupshape,
     replace_xml_node,
     xml_print,
+    save_xml,
     object_to_dict,
 )  # noqa
 from pptx.dml.color import RGBColor
@@ -97,7 +98,7 @@ class TextFrame:
             p = tf.paragraphs[0]
             if pid != 0:
                 p = tf.add_paragraph()
-            dict_to_object(para, p)
+            dict_to_object(para, p, exclude=["runs", "text"])
 
             # 目前只有一个run，后续使用markdown的可能更多
             if font is None:
@@ -105,9 +106,9 @@ class TextFrame:
             run = p.add_run()
             if font["color"] is not None:
                 run.font.fill.solid()
-                run.font.fill.fore_color.rgb = RGBColor(*font.pop("color"))
+                run.font.fill.fore_color.rgb = RGBColor(*font["color"])
             run.text = text
-            dict_to_object(font, run.font)
+            dict_to_object(font, run.font, exclude=["color"])
         dict_to_object(self.style, tf)
 
     def __repr__(self) -> str:
@@ -133,7 +134,7 @@ class UnsupportedShape:
         obj.style = style
         return obj
 
-    def build(self, slide: Slide):
+    def build(self, slide: PPTXSlide):
         pass
 
 
@@ -251,7 +252,7 @@ class AutoShape(ShapeElement):
         descr = str(shape.auto_shape_type)
         return cls(slide_idx, shape_idx, style, data, text_frame, descr)
 
-    def build(self, slide: Slide):
+    def build(self, slide: PPTXSlide):
         shape = slide.shapes.add_shape(
             self.data["auto_shape_type"], **self.style["shape_bounds"]
         )
@@ -279,7 +280,7 @@ class TextBox(ShapeElement):
     ):
         return cls(slide_idx, shape_idx, style, None, text_frame, False)
 
-    def build(self, slide: Slide):
+    def build(self, slide: PPTXSlide):
         shape = slide.shapes.add_textbox(**self.style["shape_bounds"])
         return super().build(slide, shape)
 
@@ -302,7 +303,7 @@ class Placeholder(ShapeElement):
         data = []
         return cls(slide_idx, shape_idx, style, data, text_frame)
 
-    def build(self, slide: Slide):
+    def build(self, slide: PPTXSlide):
         pass
         # super().build(slide, self.shape)
 
@@ -313,7 +314,7 @@ class Picture(ShapeElement):
         cls,
         slide_idx: int,
         shape_idx: int,
-        shape: Picture,
+        shape: PPTXPicture,
         style: Dict,
         text_frame: TextFrame,
     ):
@@ -335,7 +336,7 @@ class Picture(ShapeElement):
             slide_idx, shape_idx, style, [img_path, shape.name], text_frame, shape.name
         )
 
-    def build(self, slide: Slide):
+    def build(self, slide: PPTXSlide):
         shape = slide.shapes.add_picture(
             self.data[0],
             **self.style["shape_bounds"],
@@ -351,7 +352,7 @@ class GroupShape(ShapeElement):
         cls,
         slide_idx: int,
         shape_idx: int,
-        shape: GroupShape,
+        shape: PPTXGroupShape,
         style: Dict,
         text_frame: TextFrame,
     ):
@@ -363,7 +364,7 @@ class GroupShape(ShapeElement):
             data[idx].style["shape_bounds"] = shape_bounds
         return cls(slide_idx, shape_idx, style, data, text_frame, " group ")
 
-    def build(self, slide: Slide):
+    def build(self, slide: PPTXSlide):
         shapes = []
         for sub_shape in self.data:
             shapes.append(sub_shape.build(slide))
@@ -376,7 +377,7 @@ class Chart(ShapeElement):
         cls,
         slide_idx: int,
         shape_idx: int,
-        shape: Chart,
+        shape: PPTXChart,
         style: Dict,
         text_frame: TextFrame,
     ):
@@ -400,7 +401,7 @@ class Chart(ShapeElement):
         setattr(obj, "shape", shape)
         return obj
 
-    def build(self, slide: Slide):
+    def build(self, slide: PPTXSlide):
         pass
         # graphic_frame = slide.shapes.add_chart(
         #     self.style["chart_style"]["chart_type"],
@@ -434,7 +435,7 @@ class Table(ShapeElement):
         setattr(obj, "shape", shape)
         return obj
 
-    def build(self, slide: Slide):
+    def build(self, slide: PPTXSlide):
         graphic_frame = slide.shapes.add_table(
             len(self.data), len(self.data[0]), **self.style["shape_bounds"]
         )
@@ -455,14 +456,15 @@ class SlidePage:
         slide_layout_name: str,
         slide_title: str,
     ):
-        self.slide_idx = slide_idx
         self.shapes = shapes
+        self.slide_idx = slide_idx
+        self.slide_notes = slide_notes
         self.slide_layout_name = slide_layout_name
         self.slide_title = slide_title
         self.consumed = False
 
     @classmethod
-    def from_slide(cls, slide: Slide, slide_idx: int):
+    def from_slide(cls, slide: PPTXSlide, slide_idx: int):
         shapes = [
             ShapeElement.from_shape(slide_idx, i, shape)
             for i, shape in enumerate(slide.shapes)
@@ -479,12 +481,21 @@ class SlidePage:
         )
         return cls(shapes, slide_idx, slide_notes, slide_layout_name, slide_title)
 
+    def clear_placeholders(self, slide: PPTXSlide):
+        used_phs = (
+            i.placeholder_name for i in self.shapes if isinstance(i, Placeholder)
+        )
+        for ph in slide.placeholders:
+            if ph.name not in used_phs:
+                ph.element.getparent().remove(ph.element)
+
     def build(self, prs: PPTXPre, slide_layout):
         assert not self.consumed, "SlidePage has been consumed"
         self.consumed = True
         slide = prs.slides.add_slide(slide_layout)
         for shape in self.shapes:
             shape.build(slide)
+        self.clear_placeholders(slide)
         # if self.slide_title:
         # slide.shapes.title.text = self.slide_title
 
