@@ -3,6 +3,7 @@ from lxml import etree
 from pptx.oxml.ns import _nsmap as namespaces
 from pptx.shapes.group import GroupShape
 import xml.etree.ElementTree as ET
+from rich import print
 
 # def clone_shape(shape):
 #     """Add a duplicate of `shape` to the slide on which it appears."""
@@ -160,13 +161,16 @@ class Config:
     def __init__(self):
         # 当前运行目录，而不是文件所在目录
         self.BASE_DIR = os.curdir
-        self.PPT_DIR = os.path.join(self.BASE_DIR, "resource")
-        self.GEN_PPT_DIR = os.path.join(self.BASE_DIR, "output/ppts")
-        self.IMAGE_DIR = os.path.join(self.BASE_DIR, "output/images")
+        self.PPT_DIR = pjoin(self.BASE_DIR, "resource")
+        self.GEN_PPT_DIR = pjoin(self.BASE_DIR, "output/ppts")
+        self.IMAGE_DIR = pjoin(self.BASE_DIR, "output/images")
         for the_dir in [self.PPT_DIR, self.IMAGE_DIR, self.GEN_PPT_DIR]:
             if not os.path.exists(the_dir):
                 os.makedirs(the_dir)
 
+
+pjoin = os.path.join
+base_config = Config()
 
 if __name__ == "__main__":
     config = Config()

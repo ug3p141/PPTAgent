@@ -7,3 +7,4 @@ models
 *.ppt*
 *DS_Store*
 *test*
+*egg-info

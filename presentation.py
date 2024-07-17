@@ -1,5 +1,4 @@
 import pickle
-import os
 import re
 from rich import print
 from pptx.oxml import parse_xml
@@ -23,13 +22,12 @@ from utils import (
     replace_xml_node,
     xml_print,
     save_xml,
+    base_config,
+    pjoin,
     object_to_dict,
 )  # noqa
 from pptx.dml.color import RGBColor
 from pptx.util import Emu
-
-base_config = Config()
-pjoin = os.path.join
 
 
 # 三种级别的text 可以保存的属性
@@ -209,20 +207,15 @@ class ShapeElement:
             shape.rotation = self.style["rotation"]
         return shape
 
-    def get_style(self):
-        return self.style
-
-    def get_data(self):
-        return self.data
-
+    # style and shape idx eq
     def __eq__(self, __value: object) -> bool:
         if not isinstance(__value, ShapeElement) or self.consumed:
             return False
         return (
             self.shape_idx == __value.shape_idx
             and self.style == __value.style
-            and self.data == __value.data
-            and self.text_frame == __value.text_frame
+            # and self.data == __value.data
+            # and self.text_frame == __value.text_frame
         )
 
     def __repr__(self) -> str:
@@ -232,6 +225,34 @@ class ShapeElement:
         # pickle self for later use
         with open(path, "wb") as f:
             pickle.dump(self, f)
+
+    @property
+    def left(self):
+        return self.style["shape_bounds"]["left"]
+
+    @property
+    def top(self):
+        return self.style["shape_bounds"]["top"]
+
+    @property
+    def width(self):
+        return self.style["shape_bounds"]["width"]
+
+    @property
+    def height(self):
+        return self.style["shape_bounds"]["height"]
+
+    @property
+    def right(self):
+        return self.left + self.width
+
+    @property
+    def bottom(self):
+        return self.top + self.height
+
+    @property
+    def area(self):
+        return self.width * self.height
 
 
 class AutoShape(ShapeElement):
@@ -503,10 +524,8 @@ class SlidePage:
         if not isinstance(__value, SlidePage) or self.consumed:
             return False
         return (
-            self.slide_idx == __value.slide_idx
-            and self.shapes == __value.shapes
+            self.shapes == __value.shapes
             and self.slide_layout_name == __value.slide_layout_name
-            and self.slide_title == __value.slide_title
         )
 
 
