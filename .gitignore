@@ -5,6 +5,7 @@ data
 .vscode
 models
 *.ppt*
+*.html*
 *DS_Store*
 *test*
 *egg-info

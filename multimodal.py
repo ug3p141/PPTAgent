@@ -1,8 +1,7 @@
-from presentation import Presentation, Picture
-from rich import print
-from utils import base_config, pjoin
+from presentation import Presentation, Picture, UnsupportedShape
+from utils import base_config, pjoin, print
 from tqdm.auto import tqdm
-from llms import InternVL
+from llms import QWEN2, InternVL
 
 
 # TODO: layout中的背景图片需要识别吗，感觉不需要了
@@ -11,13 +10,41 @@ class ImageLabler:
         self.presentation = presentation
         self.slide_area = presentation.slide_width * presentation.slide_height
         self.image_stats = {}
-        self.summarize_images()
         self.llm = InternVL()
+        self.caption_images()
+        self.gen_outlines()
+        self.summarize_images()
+        self.label_images()
+        print(self.outline, self.image_stats)
+
+    def gen_outlines(self):
+        qwen = QWEN2()
+        prompt = (
+            "Please generating outlines of the slides in markdown format\n\nSlides:"
+        )
+        self.outline = qwen.chat(prompt + str(self.presentation))
+
+    def caption_images(self, batch_size=1):
+        for image, stats in tqdm(self.image_stats.items()):
+            stats["caption"] = self.llm.caption_image(image)
+        for slide in self.presentation.slides:
+            for shape in slide.shapes:
+                if not isinstance(shape, Picture):
+                    continue
+                image_path = shape.data[0]
+                stats = self.image_stats[image_path]
+                shape.caption = stats["caption"]
 
     def label_images(self, batch_size=1):
         for image, stats in tqdm(self.image_stats.items()):
-            stats["result"] = self.llm.label_image(image, **stats)
-        return self.image_stats
+            stats["result"] = self.llm.label_image(image, self.outline, **stats)
+        for slide in self.presentation.slides:
+            for shape in slide.shapes:
+                if not isinstance(shape, Picture):
+                    continue
+                image_path = shape.data[0]
+                stats = self.image_stats[image_path]
+                shape.is_background = "background" in stats["result"]["label"]
 
     def summarize_images(self):
         for slide_index, slide in enumerate(self.presentation.slides):
@@ -82,12 +109,12 @@ if __name__ == "__main__":
         "./output/images/图片 2.png": 1,
         "./output/images/图片 2.jpg": 0,
     }
-    labels = ImageLabler(prs).label_images()
+    labels = ImageLabler(prs)
     false_samples = []
     # 可能还是vllm只做caption让qwen来分类效果更好
     # 或者添加几个shot
     for k, v in labels.items():
         if v["result"]["label"] != LABEL[ground_truth[k]]:
-            false_samples.append([k,v])
+            false_samples.append([k, v])
     print(false_samples)
     print(f"Accuracy: {1-len(false_samples)/len(labels)}")
