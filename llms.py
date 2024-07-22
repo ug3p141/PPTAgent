@@ -106,7 +106,7 @@ class Gemini:
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ]
         self.generation_config = genai.GenerationConfig(
-            response_mime_type="application/json"  # , response_schema=list[*DATACLASSES]
+            #response_mime_type="application/json"  , response_schema=list[*DATACLASSES]
         )
 
     def chat(self, content: str) -> str:
@@ -136,7 +136,6 @@ class QWEN2:
         }
         response = requests.post(self.api, headers=self.headers, data=json.dumps(data))
         assert response.status_code == 200, response.text
-        return response.json()["choices"]["message"]["content"]
 
 
 if __name__ == "__main__":

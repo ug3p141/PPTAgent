@@ -284,7 +284,8 @@ class AutoShape(ShapeElement):
         text_frame: TextFrame,
     ):
         data = {
-            "auto_shape_type": shape.auto_shape_type,
+            "auto_shape_type": shape.auto_shape_type.real,
+            "svg_tag": str(shape.auto_shape_type).split()[0].lower(),
             "is_nofill": isinstance(shape.fill._fill, (_NoneFill, _NoFill)),
             "is_line_nofill": isinstance(shape.line.fill._fill, (_NoneFill, _NoFill)),
         }
@@ -306,8 +307,7 @@ class AutoShape(ShapeElement):
         shape = super().build(slide, shape)
 
     def __repr__(self) -> str:
-        svg_tagname = str(self.data["auto_shape_type"]).split()[0].lower()
-        return f"<{svg_tagname}>\n<text>\n{self.text_frame.__repr__('tspan')}\n</text>\n</{svg_tagname}>"
+        return f"<{self.data['svg_tag']}>\n<text>\n{self.text_frame.__repr__('tspan')}\n</text>\n</{self.data['svg_tag']}>"
 
 
 class TextBox(ShapeElement):
@@ -405,9 +405,9 @@ class Picture(ShapeElement):
     def __repr__(self) -> str:
         return (
             f"<figure>\n<img alt='{self.data[1]}' />"
-            + f"\n<figcaption>{self.caption}</figcaption>\n"
+            + (f"\n<figcaption>{self.caption}</figcaption>\n"
             if self.caption
-            else "" + "</figure>"
+            else "") + "</figure>"
         )
 
 

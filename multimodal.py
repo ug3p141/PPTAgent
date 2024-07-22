@@ -1,7 +1,8 @@
+import json
 from presentation import Presentation, Picture, UnsupportedShape
 from utils import base_config, pjoin, print
 from tqdm.auto import tqdm
-from llms import QWEN2, InternVL
+from llms import QWEN2, Gemini, InternVL
 
 
 # TODO: layout中的背景图片需要识别吗，感觉不需要了
@@ -10,17 +11,18 @@ class ImageLabler:
         self.presentation = presentation
         self.slide_area = presentation.slide_width * presentation.slide_height
         self.image_stats = {}
-        self.llm = InternVL()
-        self.caption_images()
+        self.image_stats = json.load(open("image_stats.json", "r"))
+        # self.llm = InternVL()
+        # self.collect_images()
+        # self.caption_images()
         self.gen_outlines()
-        self.summarize_images()
         self.label_images()
         print(self.outline, self.image_stats)
 
     def gen_outlines(self):
-        qwen = QWEN2()
+        qwen = Gemini()
         prompt = (
-            "Please generating outlines of the slides in markdown format\n\nSlides:"
+            "Please generating outlines for the following slides html code.in markdown format\n\nSlides:"
         )
         self.outline = qwen.chat(prompt + str(self.presentation))
 
@@ -46,7 +48,7 @@ class ImageLabler:
                 stats = self.image_stats[image_path]
                 shape.is_background = "background" in stats["result"]["label"]
 
-    def summarize_images(self):
+    def collect_images(self):
         for slide_index, slide in enumerate(self.presentation.slides):
             for shape in slide.shapes:
                 if not isinstance(shape, Picture):
