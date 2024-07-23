@@ -1,0 +1,1 @@
+Please describe the image shortly, no more than 30 words\n<image>

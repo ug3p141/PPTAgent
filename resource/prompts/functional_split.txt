@@ -1,0 +1,61 @@
+I have a collection of slides from a PowerPoint presentation, provided in HTML format. 
+I want to classify these slides into two categories: "Content Slides" and "Auxiliary Slides". 
+"Content Slides" contain actual presentation content such as introductions, data analysis, and discussions. 
+"Auxiliary Slides" typically serve structural purposes and include items like the table of contents, section headers, opening and closing slides, and acknowledgments.
+
+For "Auxiliary Slides", please tag them with one of the following labels:
+- "Opening" for opening slides
+- "Closing" for closing or thank-you slides
+- "Table of Contents" for slides listing the contents
+- "Section Header" for slides marking the beginning of sections
+
+Slides with large headings, lists of items, or phrases like "Welcome", "Thank You", "Agenda", "Outline", "Table of Contents", and similar should be considered as "Auxiliary Slides". 
+Additionally, slides that contain bullet points with very little text and big font sizes should also be considered as "Auxiliary Slides".
+
+Return the classification results in JSON format with the slide numbers corresponding to each tag.
+
+Here are some example slides:
+
+Slide 1:
+<html>
+<head></head>
+<body>
+<h1>Welcome to Our Presentation</h1>
+</body>
+</html>
+
+Slide 2:
+<html>
+<head></head>
+<body>
+<h2>Table of Contents</h2>
+<ul>
+<li>Introduction</li>
+<li>Data Analysis</li>
+<li>Conclusion</li>
+</ul>
+</body>
+</html>
+
+Slide 3:
+<html>
+<head></head>
+<body>
+<h2>Introduction</h2>
+<p>Our project is about...</p>
+</body>
+</html>
+
+Please analyze and classify these slides as follows:
+
+Example Output:
+{
+  "Content Slides": [3],
+  "Auxiliary Slides": {
+    "Opening": [1],
+    "Table of Contents": [2]
+  }
+}
+
+Now, analyze the following slides:
+Inputs:
