@@ -1,34 +1,35 @@
 import json
-from presentation import Presentation, Picture, UnsupportedShape
+from presentation import Presentation, Picture
 from utils import base_config, pjoin, print
 from tqdm.auto import tqdm
-from llms import QWEN2, Gemini, InternVL
+from llms import (
+    get_prs_outline,
+    label_image_withcap,
+    label_image_withcap_outline,
+    label_image_withgemini_image,
+    label_image_withoutcap,
+    label_image_withqwen,
+    label_image_withslide,
+)
 
 
 # TODO: layout中的背景图片需要识别吗，感觉不需要了
 class ImageLabler:
     def __init__(self, presentation: Presentation):
         self.presentation = presentation
-        self.slide_area = presentation.slide_width * presentation.slide_height
+        self.slide_area = presentation.slide_width.pt * presentation.slide_height.pt
         self.image_stats = {}
-        self.image_stats = json.load(open("image_stats.json", "r"))
         # self.llm = InternVL()
-        # self.collect_images()
-        # self.caption_images()
-        self.gen_outlines()
-        self.label_images()
-        print(self.outline, self.image_stats)
-
-    def gen_outlines(self):
-        qwen = Gemini()
-        prompt = (
-            "Please generating outlines for the following slides html code.in markdown format\n\nSlides:"
-        )
-        self.outline = qwen.chat(prompt + str(self.presentation))
+        self.collect_images()
+        self.image_stats = json.load(open("resource/image_stats.json", "r"))
+        self.caption_images()
+        self.outline = get_prs_outline(self.presentation)
+        # self.label_images()
+        # print(self.outline, self.image_stats)
 
     def caption_images(self, batch_size=1):
-        for image, stats in tqdm(self.image_stats.items()):
-            stats["caption"] = self.llm.caption_image(image)
+        # for image, stats in tqdm(self.image_stats.items()):
+        # stats["caption"] = self.llm.caption_image(image)
         for slide in self.presentation.slides:
             for shape in slide.shapes:
                 if not isinstance(shape, Picture):
@@ -85,6 +86,12 @@ class ImageLabler:
         return ranges
 
 
+# 三种方法的acc对比
+# 1. 直接使用intern-vl，无caption仅few-shot，约75左右
+# 2. 先用intern-vl做caption，再用qwen做分类，约
+# 3. 用intern-vl做caption，再用intern-vl做分类，约
+# 4. 不传入image
+
 if __name__ == "__main__":
     prs = Presentation.from_file(
         pjoin(
@@ -111,12 +118,20 @@ if __name__ == "__main__":
         "./output/images/图片 2.png": 1,
         "./output/images/图片 2.jpg": 0,
     }
-    labels = ImageLabler(prs)
-    false_samples = []
-    # 可能还是vllm只做caption让qwen来分类效果更好
-    # 或者添加几个shot
-    for k, v in labels.items():
-        if v["result"]["label"] != LABEL[ground_truth[k]]:
-            false_samples.append([k, v])
-    print(false_samples)
-    print(f"Accuracy: {1-len(false_samples)/len(labels)}")
+    image_stats = json.load(open("resource/image_stats.json", "r"))
+    funcs = [
+        label_image_withgemini_image,
+        label_image_withcap,
+        label_image_withoutcap,
+        label_image_withqwen,
+        label_image_withcap_outline,
+    ]
+    outline = get_prs_outline(prs)
+    for func in funcs:
+        false_samples = []
+        for k, v in image_stats.items():
+            if func(image_file=k, outline=outline, **v) != LABEL[ground_truth[k]]:
+                false_samples.append([k, v])
+        print(
+            f"Accuracy of {func.__name__}: {100*(1-len(false_samples)/len(image_stats))}%"
+        )
