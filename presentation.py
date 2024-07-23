@@ -1,5 +1,5 @@
-import pickle
 import re
+from matplotlib.colors import rgb2hex
 from rich import print
 from pptx.oxml import parse_xml
 from pptx import Presentation as PPTXPre
@@ -14,9 +14,13 @@ from pptx.text.text import _Run, TextFrame as PPTXTextFrame
 from pptx.shapes.placeholder import SlidePlaceholder
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.dml.fill import _NoneFill, _NoFill
+from torch import fill_
 from typing_extensions import Dict, Type
 from utils import (
+    apply_fill,
     dict_to_object,
+    extract_fill,
+    get_text_inlinestyle,
     parse_groupshape,
     replace_xml_node,
     base_config,
@@ -107,12 +111,33 @@ class TextFrame:
             dict_to_object(font, run.font, exclude=["color"])
         dict_to_object(self.style, tf)
 
-    def __repr__(self, tagname="p") -> str:
-        repr_list = [
-            f"<{tagname}>{para['text']}</{tagname}>"
-            for para in self.data
-            if para["text"]
-        ]
+    def __repr__(self) -> str:
+        repr_list = []
+        pre_bullet = None
+        bullets = []
+        for para in self.data:
+            if para["bullet"] is None and para["text"]:
+                repr_list.append(f"<p {get_text_inlinestyle(para)}>{para['text']}</p>")
+            if para["bullet"] != pre_bullet:
+                repr_list.extend(
+                    ["<ul>"]
+                    + [
+                        f"<li {get_text_inlinestyle(i)}>{i['text']}</li>"
+                        for i in bullets
+                    ]
+                    + ["</ul>"]
+                )
+            elif para["text"]:
+                bullets.append(para)
+                if para == self.data[-1]:
+                    repr_list.extend(
+                        ["<ul>"]
+                        + [
+                            f"<li {get_text_inlinestyle(i)}>{i['text']}</li>"
+                            for i in bullets
+                        ]
+                        + ["</ul>"]
+                    )
         return "\n".join(repr_list)
 
 
@@ -158,25 +183,25 @@ class ShapeElement:
 
     @classmethod
     def from_shape(cls, slide_idx: int, shape_idx: int, shape: BaseShape):
+        line = None
+        if "line" in dir(shape) and shape.line._ln is not None:
+            line = {
+                "fill": extract_fill(shape.line),
+                "width": shape.line.width,
+                "dash_style": shape.line.dash_style,
+            }
+        fill = extract_fill(shape)
         style = {
             "shape_bounds": {
-                "width": Emu(shape.width.emu),
-                "height": Emu(shape.height.emu),
-                "left": Emu(shape.left.emu),
-                "top": Emu(shape.top.emu),
+                "width": shape.width,
+                "height": shape.height,
+                "left": shape.left,
+                "top": shape.top,
             },
             "shape_type": str(shape.shape_type),
             "rotation": shape.rotation,
-            "fill": shape.fill._xPr.xml if "fill" in dir(shape) else None,
-            "line": (
-                {
-                    "line_xml": shape.line.fill._xPr.xml,
-                    "width": shape.line.width,
-                    "dash_style": shape.line.dash_style,
-                }
-                if "line" in dir(shape) and shape.line._ln is not None
-                else None
-            ),
+            "fill": fill,
+            "line": line,
         }
         text_frame = TextFrame.from_shape(shape)
         obj = SHAPECAST.get(shape.shape_type, UnsupportedShape).from_shape(
@@ -190,16 +215,12 @@ class ShapeElement:
 
     def build(self, slide, shape):
         self.text_frame.build(shape)
-        if self.style["fill"] is not None:
-            replace_xml_node(shape.fill._xPr, self.style["fill"])
-            dict_to_object(self.style["shape_bounds"], shape)
+        apply_fill(shape, self.style["fill"])
         if self.style["line"] is not None:
-            # shape.line.fill.background()
-            replace_xml_node(
-                shape.line.fill._xPr,
-                self.style["line"]["line_xml"],
-            )
-            dict_to_object(self.style["line"], shape.line, exclude=["line_xml"])
+            apply_fill(shape.line, self.style["line"]["fill"])
+            dict_to_object(self.style["line"], shape.line, exclude=["fill"])
+
+        dict_to_object(self.style["shape_bounds"], shape)
         if "rotation" in dir(shape):
             shape.rotation = self.style["rotation"]
         return shape
@@ -222,20 +243,54 @@ class ShapeElement:
         return ""
 
     @property
+    def inline_fill(self):
+        fill_dict = self.style["fill"]
+        if fill_dict is None or "type" not in fill_dict:
+            return ""
+        for key, value in fill_dict.items():
+            if "color" in key:
+                return f"background-color:{rgb2hex(value)}"
+        return f"background-color:{fill_dict['type']};"
+
+    @property
+    def inline_border(self):
+        line_dict = self.style["line"]
+        if line_dict is None or "type" not in line_dict["fill"]:
+            return ""
+        border_style = f"; border-width: {line_dict['width'].pt}pt; border-style: {line_dict['dash_style']};"
+        fill_dict = line_dict["fill"]
+        for key, value in fill_dict.items():
+            if "color" in key:
+                return f"border-color:{rgb2hex(value)}" + border_style
+        return f"border-color:{fill_dict['type']}" + border_style
+
+    @property
+    def inline_box(self):
+        return f"left: {self.left}pt; top: {self.top}pt; width: {self.width}pt; height: {self.height}pt; "
+
+    # @property
+    # def inline_margin(self):
+    #     pass
+
+    @property
+    def inline_style(self):
+        return 'style="' + self.inline_box + self.inline_border + self.inline_fill + '"'
+
+    @property
     def left(self):
-        return self.style["shape_bounds"]["left"]
+        return self.style["shape_bounds"]["left"].pt
 
     @property
     def top(self):
-        return self.style["shape_bounds"]["top"]
+        return self.style["shape_bounds"]["top"].pt
 
     @property
     def width(self):
-        return self.style["shape_bounds"]["width"]
+        return self.style["shape_bounds"]["width"].pt
 
     @property
     def height(self):
-        return self.style["shape_bounds"]["height"]
+        return self.style["shape_bounds"]["height"].pt
 
     @property
     def right(self):
@@ -307,7 +362,7 @@ class AutoShape(ShapeElement):
         shape = super().build(slide, shape)
 
     def __repr__(self) -> str:
-        return f"<{self.data['svg_tag']}>\n<text>\n{self.text_frame.__repr__('tspan')}\n</text>\n</{self.data['svg_tag']}>"
+        return f"<{self.data['svg_tag']}>\n<text>\n{self.text_frame}\n</text>\n</{self.data['svg_tag']}>"
 
 
 class TextBox(ShapeElement):
@@ -327,7 +382,7 @@ class TextBox(ShapeElement):
         return super().build(slide, shape)
 
     def __repr__(self) -> str:
-        return f"<article>\n{self.text_frame}\n</article>"
+        return f"<article {self.inline_style}>\n{self.text_frame}\n</article>"
 
 
 class Placeholder(ShapeElement):
@@ -404,10 +459,9 @@ class Picture(ShapeElement):
 
     def __repr__(self) -> str:
         return (
-            f"<figure>\n<img alt='{self.data[1]}' />"
-            + (f"\n<figcaption>{self.caption}</figcaption>\n"
-            if self.caption
-            else "") + "</figure>"
+            f"<figure {self.inline_style}>\n<img alt='{self.data[1]}' />\n"
+            + (f"\n<figcaption>{self.caption}</figcaption>" if self.caption else "")
+            + "\n</figure>"
         )
 
 
@@ -433,7 +487,7 @@ class GroupShape(ShapeElement):
         shapes = []
         for sub_shape in self.data:
             shapes.append(sub_shape.build(slide))
-        return super().build(slide, shapes)
+            # super().build(slide, )
 
     def __repr__(self) -> str:
         return "<div>\n" + "\n".join(str(shape) for shape in self.data) + "\n</div>\n"
@@ -523,30 +577,41 @@ class SlidePage:
         slide_notes: str,
         slide_layout_name: str,
         slide_title: str,
+        slide_width: int,
+        slide_height: int,
     ):
         self.shapes = shapes
         self.slide_idx = slide_idx
         self.slide_notes = slide_notes
         self.slide_layout_name = slide_layout_name
         self.slide_title = slide_title
+        self.slide_width = slide_width
+        self.slide_height = slide_height
 
     @classmethod
-    def from_slide(cls, slide: PPTXSlide, slide_idx: int):
+    def from_slide(
+        cls, slide: PPTXSlide, slide_idx: int, slide_width: int, slide_height: int
+    ):
         shapes = [
             ShapeElement.from_shape(slide_idx, i, shape)
             for i, shape in enumerate(slide.shapes)
         ]
-        #! cannot be sort because it will change the z-order
-        # shapes.sort(key=lambda x: x.style["shape_bounds"]["top"])
         slide_layout_name = slide.slide_layout.name if slide.slide_layout else None
-        # is shape a title
         slide_title = slide.shapes.title.text if slide.shapes.title else None
         slide_notes = (
             slide.notes_slide.notes_text_frame.text
             if slide.has_notes_slide and slide.notes_slide.notes_text_frame
             else None
         )
-        return cls(shapes, slide_idx, slide_notes, slide_layout_name, slide_title)
+        return cls(
+            shapes,
+            slide_idx,
+            slide_notes,
+            slide_layout_name,
+            slide_title,
+            slide_width,
+            slide_height,
+        )
 
     def clear_placeholders(self, slide: PPTXSlide):
         used_phs = (
@@ -561,11 +626,20 @@ class SlidePage:
         for shape in self.shapes:
             shape.build(slide)
         self.clear_placeholders(slide)
-        # if self.slide_title:
-        # slide.shapes.title.text = self.slide_title
 
-    def show_box(self):
-        pass
+    def is_multimodal(self, shapes=None):
+        if shapes is None:
+            shapes = self.shapes
+        for shape in self.shapes:
+            if isinstance(shape, (Chart, Table)):
+                return True
+            elif isinstance(shape, Picture) and not shape.is_background:
+                return True
+            elif isinstance(shape, GroupShape) and self.is_multimodal(
+                shapes=shape.data
+            ):
+                return True
+        return False
 
     def __eq__(self, __value) -> bool:
         if not isinstance(__value, SlidePage):
@@ -577,11 +651,12 @@ class SlidePage:
 
     # lang style width height
     def __repr__(self) -> str:
-        return "\n".join(
+        return "".join(
             [
-                """<!DOCTYPE html>\n<html>""",
-                f"<title>{self.slide_title}</title>" if self.slide_title else "",
-                "<body>" + "\n".join(shape.__repr__() for shape in self.shapes),
+                "<!DOCTYPE html>\n<html>\n",
+                f"<title>{self.slide_title}</title>\n" if self.slide_title else "",
+                f'<body style="width:{self.slide_width}pt; height:{self.slide_height}pt;">\n'
+                + "\n".join(shape.__repr__() for shape in self.shapes),
                 "</body>\n</html>",
             ]
         )
@@ -595,43 +670,38 @@ class Presentation:
         slide_height: float,
         file_path: str,
         num_pages: int,
-        author: str,
     ) -> None:
         self.slides = slides
         self.slide_width = slide_width
         self.slide_height = slide_height
         self.num_pages = num_pages
         self.source_file = file_path
-        self.author = author
+        self.prs = PPTXPre(file_path)
+        self.prs.core_properties.last_modified_by = "OminiPreGen"
+        while len(self.prs.slides) != 0:
+            rId = self.prs.slides._sldIdLst[0].rId
+            self.prs.part.drop_rel(rId)
+            del self.prs.slides._sldIdLst[0]
 
     @classmethod
     def from_file(cls, file_path):
         prs = PPTXPre(file_path)
+        slide_width = prs.slide_width
+        slide_height = prs.slide_height
         # TODO set slide range here
         slides = [
-            SlidePage.from_slide(slide, i)
+            SlidePage.from_slide(slide, i, slide_width.pt, slide_height.pt)
             for i, slide in enumerate(list(prs.slides)[:])
         ]
-        slide_width = Emu(prs.slide_width.emu)
-        slide_height = Emu(prs.slide_height.emu)
-        core_properties = prs.core_properties
         num_pages = len(slides)
-        author = core_properties.author
-        return cls(slides, slide_width, slide_height, file_path, num_pages, author)
+        return cls(slides, slide_width, slide_height, file_path, num_pages)
 
     def save(self, file_path):
-        prs = PPTXPre(self.source_file)
-        # delete all slides so we can rebuild them
-        while len(prs.slides) != 0:
-            rId = prs.slides._sldIdLst[0].rId
-            prs.part.drop_rel(rId)
-            del prs.slides._sldIdLst[0]
-
-        prs.core_properties.author += "OminiPreGen with: "
-        layout_mapping = {layout.name: layout for layout in prs.slide_layouts}
+        self.prs.core_properties.author += "OminiPreGen with: "
+        layout_mapping = {layout.name: layout for layout in self.prs.slide_layouts}
         for slide in self.slides:
-            slide.build(prs, layout_mapping[slide.slide_layout_name])
-        prs.save(file_path)
+            slide.build(self.prs, layout_mapping[slide.slide_layout_name])
+        self.prs.save(file_path)
 
     def __eq__(self, __value: object) -> bool:
         if not isinstance(__value, Presentation):

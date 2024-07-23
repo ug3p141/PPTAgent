@@ -1,8 +1,11 @@
 import os
+from types import SimpleNamespace
 from lxml import etree
-from pptx.oxml.ns import _nsmap as namespaces
+from pptx.dml.fill import _NoFill, _NoneFill
+from pptx.shapes.base import BaseShape
 from pptx.shapes.group import GroupShape
 import xml.etree.ElementTree as ET
+from pptx.util import Length
 from rich import print
 
 # def clone_shape(shape):
@@ -20,6 +23,36 @@ from rich import print
 #     new_shape.shape_id = shape.shape_id + 1000
 #     # ---return the new proxy object---
 #     return new_shape
+
+
+def rgb2hex(rgb):
+    return "#{:02x}{:02x}{:02x}".format(rgb[0], rgb[1], rgb[2])
+
+
+def get_text_inlinestyle(para: dict):
+    font = SimpleNamespace(**para["font"])
+    font_size = f"font-size: {Length(font.size).pt}pt;" if font.size else ""
+    font_family = f"font-family: {font.name};" if font.name else ""
+    font_color = f"color={rgb2hex(font.color)};" if font.color else ""
+    font_bold = "font-weight: bold;" if font.bold else ""
+    return 'style="{}"'.format("".join([font_size, font_family, font_color, font_bold]))
+
+
+def extract_fill(shape: BaseShape):
+    if "fill" not in dir(shape):
+        return None
+    fill_dict = {
+        "fill_xml": shape.fill._xPr.xml,
+    } | {k: v for k, v in object_to_dict(shape.fill).items() if "color" in k}
+    if not isinstance(shape.fill._fill, (_NoneFill, _NoFill)):
+        fill_dict["type"] = shape.fill.type._member_name.lower()
+    return fill_dict
+
+
+def apply_fill(shape: BaseShape, fill: dict):
+    if fill is None:
+        return
+    replace_xml_node(shape.fill._xPr, fill["fill_xml"])
 
 
 def save_xml(xml_string: str, filename: str = "output.xml"):
@@ -134,8 +167,8 @@ def object_to_dict(obj, result=None, exclude=None):
                     attr_value = attr_value.real
                 if is_primitive(attr_value):
                     result[attr] = attr_value
-        except Exception as e:
-            print(f"Error while processing attribute {attr}: {e}")
+        except:
+            pass
     return result
 
 

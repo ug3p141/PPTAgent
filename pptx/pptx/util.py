@@ -63,7 +63,7 @@ class Length(int):
         """
         Floating point length in points
         """
-        return self / float(self._EMUS_PER_PT)
+        return self // self._EMUS_PER_PT
 
 
 class Inches(Length):
