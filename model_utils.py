@@ -1,10 +1,37 @@
+import os
 from PIL import Image
 import torchvision.transforms as T
 import torch
 from torchvision.transforms.functional import InterpolationMode
+import pytorch_fid.fid_score as fid
+from utils import pjoin
+
+fid.tqdm = lambda x: x
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
+
+
+# < 150效果比较好
+def fid_score(img_basename: str, image_folder: str, batch_size: int = None):
+    os.makedirs(".temp")
+    os.rename(pjoin(image_folder, img_basename), ".temp/base.jpg")
+    files = sorted(
+        [
+            file
+            for ext in fid.IMAGE_EXTENSIONS
+            for file in image_folder.glob("*.{}".format(ext))
+        ]
+    )
+    if batch_size is None:
+        batch_size = min(len(files), 32)
+    fid_scores = fid.calculate_fid_given_paths(
+        [".temp", image_folder],
+        batch_size=batch_size,
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        dims=2048,
+    )
+    return zip(files, fid_scores)
 
 
 def build_transform(input_size):
