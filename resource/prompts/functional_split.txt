@@ -9,7 +9,7 @@ For "Auxiliary Slides", please tag them with one of the following labels:
 - "Table of Contents" for slides listing the contents
 - "Section Header" for slides marking the beginning of sections
 
-Slides with large headings, lists of items, or phrases like "Welcome", "Thank You", "Agenda", "Outline", "Table of Contents", and similar should be considered as "Auxiliary Slides". 
+Slides with large headings, lists of items with numbers or bullet points, or phrases like "Welcome", "Thank You", "Agenda", "Outline", "Table of Contents", and similar should be considered as "Auxiliary Slides". 
 Additionally, slides that contain bullet points with very little text and big font sizes should also be considered as "Auxiliary Slides".
 
 Return the classification results in JSON format with the slide numbers corresponding to each tag.
