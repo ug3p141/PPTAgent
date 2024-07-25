@@ -112,6 +112,7 @@ class QWEN2:
         }
         response = requests.post(self.api, headers=self.headers, data=json.dumps(data))
         assert response.status_code == 200, response.text
+        return response.json()["choices"][0]["message"]["content"]
 
     # 给个markdown的example吧
 
@@ -123,7 +124,7 @@ vl_model = InternVL()
 
 def caption_image(image_file: str):
     _, pixel_values = load_image(image_file)
-    prompt = open("resource/prompts/caption.txt")
+    prompt = open("prompts/caption.txt")
     return vl_model(pixel_values.to(torch.bfloat16).cuda(), prompt)
 
 
@@ -137,7 +138,7 @@ def label_image_withslide(
     relative_area: float,
     **kwargs,
 ):
-    prompt_head = open("resource/prompts/prompt_image_withslide.txt").read()
+    prompt_head = open("prompts/prompt_image_withslide.txt").read()
     aspect_ratio, pixel_values = load_image(image_file)
     prompt = (
         prompt_head
@@ -152,7 +153,7 @@ def label_image_withslide(
             "relative_area": relative_area,
         }
     )
-    return json.loads(vl_model(pixel_values.to(torch.bfloat16).cuda(), prompt))
+    return json.loads(vl_model(pixel_values.to(torch.bfloat16).cuda(), prompt).strip())
 
 
 def label_image_withgemini_image(
@@ -163,7 +164,7 @@ def label_image_withgemini_image(
     caption: str,
     **kwargs,
 ):
-    prompt_head = open("resource/prompts/image_cls_withcap.txt").read()
+    prompt_head = open("prompts/image_cls_withcap.txt").read()
     aspect_ratio, _ = load_image(image_file)
     prompt = (
         prompt_head
@@ -178,7 +179,7 @@ def label_image_withgemini_image(
             }
         )
     )
-    return json.loads(gemini(prompt, image_file))
+    return json.loads(gemini(prompt, image_file).strip())
 
 
 def label_image_withqwen(
@@ -189,7 +190,7 @@ def label_image_withqwen(
     caption: str,
     **kwargs,
 ):
-    prompt_head = open("resource/prompts/image_cls_withcap.txt").read()
+    prompt_head = open("prompts/image_cls_withcap.txt").read()
     aspect_ratio, _ = load_image(image_file)
     prompt = (
         prompt_head
@@ -204,7 +205,7 @@ def label_image_withqwen(
             }
         )
     )
-    return json.loads(qwen(prompt))
+    return json.loads(qwen(prompt).strip())
 
 
 def label_image_withcap(
@@ -215,7 +216,7 @@ def label_image_withcap(
     caption: str,
     **kwargs,
 ):
-    prompt_head = open("resource/prompts/image_cls_withcap.txt").read()
+    prompt_head = open("prompts/image_cls_withcap.txt").read()
     aspect_ratio, pixel_values = load_image(image_file)
     prompt = (
         prompt_head
@@ -231,7 +232,7 @@ def label_image_withcap(
             }
         )
     )
-    return json.loads(vl_model(pixel_values.to(torch.bfloat16).cuda(), prompt))
+    return json.loads(vl_model(pixel_values.to(torch.bfloat16).cuda(), prompt).strip())
 
 
 def label_image_withcap_outline(
@@ -243,7 +244,7 @@ def label_image_withcap_outline(
     caption: str,
     **kwargs,
 ):
-    prompt_head = open("resource/prompts/image_cls_withcap.txt").read()
+    prompt_head = open("prompts/image_cls_withcap.txt").read()
     aspect_ratio, pixel_values = load_image(image_file)
     prompt = (
         prompt_head
@@ -260,7 +261,7 @@ def label_image_withcap_outline(
             }
         )
     )
-    return json.loads(vl_model(pixel_values.to(torch.bfloat16).cuda(), prompt))
+    return json.loads(vl_model(pixel_values.to(torch.bfloat16).cuda(), prompt).strip())
 
 
 def label_image_withoutcap(
@@ -271,7 +272,7 @@ def label_image_withoutcap(
     relative_area: float,
     **kwargs,
 ):
-    prompt_head = open("resource/prompts/prompt_image.txt").read()
+    prompt_head = open("prompts/prompt_image.txt").read()
     aspect_ratio, pixel_values = load_image(image_file)
     prompt = (
         prompt_head
@@ -287,7 +288,7 @@ def label_image_withoutcap(
             }
         )
     )
-    return json.loads(vl_model(pixel_values.to(torch.bfloat16).cuda(), prompt))
+    return json.loads(vl_model(pixel_values.to(torch.bfloat16).cuda(), prompt).strip())
 
 
 OUTLINE_PROMPT = """Extract the most important headings from the provided outline and present them in JSON format. Each heading should have a title and a description string. Ensure the language of the headings matches the input language, and each heading is no longer than three sentences. Example format:
