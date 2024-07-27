@@ -1,12 +1,14 @@
-from copy import deepcopy
+import json
 import os
+import random
+from copy import deepcopy
 from time import sleep, time
+
+import google.generativeai as genai
 import requests
 import torch
-import logging
-import json
 from transformers import AutoModel, AutoTokenizer
-import google.generativeai as genai
+
 from model_utils import load_image
 from presentation import Presentation
 from utils import print
@@ -23,7 +25,7 @@ class SingletonMeta(type):
 
 
 class InternVL(metaclass=SingletonMeta):
-    def __init__(self, model_id="OpenGVLab/InternVL2-8B", device_map: dict = None):
+    def __init__(self, model_id="./InternVL2-Llama3-76B-AWQ", device_map: dict = None):
         self._initialized = False
         self._model_id = model_id
         self._device_map = device_map if device_map is not None else {"": 0}
@@ -38,7 +40,7 @@ class InternVL(metaclass=SingletonMeta):
         ).eval()
         self.generation_config = dict(
             num_beams=1,
-            max_new_tokens=1024,
+            max_new_tokens=10240,
             do_sample=False,
         )
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -65,33 +67,67 @@ class Gemini:
         os.environ["http_proxy"] = proxy
         os.environ["HTTP_PROXY"] = proxy
         os.environ["HTTPS_PROXY"] = proxy
-        genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
-        self.last_call = 0
         self.time_limit = time_limit
         self.model = genai.GenerativeModel("gemini-1.5-pro-latest")
         self.safety_settings = [
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            {
+                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                "threshold": "BLOCK_NONE",
+            },
+            {
+                "category": "HARM_CATEGORY_HATE_SPEECH",
+                "threshold": "BLOCK_NONE",
+            },
+            {
+                "category": "HARM_CATEGORY_HARASSMENT",
+                "threshold": "BLOCK_NONE",
+            },
+            {
+                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                "threshold": "BLOCK_NONE",
+            },
         ]
         self.generation_config = genai.GenerationConfig(
             response_mime_type="application/json",  # response_schema=list[*DATACLASSES]
         )
+        self.api_config = (
+            [
+                "AIzaSyBks5-bQ96-uyhvIOCtoPToVqKIdl4szcQ",
+                "AIzaSyAQSqXqih0qx0E0U5eUWz1WI_-pt4LjpYk",
+                "AIzaSyBA7Bd1jyVePHOKVFmhM7zA1RSxvvIoCS0",
+                "AIzaSyD8-BuQYK5njOKBBkeIKhjEaoYmGkjoA84",
+            ],
+            [0, 0, 0, 0],
+        )
+        self._call_idx = random.randint(0, len(self.api_config[0]) - 1)
+        self._chat = self.model.start_chat(history=[])
+
+    def prepare(self):
+        self._call_idx = (self._call_idx + 1) % len(self.api_config[0])
+        genai.configure(api_key=self.api_config[0][self._call_idx])
+        call_time = time()
+        if call_time - self.api_config[1][self._call_idx] < self.time_limit:
+            sleep(self.time_limit - (call_time - self.api_config[1][self._call_idx]))
+        self.api_config[1][self._call_idx] = call_time
 
     def __call__(self, content: str, image_file: str = None) -> str:
+        self.prepare()
         if image_file is not None:
             image_file = genai.upload_file(image_file)
-            content = [image_file, content]
-        call_time = time()
-        if call_time - self.last_call < self.time_limit:
-            sleep(self.time_limit - (call_time - self.last_call))
-        self.last_call = call_time
+            content = [content, image_file]
         response = self.model.generate_content(
             content,
             safety_settings=self.safety_settings,
             generation_config=self.generation_config,
         )
+        return response.text
+
+    def chat(self, content: str, image_file: str = None) -> str:
+        self.prepare()
+        if image_file is not None:
+            image_file = genai.upload_file(image_file)
+            content = [content, image_file]
+        response = self._chat.send_message(content, image_file)
         return response.text
 
 
@@ -102,7 +138,7 @@ class QWEN2:
         self.template_data = {
             "model": "Qwen2-72B-Instruct-GPTQ-Int4",
             "temperature": 0.0,
-            "max_tokens": 100,
+            "max_tokens": 10240,
             "stream": False,
         }
 

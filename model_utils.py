@@ -1,9 +1,12 @@
 import os
-from PIL import Image
-import torchvision.transforms as T
-import torch
-from torchvision.transforms.functional import InterpolationMode
+
+import numpy as np
 import pytorch_fid.fid_score as fid
+import torch
+import torchvision.transforms as T
+from PIL import Image
+from torchvision.transforms.functional import InterpolationMode
+
 from utils import pjoin
 
 fid.tqdm = lambda x: x
@@ -13,25 +16,35 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 
 
 # < 150效果比较好
-def fid_score(img_basename: str, image_folder: str, batch_size: int = None):
-    os.makedirs(".temp")
-    os.rename(pjoin(image_folder, img_basename), ".temp/base.jpg")
-    files = sorted(
-        [
-            file
-            for ext in fid.IMAGE_EXTENSIONS
-            for file in image_folder.glob("*.{}".format(ext))
-        ]
-    )
-    if batch_size is None:
-        batch_size = min(len(files), 32)
-    fid_scores = fid.calculate_fid_given_paths(
-        [".temp", image_folder],
-        batch_size=batch_size,
-        device="cuda" if torch.cuda.is_available() else "cpu",
-        dims=2048,
-    )
-    return zip(files, fid_scores)
+def fid_score(img_dir: str, batch_size: int = None):
+    img_files = [f for f in os.listdir(img_dir)]
+    num_images = len(img_files)
+    fid_scores = np.zeros((num_images, num_images))
+    os.makedirs(".temp_1")
+    os.makedirs(".temp_2")
+    for i in range(num_images):
+        for j in range(i + 1, num_images):
+            img_i_path = pjoin(img_dir, img_files[i])
+            img_j_path = pjoin(img_dir, img_files[j])
+            os.rename(img_i_path, pjoin(".temp_1", img_files[i]))
+            os.rename(img_j_path, pjoin(".temp_2", img_files[j]))
+            fid_value = fid.calculate_fid_given_paths(
+                [".temp_1", ".temp_2"],
+                batch_size=1,
+                device="cuda" if torch.cuda.is_available() else "cpu",
+                dims=2048,
+            )
+            fid_scores[i, j] = fid_value
+            fid_scores[j, i] = fid_value
+
+            if fid_value < 150:
+                print(f"{img_files[i]} - {img_files[j]}: {fid_value}")
+            os.rename(pjoin(".temp_1", img_files[i]), img_i_path)
+            os.rename(pjoin(".temp_2", img_files[j]), img_j_path)
+
+    os.system("rm -rf .temp_1")
+    os.system("rm -rf .temp_2")
+    print(fid_scores)
 
 
 def build_transform(input_size):
@@ -39,7 +52,10 @@ def build_transform(input_size):
     transform = T.Compose(
         [
             T.Lambda(lambda img: img.convert("RGB") if img.mode != "RGB" else img),
-            T.Resize((input_size, input_size), interpolation=InterpolationMode.BICUBIC),
+            T.Resize(
+                (input_size, input_size),
+                interpolation=InterpolationMode.BICUBIC,
+            ),
             T.ToTensor(),
             T.Normalize(mean=MEAN, std=STD),
         ]
