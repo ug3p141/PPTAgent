@@ -1,4 +1,5 @@
 import os
+from copy import deepcopy
 
 import numpy as np
 import pytorch_fid.fid_score as fid
@@ -15,11 +16,12 @@ IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
 
-# < 150效果比较好
-def fid_score(img_dir: str, batch_size: int = None):
-    img_files = [f for f in os.listdir(img_dir)]
+def fid_score(img_dir: str):
+    img_files = sorted([f for f in os.listdir(img_dir)])
     num_images = len(img_files)
     fid_scores = np.zeros((num_images, num_images))
+    os.system("rm -rf .temp_1")
+    os.system("rm -rf .temp_2")
     os.makedirs(".temp_1")
     os.makedirs(".temp_2")
     for i in range(num_images):
@@ -42,9 +44,65 @@ def fid_score(img_dir: str, batch_size: int = None):
             os.rename(pjoin(".temp_1", img_files[i]), img_i_path)
             os.rename(pjoin(".temp_2", img_files[j]), img_j_path)
 
-    os.system("rm -rf .temp_1")
-    os.system("rm -rf .temp_2")
     print(fid_scores)
+
+
+MAX_SIM = 999
+SIM_BOUND = 50
+
+
+def average_distance(similarity, idx, cluster_idx):
+    """
+    Calculate the average distance between a point (idx) and a cluster (cluster_idx).
+    """
+    total_distance = 0
+    for idx_in_cluster in cluster_idx:
+        total_distance += similarity[idx, idx_in_cluster]
+    return total_distance / len(cluster_idx)
+
+
+def get_cluster(similarity: np.ndarray):
+    similarity[similarity == 0] = MAX_SIM
+    num_points = similarity.shape[0]
+    cluster = []
+    sim_copy = deepcopy(similarity)
+
+    while True:
+        min_avg_dist = SIM_BOUND
+        best_cluster = None
+        best_point = None
+
+        for c in cluster:
+            for point_idx in range(num_points):
+                avg_dist = average_distance(sim_copy, point_idx, c)
+                if avg_dist < min_avg_dist:
+                    min_avg_dist = avg_dist
+                    best_cluster = c
+                    best_point = point_idx
+
+        if best_point is not None:  # or 考虑方差
+            best_cluster.append(best_point)
+            similarity[best_point, :] = MAX_SIM
+            similarity[:, best_point] = MAX_SIM
+        else:
+            miss_flag = False
+            min_edge_val = similarity.min()
+            if min_edge_val > SIM_BOUND:
+                miss_flag = True
+                break
+            i, j = np.unravel_index(np.argmin(similarity), similarity.shape)
+            # if added[i] or added[j]: # 凡是added过了，已经MAX_SIM了
+            cluster.append([i, j])
+            similarity[i, :] = MAX_SIM
+            similarity[:, i] = MAX_SIM
+            similarity[j, :] = MAX_SIM
+            similarity[:, j] = MAX_SIM
+            if miss_flag:
+                break
+    cluster.extend(
+        [[idx] for idx in range(num_points) if all([idx not in c for c in cluster])]
+    )
+    return cluster
 
 
 def build_transform(input_size):

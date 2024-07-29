@@ -40,10 +40,54 @@ class ModelAPI:
         results = []
         # 可以把东西放进这个locals里
         for line in lines:
-            result = eval(line, globals(), self.registered_functions)
+            result = eval(line, {"slide": slide}, self.registered_functions)
             results.append(result)
         return results
 
+
+def set_text(text: str, id: str):
+    """
+    This function sets the text of the element with the given id.
+    """
+    global slide
+
+
+def set_image(image_path: str, image_id: str):
+    """
+    This function sets the image of the element with the given id.
+    """
+    global slide
+
+
+def clone_shape(shape_id: str, shape_bounds: dict):
+    """
+    This function clones the shape with the given id, applying the specified bounding box to the new shape.
+
+    Args:
+        shape_id (str): The unique identifier of the shape to clone.
+        shape_bounds (dict): A dictionary containing the bounding box parameters of the shape, including `left`, `top`, `width`, and `height`.
+        eg. `{'left': 100, 'top': 200, 'width': 300, 'height': 400}`
+    """
+    global slide
+
+
+def del_shape(shape_id: str):
+    """
+    This function deletes the shape with the given id.
+    """
+    pass
+
+
+def swap_style(source_shape_id: str, target_shape_id: str):
+    """
+    This function swaps the style of the source shape with the style of the target shape.
+    In certain scenarios, one shape in a list may need to become a focal element (e.g., bold, highlighted with different colors, underlined).
+    During setting elements, it is sometimes necessary to modify the focal element based on its content.
+    """
+    pass
+
+
+# def
 
 model_api = ModelAPI(locals())
 if __name__ == "__main__":

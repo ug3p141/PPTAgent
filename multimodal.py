@@ -1,53 +1,46 @@
 import json
-from presentation import Presentation, Picture
-from utils import base_config, pjoin, print
+import os
+
 from tqdm.auto import tqdm
-from llms import (
-    get_prs_outline,
-    label_image_withcap,
-    label_image_withcap_outline,
-    label_image_withgemini_image,
-    label_image_withoutcap,
-    label_image_withqwen,
-    label_image_withslide,
-)
+
+from llms import caption_image, label_image
+from presentation import Picture, Presentation
+from utils import app_config, pjoin, print
 
 
-# TODO: layout中的背景图片需要识别吗，感觉不需要了
 class ImageLabler:
-    def __init__(self, presentation: Presentation):
+    def __init__(self, presentation: Presentation, output_dir: str, batchsize: int = 8):
         self.presentation = presentation
         self.slide_area = presentation.slide_width.pt * presentation.slide_height.pt
         self.image_stats = {}
-        # self.llm = InternVL()
-        self.collect_images()
-        self.image_stats = json.load(open("resource/image_stats.json", "r"))
-        self.caption_images()
-        self.outline = get_prs_outline(self.presentation)
-        # self.label_images()
-        # print(self.outline, self.image_stats)
+        self.out_file = pjoin(output_dir, "image_stats.json")
 
-    def caption_images(self, batch_size=1):
-        # for image, stats in tqdm(self.image_stats.items()):
-        # stats["caption"] = self.llm.caption_image(image)
+    def work(self):
+        if os.path.exists(self.out_file):
+            self.image_stats = json.load(open(self.out_file, "r"))
+        else:
+            self.collect_images()
+            self.caption_images()
+            self.label_images()
+            json.dump(self.image_stats, open(self.out_file, "w"), indent=4)
+        self.apply_stats()
+
+    def apply_stats(self):
         for slide in self.presentation.slides:
             for shape in slide.shapes:
                 if not isinstance(shape, Picture):
                     continue
-                image_path = shape.data[0]
-                stats = self.image_stats[image_path]
+                stats = self.image_stats[shape.data[0]]
                 shape.caption = stats["caption"]
+                shape.is_background = "background" == stats["result"]["label"]
 
-    def label_images(self, batch_size=1):
+    def caption_images(self):
         for image, stats in tqdm(self.image_stats.items()):
-            stats["result"] = self.llm.label_image(image, self.outline, **stats)
-        for slide in self.presentation.slides:
-            for shape in slide.shapes:
-                if not isinstance(shape, Picture):
-                    continue
-                image_path = shape.data[0]
-                stats = self.image_stats[image_path]
-                shape.is_background = "background" in stats["result"]["label"]
+            self.image_stats[image]["caption"] = caption_image(image)
+
+    def label_images(self):
+        for image, stats in tqdm(self.image_stats.items()):
+            self.image_stats[image]["result"] = label_image(image, **stats)
 
     def collect_images(self):
         for slide_index, slide in enumerate(self.presentation.slides):
@@ -86,19 +79,8 @@ class ImageLabler:
         return ranges
 
 
-# 三种方法的acc对比
-# 1. 直接使用intern-vl，无caption仅few-shot，约75左右
-# 2. 先用intern-vl做caption，再用qwen做分类，约
-# 3. 用intern-vl做caption，再用intern-vl做分类，约
-# 4. 不传入image
-
 if __name__ == "__main__":
-    prs = Presentation.from_file(
-        pjoin(
-            base_config.PPT_DIR,
-            "中文信息联合党支部2022年述职报告.pptx",
-        )
-    )
+    prs = Presentation.from_file(app_config.TEST_PPT)
     LABEL = ["background", "content"]
     ground_truth = {
         "./output/images/图片 26.jpg": 0,
@@ -118,20 +100,15 @@ if __name__ == "__main__":
         "./output/images/图片 2.png": 1,
         "./output/images/图片 2.jpg": 0,
     }
-    image_stats = json.load(open("resource/image_stats.json", "r"))
-    funcs = [
-        label_image_withgemini_image,
-        label_image_withcap,
-        label_image_withoutcap,
-        label_image_withqwen,
-        label_image_withcap_outline,
-    ]
-    outline = get_prs_outline(prs)
-    for func in funcs:
-        false_samples = []
-        for k, v in image_stats.items():
-            if func(image_file=k, outline=outline, **v) != LABEL[ground_truth[k]]:
-                false_samples.append([k, v])
-        print(
-            f"Accuracy of {func.__name__}: {100*(1-len(false_samples)/len(image_stats))}%"
-        )
+    image_stats = json.load(open("image_stats.json", "r"))
+    false_samples = []
+    for k, v in tqdm(image_stats.items()):
+        output = label_image(image_file=k, outline=None, **v)
+        image_stats[k]["result"] = output
+        if output["label"] != LABEL[ground_truth[k]]:
+            false_samples.append([k, v, output])
+        json.dump(image_stats, open("image_stats.json", "w"))
+
+    print(
+        f"Accuracy of {label_image.__name__}: {100*(1-len(false_samples)/len(image_stats))}%"
+    )

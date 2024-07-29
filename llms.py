@@ -5,8 +5,10 @@ from copy import deepcopy
 from time import sleep, time
 
 import google.generativeai as genai
+import PIL
 import requests
 import torch
+from tenacity import retry, stop_after_attempt, wait_fixed
 from transformers import AutoModel, AutoTokenizer
 
 from model_utils import load_image
@@ -61,12 +63,12 @@ class InternVL(metaclass=SingletonMeta):
 
 
 class Gemini:
-    def __init__(self, time_limit: int = 30) -> None:
-        proxy = "http://124.16.138.148:7890"
-        os.environ["https_proxy"] = proxy
-        os.environ["http_proxy"] = proxy
-        os.environ["HTTP_PROXY"] = proxy
-        os.environ["HTTPS_PROXY"] = proxy
+    def __init__(self, time_limit: int = 60) -> None:
+        # proxy = "http://124.16.138.148:7890"
+        # os.environ["https_proxy"] = proxy
+        # os.environ["http_proxy"] = proxy
+        # os.environ["HTTP_PROXY"] = proxy
+        # os.environ["HTTPS_PROXY"] = proxy
         self.time_limit = time_limit
         self.model = genai.GenerativeModel("gemini-1.5-pro-latest")
         self.safety_settings = [
@@ -104,17 +106,21 @@ class Gemini:
 
     def prepare(self):
         self._call_idx = (self._call_idx + 1) % len(self.api_config[0])
-        genai.configure(api_key=self.api_config[0][self._call_idx])
+        self.use_apikey = self.api_config[0][self._call_idx]
+        genai.configure(api_key=self.use_apikey)
         call_time = time()
         if call_time - self.api_config[1][self._call_idx] < self.time_limit:
             sleep(self.time_limit - (call_time - self.api_config[1][self._call_idx]))
         self.api_config[1][self._call_idx] = call_time
 
+    @retry(
+        wait=wait_fixed(10),
+        stop=stop_after_attempt(6),
+    )
     def __call__(self, content: str, image_file: str = None) -> str:
         self.prepare()
         if image_file is not None:
-            image_file = genai.upload_file(image_file)
-            content = [content, image_file]
+            content = [content, PIL.Image.open(image_file)]
         response = self.model.generate_content(
             content,
             safety_settings=self.safety_settings,
@@ -155,7 +161,14 @@ class QWEN2:
 
 qwen = QWEN2()
 gemini = Gemini()
-vl_model = InternVL()
+intern = InternVL()
+vl_model = gemini
+long_model = gemini
+
+
+def functional_split(prs_html: str):
+    function_split_prompt = open("prompts/functional_split.txt").read()
+    return json.loads(gemini(function_split_prompt + prs_html + "Output:").strip())
 
 
 def caption_image(image_file: str):
@@ -164,35 +177,7 @@ def caption_image(image_file: str):
     return vl_model(pixel_values.to(torch.bfloat16).cuda(), prompt)
 
 
-# ablation study
-def label_image_withslide(
-    image_file: str,
-    slide_html: str,
-    outline: str,
-    appear_times: int,
-    top_ranges_str: str,
-    relative_area: float,
-    **kwargs,
-):
-    prompt_head = open("prompts/prompt_image_withslide.txt").read()
-    aspect_ratio, pixel_values = load_image(image_file)
-    prompt = (
-        prompt_head
-        + "Input:\n"
-        + {
-            "image": "<image>",
-            "slide_html": slide_html,
-            "outline": outline,
-            "appear_times": appear_times,
-            "slide_range": top_ranges_str,
-            "aspect_ratio": aspect_ratio,
-            "relative_area": relative_area,
-        }
-    )
-    return json.loads(vl_model(pixel_values.to(torch.bfloat16).cuda(), prompt).strip())
-
-
-def label_image_withgemini_image(
+def label_image(
     image_file: str,
     appear_times: int,
     top_ranges_str: str,
@@ -215,116 +200,7 @@ def label_image_withgemini_image(
             }
         )
     )
-    return json.loads(gemini(prompt, image_file).strip())
-
-
-def label_image_withqwen(
-    image_file: str,
-    appear_times: int,
-    top_ranges_str: str,
-    relative_area: float,
-    caption: str,
-    **kwargs,
-):
-    prompt_head = open("prompts/image_cls_withcap.txt").read()
-    aspect_ratio, _ = load_image(image_file)
-    prompt = (
-        prompt_head
-        + "Input:\n"
-        + str(
-            {
-                "caption": caption,
-                "appear_times": appear_times,
-                "slide_range": top_ranges_str,
-                "aspect_ratio": aspect_ratio,
-                "relative_area": relative_area,
-            }
-        )
-    )
-    return json.loads(qwen(prompt).strip())
-
-
-def label_image_withcap(
-    image_file: str,
-    appear_times: int,
-    top_ranges_str: str,
-    relative_area: float,
-    caption: str,
-    **kwargs,
-):
-    prompt_head = open("prompts/image_cls_withcap.txt").read()
-    aspect_ratio, pixel_values = load_image(image_file)
-    prompt = (
-        prompt_head
-        + "Input:\n"
-        + str(
-            {
-                "image": "<image>",
-                "caption": caption,
-                "appear_times": appear_times,
-                "slide_range": top_ranges_str,
-                "aspect_ratio": aspect_ratio,
-                "relative_area": relative_area,
-            }
-        )
-    )
-    return json.loads(vl_model(pixel_values.to(torch.bfloat16).cuda(), prompt).strip())
-
-
-def label_image_withcap_outline(
-    image_file: str,
-    outline: str,
-    appear_times: int,
-    top_ranges_str: str,
-    relative_area: float,
-    caption: str,
-    **kwargs,
-):
-    prompt_head = open("prompts/image_cls_withcap.txt").read()
-    aspect_ratio, pixel_values = load_image(image_file)
-    prompt = (
-        prompt_head
-        + "Input:\n"
-        + str(
-            {
-                "image": "<image>",
-                "caption": caption,
-                "outline": outline,
-                "appear_times": appear_times,
-                "slide_range": top_ranges_str,
-                "aspect_ratio": aspect_ratio,
-                "relative_area": relative_area,
-            }
-        )
-    )
-    return json.loads(vl_model(pixel_values.to(torch.bfloat16).cuda(), prompt).strip())
-
-
-def label_image_withoutcap(
-    image_file: str,
-    outline: str,
-    appear_times: int,
-    top_ranges_str: str,
-    relative_area: float,
-    **kwargs,
-):
-    prompt_head = open("prompts/prompt_image.txt").read()
-    aspect_ratio, pixel_values = load_image(image_file)
-    prompt = (
-        prompt_head
-        + "Input:\n"
-        + str(
-            {
-                "image": "<image>",
-                "outline": outline,
-                "appear_times": appear_times,
-                "slide_range": top_ranges_str,
-                "aspect_ratio": aspect_ratio,
-                "relative_area": relative_area,
-            }
-        )
-    )
-    return json.loads(vl_model(pixel_values.to(torch.bfloat16).cuda(), prompt).strip())
+    return json.loads(vl_model(prompt, image_file).strip())
 
 
 OUTLINE_PROMPT = """Extract the most important headings from the provided outline and present them in JSON format. Each heading should have a title and a description string. Ensure the language of the headings matches the input language, and each heading is no longer than three sentences. Example format:
@@ -342,7 +218,7 @@ def get_prs_outline(presentation: Presentation):
             OUTLINE_PROMPT,
         ]
     )
-    return gemini(prompt)
+    return long_model(prompt)
 
 
 def get_paper_outline(paper_md: str):
@@ -353,12 +229,12 @@ def get_paper_outline(paper_md: str):
             OUTLINE_PROMPT,
         ]
     )
-    return gemini(prompt)
+    return long_model(prompt)
 
 
 if __name__ == "__main__":
-    # internvl = InternVL()
-    # internvl.label_image("output/images/图片 2.jpg", 2, "1,3", 0.5)
+    internvl = InternVL()
+    internvl("who r u")
     print(qwen("你是谁"))
-    # gemini = Gemini()
-    # print(gemini.chat("你是谁"))
+    gemini = Gemini()
+    print(gemini.chat("你是谁"))
