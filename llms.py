@@ -27,10 +27,11 @@ class SingletonMeta(type):
 
 
 class InternVL(metaclass=SingletonMeta):
-    def __init__(self, model_id="./InternVL2-Llama3-76B-AWQ", device_map: dict = None):
+
+    def __init__(self, model_id="models/InternVL2-8B", device_map: dict = None):
         self._initialized = False
         self._model_id = model_id
-        self._device_map = device_map if device_map is not None else {"": 0}
+        self._device_map = device_map if device_map is not None else "auto"
 
     def _initialize(self):
         self.model = AutoModel.from_pretrained(
@@ -173,7 +174,7 @@ def functional_split(prs_html: str):
 
 def caption_image(image_file: str):
     _, pixel_values = load_image(image_file)
-    prompt = open("prompts/caption.txt")
+    prompt = open("prompts/caption.txt").read()
     return vl_model(pixel_values.to(torch.bfloat16).cuda(), prompt)
 
 
