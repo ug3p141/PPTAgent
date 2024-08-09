@@ -1,5 +1,4 @@
 import json
-import os
 import random
 from copy import deepcopy
 from time import sleep, time
@@ -8,6 +7,7 @@ import google.generativeai as genai
 import PIL
 import requests
 import torch
+from jinja2 import Template
 from tenacity import retry, stop_after_attempt, wait_fixed
 from transformers import AutoModel, AutoTokenizer
 
@@ -127,15 +127,14 @@ class Gemini:
             safety_settings=self.safety_settings,
             generation_config=self.generation_config,
         )
-        return response.text
+        return json.loads(response.text.strip())
 
     def chat(self, content: str, image_file: str = None) -> str:
         self.prepare()
         if image_file is not None:
-            image_file = genai.upload_file(image_file)
-            content = [content, image_file]
-        response = self._chat.send_message(content, image_file)
-        return response.text
+            content = [content, PIL.Image.open(image_file)]
+        response = self._chat.send_message(content)
+        return json.loads(response.text.strip())
 
 
 class QWEN2:
@@ -165,11 +164,6 @@ gemini = Gemini()
 intern = InternVL()
 vl_model = gemini
 long_model = gemini
-
-
-def functional_split(prs_html: str):
-    function_split_prompt = open("prompts/functional_split.txt").read()
-    return json.loads(gemini(function_split_prompt + prs_html + "Output:").strip())
 
 
 def caption_image(image_file: str):
@@ -204,38 +198,16 @@ def label_image(
     return json.loads(vl_model(prompt, image_file).strip())
 
 
-OUTLINE_PROMPT = """Extract the most important headings from the provided outline and present them in JSON format. Each heading should have a title and a description string. Ensure the language of the headings matches the input language, and each heading is no longer than three sentences. Example format:
-{
-"2022 Work Report": "Reporting unit xx, Reporter yy, Reporting date zz",
-"Report Contents": "..."
-}"""
-
-
-def get_prs_outline(presentation: Presentation):
-    prompt = "\n".join(
-        [
-            "From the following slides html code which is the content of the presentation.",
-            str(presentation),
-            OUTLINE_PROMPT,
-        ]
-    )
-    return long_model(prompt)
-
-
-def get_paper_outline(paper_md: str):
-    prompt = "\n".join(
-        [
-            "From the following text which contains a set of headings and some content within each heading",
-            paper_md,
-            OUTLINE_PROMPT,
-        ]
-    )
+def get_outline(content: str):
+    template = Template(open("prompts/get_outline.txt").read())
+    prompt = template(paper_md=content).render()
     return long_model(prompt)
 
 
 if __name__ == "__main__":
-    internvl = InternVL()
-    internvl("who r u")
-    print(qwen("你是谁"))
+    # internvl = InternVL()
+    # internvl("who r u")
+    # print(qwen("你是谁"))
     gemini = Gemini()
-    print(gemini.chat("你是谁"))
+    gemini.chat("小红是小明的爸爸")
+    print(gemini.chat("小红是谁"))

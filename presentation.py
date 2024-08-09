@@ -2,7 +2,7 @@ import re
 
 from matplotlib.colors import rgb2hex
 from rich import print
-from typing_extensions import Dict, Type
+from typing_extensions import Type
 
 from pptx import Presentation as PPTXPre
 from pptx.chart.chart import Chart as PPTXChart
@@ -18,10 +18,10 @@ from pptx.shapes.placeholder import SlidePlaceholder
 from pptx.slide import Slide as PPTXSlide
 from pptx.table import Table
 from pptx.text.text import _Run
-from utils import dict_to_object  # noqa
 from utils import (
+    app_config,
     apply_fill,
-    base_config,
+    dict_to_object,
     extract_fill,
     get_text_inlinestyle,
     object_to_dict,
@@ -29,39 +29,32 @@ from utils import (
     pjoin,
 )
 
-# 三种级别的text 可以保存的属性
-# textframe: shape bounds
-# paragraph: space, alignment, level, font
-# run: font, hyperlink, text
-# 以paragraphs 为单位处理文本框
-textframe_tags = ["幻灯片标题", "小节标题", "标题", "固定文本"]
-background_tags = ["固定文本"]
 
-
-# textframe 无font如何填槽
-# 这里的repr应该用<p>补充
+# set element id
 class TextFrame:
     def __init__(
         self,
         is_textframe: bool,
-        style: Dict,
-        data: Dict,
+        style: dict,
+        data: list[dict],
+        father_idx: int,
         text: str = "",
     ):
         self.is_textframe = is_textframe
         self.style = style
         self.data = data
+        self.father_idx = father_idx
         self.text = text
         self.text_tag = None  # induct from template
 
     @classmethod
-    def from_shape(cls, shape: BaseShape):
+    def from_shape(cls, shape: BaseShape, father_idx: int):
         if not shape.has_text_frame:
-            return cls(False, {}, [])
+            return cls(False, None, None, None, None)
         shape = shape.text_frame
         style = object_to_dict(shape, exclude=["text"])
         data = []
-        for _, paragraph in enumerate(shape.paragraphs):
+        for idx, paragraph in enumerate(shape.paragraphs):
             runs = paragraph.runs
             if len(runs) == 0:  # 成功解析
                 runs = [
@@ -79,8 +72,9 @@ class TextFrame:
             content["font"] = object_to_dict(max(runs_ronts, key=runs_ronts.get))
             if content["font"]["name"] == "+mj-ea":
                 content["font"]["name"] = "宋体"
+            content["idx"] = idx
             data.append(content)
-        return cls(True, style, data, shape.text)
+        return cls(True, style, data, father_idx, shape.text)
 
     def build(self, shape: BaseShape):
         if not self.is_textframe:
@@ -116,18 +110,16 @@ class TextFrame:
             if (para["bullet"] != pre_bullet or para == self.data[-1]) and len(
                 bullets
             ) != 0:
-                repr_list.extend(
-                    ["<ul>"]
-                    + [
-                        f"<li {get_text_inlinestyle(i)}>{i['text']}</li>"
-                        for i in bullets
-                    ]
-                    + ["</ul>"]
-                )
+                repr_list.extend(["<ul>"] + bullets + ["</ul>"])
+                bullets.clear()
             if para["bullet"] is None and para["text"]:
-                repr_list.append(f"<p {get_text_inlinestyle(para)}>{para['text']}</p>")
+                repr_list.append(
+                    f"<p {get_text_inlinestyle(para)} id={self.father_idx}_{para['idx']}>{para['text']}</p>"
+                )
             elif para["text"]:
-                bullets.append(para)
+                bullets.append(
+                    f"<li id='{self.father_idx}_{para['idx']}' {get_text_inlinestyle(para)}>{para['text']}</li>"
+                )
             pre_bullet = para["bullet"]
         return "\n".join(repr_list)
 
@@ -139,7 +131,7 @@ class UnsupportedShape:
         slide_idx: int,
         shape_idx: int,
         shape: BaseShape,
-        style: Dict,
+        style: dict,
         text_frame: TextFrame,
     ):
         # print(f"Unsupport Shape --- {shape.__class__}\n", object_to_dict(shape))
@@ -161,8 +153,8 @@ class ShapeElement:
         self,
         slide_idx: int,
         shape_idx: int,
-        style: Dict,
-        data: Dict,
+        style: dict,
+        data: dict,
         text_frame: TextFrame,
     ):
         self.slide_idx = slide_idx
@@ -193,7 +185,7 @@ class ShapeElement:
             "fill": fill,
             "line": line,
         }
-        text_frame = TextFrame.from_shape(shape)
+        text_frame = TextFrame.from_shape(shape, shape_idx)
         obj = SHAPECAST.get(shape.shape_type, UnsupportedShape).from_shape(
             slide_idx, shape_idx, shape, style, text_frame
         )
@@ -328,7 +320,7 @@ class AutoShape(ShapeElement):
         slide_idx: int,
         shape_idx: int,
         shape: PPTXAutoShape,
-        style: Dict,
+        style: dict,
         text_frame: TextFrame,
     ):
         data = {
@@ -358,7 +350,7 @@ class AutoShape(ShapeElement):
         text = self.text_frame.to_html()
         if text:
             text = f"<p>{text}</p>"
-        return f"<{self.data['svg_tag']}>\n{text}\n</{self.data['svg_tag']}>\n"
+        return f"<{self.data['svg_tag']} id='{self.shape_idx}'>\n{text}\n</{self.data['svg_tag']}>\n"
 
 
 class TextBox(ShapeElement):
@@ -368,7 +360,7 @@ class TextBox(ShapeElement):
         slide_idx: int,
         shape_idx: int,
         shape: TextFrame,
-        style: Dict,
+        style: dict,
         text_frame: TextFrame,
     ):
         return cls(slide_idx, shape_idx, style, None, text_frame)
@@ -378,7 +370,7 @@ class TextBox(ShapeElement):
         return super().build(slide, shape)
 
     def to_html(self) -> str:
-        return f"<article {self.inline_style}>\n{self.text_frame.to_html()}\n</article>"
+        return f"<article id='{self.shape_idx}' {self.inline_style}>\n{self.text_frame.to_html()}\n</article>"
 
 
 class Placeholder(ShapeElement):
@@ -388,7 +380,7 @@ class Placeholder(ShapeElement):
         slide_idx: int,
         shape_idx: int,
         shape: SlidePlaceholder,
-        style: Dict,
+        style: dict,
         text_frame: TextFrame,
     ):
         style |= {
@@ -411,12 +403,12 @@ class Picture(ShapeElement):
         slide_idx: int,
         shape_idx: int,
         shape: PPTXPicture,
-        style: Dict,
+        style: dict,
         text_frame: TextFrame,
     ):
         img_name = re.sub(r"[\/\0]", "_", shape.name)
         img_path = pjoin(
-            base_config.IMAGE_DIR,
+            app_config.IMAGE_DIR,
             f"{img_name}.{shape.image.ext}",
         )
         style["img_style"] = {
@@ -448,6 +440,14 @@ class Picture(ShapeElement):
         return super().build(slide, shape)
 
     @property
+    def img_path(self):
+        return self.data[0]
+
+    @img_path.setter
+    def img_path(self, img_path: str):
+        self.data[0] = img_path
+
+    @property
     def caption(self):
         return self.data[2]
 
@@ -459,7 +459,7 @@ class Picture(ShapeElement):
         if self.is_background:
             return ""
         return (
-            f"<figure {self.inline_style}>\n<img alt='{self.data[1]}' />\n"
+            f"<figure id='{self.shape_idx}' {self.inline_style}>\n<img alt='{self.data[1]}' />\n"
             + (f"\n<figcaption>{self.caption}</figcaption>" if self.caption else "")
             + "\n</figure>"
         )
@@ -472,7 +472,7 @@ class GroupShape(ShapeElement):
         slide_idx: int,
         shape_idx: int,
         shape: PPTXGroupShape,
-        style: Dict,
+        style: dict,
         text_frame: TextFrame,
     ):
         data = [
@@ -507,7 +507,7 @@ class Chart(ShapeElement):
         slide_idx: int,
         shape_idx: int,
         shape: PPTXChart,
-        style: Dict,
+        style: dict,
         text_frame: TextFrame,
     ):
         chart = shape.chart
@@ -547,7 +547,7 @@ class Table(ShapeElement):
         slide_idx: int,
         shape_idx: int,
         shape: Table,
-        style: Dict,
+        style: dict,
         text_frame: TextFrame,
     ):
         table = shape.table
@@ -655,7 +655,7 @@ class SlidePage:
         content_types = set()
         if shapes is None:
             shapes = self.shapes
-        for shape in self.shapes:
+        for shape in shapes:
             if isinstance(shape, Chart):
                 content_types.add("Chart")
             elif isinstance(shape, Table):
@@ -664,7 +664,23 @@ class SlidePage:
                 content_types.add("Picture")
             elif isinstance(shape, GroupShape):
                 content_types.union(self.get_content_types(shape.data))
-        return list(content_types).sort()
+        return sorted(list(content_types))
+
+    # def get_content_types(self, shapes: list[ShapeElement] = None, content_types: dict=None):
+    #     if content_types is None:
+    #         content_types = defaultdict(int)
+    #     if shapes is None:
+    #         shapes = self.shapes
+    #     for shape in shapes:
+    #         if isinstance(shape, Chart):
+    #             content_types["Chart"]+=1
+    #         elif isinstance(shape, Table):
+    #             content_types["Table"]
+    #         elif isinstance(shape, Picture) and not shape.is_background:
+    #             content_types["Picture"]
+    #         elif isinstance(shape, GroupShape):
+    #             self.get_content_types(shape.data, content_types)
+    #     return content_types
 
     def __eq__(self, __value) -> bool:
         if not isinstance(__value, SlidePage):
@@ -717,7 +733,7 @@ class Presentation:
         slide_height = prs.slide_height
         # TODO set slide range here
         slides = [
-            SlidePage.from_slide(slide, i, slide_width.pt, slide_height.pt)
+            SlidePage.from_slide(slide, i + 1, slide_width.pt, slide_height.pt)
             for i, slide in enumerate(list(prs.slides)[:])
         ]
         num_pages = len(slides)
@@ -749,14 +765,14 @@ class Presentation:
             pages = range(self.num_pages)
         return "\n".join(
             [
-                f"Slide Page {slide_idx+1}\n" + slide.to_html()
+                f"Slide Page {slide_idx}\n" + slide.to_html()
                 for slide_idx, slide in enumerate(self.slides)
                 if slide_idx in pages
             ]
         )
 
 
-SHAPECAST: Dict[int, Type[ShapeElement]] = {
+SHAPECAST: dict[int, Type[ShapeElement]] = {
     MSO_SHAPE_TYPE.AUTO_SHAPE: AutoShape,
     MSO_SHAPE_TYPE.PLACEHOLDER: Placeholder,
     MSO_SHAPE_TYPE.PICTURE: Picture,
@@ -770,7 +786,7 @@ SHAPECAST: Dict[int, Type[ShapeElement]] = {
 if __name__ == "__main__":
     Presentation.from_file(
         pjoin(
-            base_config.PPT_DIR,
+            app_config.PPT_DIR,
             "中文信息联合党支部2022年述职报告.pptx",
         )
-    ).save(pjoin(base_config.GEN_PPT_DIR, "ppt_handlers_test.pptx"))
+    ).save(pjoin(app_config.GEN_PPT_DIR, "ppt_handlers_test.pptx"))

@@ -116,7 +116,3 @@ Functional Pages: {{ functional_pages }}
 Images: {{ images }}
 JSON Content: {{ json_content }}
 Output:
-
----
-
-This adjusted prompt now includes the tasks of distributing images within the outline and modifying each title to be more descriptive.
