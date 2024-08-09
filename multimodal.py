@@ -9,11 +9,11 @@ from utils import app_config, pjoin, print
 
 
 class ImageLabler:
-    def __init__(self, presentation: Presentation, output_dir: str, batchsize: int = 8):
+    def __init__(self, presentation: Presentation, batchsize: int = 8):
         self.presentation = presentation
         self.slide_area = presentation.slide_width.pt * presentation.slide_height.pt
         self.image_stats = {}
-        self.out_file = pjoin(output_dir, "image_stats.json")
+        self.out_file = pjoin(app_config.RUN_DIR, "image_stats.json")
 
     def work(self):
         if os.path.exists(self.out_file):

@@ -1,0 +1,51 @@
+I have a collection of slides from a PowerPoint presentation, provided in HTML format. I want to classify these slides into two categories: "content" and "functional." All slides must be classified into one of these categories without any omissions.
+
+"Content" slides contain actual presentation content such as introductions, data analysis, and discussions.
+"Functional" slides typically serve structural purposes and may include common labels like Opening, Closing, Table of Contents, Section Header, etc.
+
+For "functional" slides, please tag them with appropriate labels and specify the required metadata, such as "Opening": ["Author", "Date"], "Conclusion": null. If this data is provided in the HTML document, extract it where possible.
+
+Slides with large headings, lists of items with numbers or bullet points, or phrases like "Welcome," "Thank You," "Agenda," "Outline," "Table of Contents," and similar should be considered "functional" slides. Additionally, slides that contain bullet points with very little text and big font sizes should also be recommended as "functional" slides.
+
+Return the classification results in JSON format with the slide numbers corresponding to each tag and the required metadata.
+
+Here are some example slides:
+Slide Page 1:
+<html>... (HTML code of slide 1) ...</html>
+Slide Page 2:
+<html>... (HTML code of slide 2) ...</html>
+Slide Page 3:
+<html>... (HTML code of slide 3) ...</html>
+Slide Page 4:
+<html>... (HTML code of slide 4) ...</html>
+Slide Page 5:
+<html>... (HTML code of slide 5) ...</html>
+Slide Page 6:
+<html>... (HTML code of slide 6) ...</html>
+Slide Page 7:
+<html>... (HTML code of slide 7) ...</html>
+Example Output:
+{
+    "functional": {
+        "Opening": {
+            "slides": [1],
+            "metadata": ["Author", "Date"]
+        },
+        "Table of Contents": {
+            "slides": [2],
+            "metadata": null
+        },
+        "Section Header": {
+            "slides": [3, 5],
+            "metadata": null
+        },
+        "Closing": {
+            "slides": [7],
+            "metadata": null
+        }
+    },
+    "content": [4, 6]
+}
+Remember, all slides must be classified into one of these categories without any omissions.
+Now, analyze the following slides:
+Inputs:

@@ -1,0 +1,118 @@
+Act like an expert presentation designer. You have been creating professional PowerPoint presentations for over 20 years. You specialize in turning markdown documents into detailed and well-structured PPT presentations.
+Objective: Use the provided markdown document and image list to create a comprehensive PowerPoint presentation outline. Ensure the outline includes all key points and sections, and generate detailed slide content based on this outline. Additionally, integrate the provided images and their captions into the appropriate slides.
+Step-by-step Instructions:
+Analyze the Markdown Document:
+Carefully read through the provided markdown document.
+Identify and list all major sections and subsections.
+Generate the Presentation Outline:
+Create a high-level outline of the presentation based on the identified sections.
+Ensure each section and subsection is represented as a slide title in the outline.
+Detail the Slide Content:
+Generate detailed content for each slide based on the outline.
+Include key points, bullet points, and any necessary explanations or descriptions.
+Integrate Images:
+Incorporate the provided images and their captions into the appropriate slides according to its corresponding caption.
+Label Slide Types:
+Label each slide with its functional type (functional or content). Functional types are provided by the user and include options such as opening, section headers, closing, or table of contents.
+Output Format:
+Output the content of each slide in a structured json list format for easy parsing.
+Each slide's content should include the title, content, and functional type label, and include images when necessary.
+Specify Slide Count: Ensure the total number of slides is appropriate for the content provided and fits within the specified range, if given by the user.
+Example Input:
+Functional Types:  [opening, section headers, closing, table of contents]
+Number of slides: 5
+Image List:
+{
+  "img1.jpg": "Image 1 Caption",
+  "img2.jpg": "Image 2 Caption"
+}
+Markdown Document:
+# Title
+## Introduction
+- Background
+- Purpose
+
+## Main Topic 1
+### Subtopic 1.1
+- Detail 1
+- Detail 2
+
+## Conclusion
+- Summary
+- Future Work
+Example Output:
+[
+  {
+    "title": "Title",
+    "type": "functional",
+    "subtype": "opening",
+    "text": [
+      "Title",
+      "Subtitle (if any)",
+      "Author",
+      "Date"
+    ]
+  },
+  {
+    "title": "Introduction",
+    "type": "content",
+    "text": [
+      "Background",
+      "Provide a brief background on the topic.",
+      "Highlight the significance of the topic.",
+      "Purpose",
+      "State the main purpose of the presentation.",
+      "Explain what the audience will learn."
+    ],
+    "image": [
+      {
+        "name": "img1.jpg",
+        "caption": "Image 1 Caption"
+      }
+    ]
+  },
+  {
+    "title": "Main Topic 1",
+    "type": "functional",
+    "subtype": "section header",
+    "text": [
+      "Main Topic 1"
+    ]
+  },
+  {
+    "title": "Subtopic 1.1",
+    "type": "content",
+    "text": [
+      "Detail 1: Describe the first key point.",
+      "Detail 2: Explain the importance of the first key point."
+    ],
+    "image": [
+      {
+        "name": "img2.jpg",
+        "caption": "Image 2 Caption"
+      }
+    ]
+  },
+  {
+    "title": "Conclusion",
+    "type": "functional",
+    "subtype": "closing",
+    "text": [
+      "Summary",
+      "Summarize the main points of the presentation.",
+      "Reinforce the key takeaways.",
+      "Future Work",
+      "Suggest areas for further research or next steps.",
+      "Encourage the audience to apply the knowledge gained."
+    ]
+  }
+]
+
+Take a deep breath and work on this problem step-by-step.
+Input:
+Functional Types:  {{ functional_types }}
+Number of slides: {{ number_of_slides }}
+Image List: {{ image_list }}
+Markdown Document:
+{{ markdown_content }}
+Output:

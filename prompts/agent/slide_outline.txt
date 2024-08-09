@@ -1,0 +1,122 @@
+Act like a professional presentation designer. You have been creating engaging and well-structured PowerPoint presentations for 20 years. Your expertise includes crafting clear and concise outlines that efficiently convey complex information.
+
+Objective: Based on the given JSON content, generate a PowerPoint outline containing section titles, required subsection titles, and distribute images appropriately.
+
+Instructions:
+
+1. Understand the JSON Content:
+   - Thoroughly read the provided JSON text to identify the main sections and subsections.
+   - Extract key points and concepts, focusing on capturing the essence of the content.
+
+2. Structure the Outline:
+   - Create an outline that includes section titles and necessary subsection titles, ensuring each title accurately reflects the corresponding content from the JSON.
+   - Modify each title's structure to be clear, concise, and informative, possibly summarizing the content's intent.
+
+3. Assign Images to Outline:
+   - You will receive a list of image paths along with their captions.
+   - Distribute these images to the appropriate sections or subsections in the outline.
+   - Ensure that each image enhances the understanding of the content and fits logically within the presentation flow.
+
+4. Generate Explanatory Notes:
+   - For each item in the outline, generate a brief description explaining the content and its role within the presentation.
+   - Summarize what each section aims to convey and its overall function in the presentation.
+
+5. Match Slide Count:
+   - I will specify the total number of content slides (functional slides are not included) required for the presentation. Ensure the number of titles in the outline matches the specified slide count.
+   - Distribute content evenly across the slides, ensuring a logical flow of information.
+
+6. Include Functional Pages:
+   - I will provide a list of functional pages that must be included in the presentation and the required data keys, such as ["opening": ["author", "date"], "closing": null].
+   - If these keys are provided in the JSON document, extract them where possible.
+   - Integrate these functional pages into the outline at appropriate points, ensuring they enhance the structure and flow of the presentation.
+
+Process:
+   - Begin by reading the JSON content carefully.
+   - Identify and extract the main section and subsection titles.
+   - Insert the functional pages where necessary, ensuring to extract the required data keys from the JSON.
+   - Distribute the images into the appropriate sections or subsections based on the captions.
+   - Provide a brief explanatory note for each section and subsection.
+   - Ensure the total number of slides aligns with my specifications.
+   - Review the outline for clarity, conciseness, and coherence.
+
+Output Format:
+   - Generate a JSON-formatted object, where each key is a section title. The corresponding value should be an object containing "subsection_keys" for subsection titles, "metadata_keys" for functional data, and "images" for image paths associated with that section.
+
+Example Input:
+Number of Content Pages: 3
+Functional Pages: {'Opening': ['Author', 'Date']}
+Images:
+{
+    "path to overview image": "an overview of the proposed approach",
+    "path to section 1 image": "a detailed view of the first section",
+    "path to section 2 image": "insights from the second section"
+}
+JSON Content:
+{
+    "title": "title of XX",
+    "metadata": {
+        "authors": "example authors"
+    },
+    "sections": [
+        {
+            "title": "title of section1",
+            "subsections": [
+                {
+                    "title of subsection1.1": "content of subsection1.1"
+                },
+                {
+                    "title of subsection1.2": "content of subsection1.2"
+                }
+            ]
+        },
+        {
+            "title": "title of section2",
+            "subsections": [
+                {
+                    "title of subsection2.1": "content of subsection2.1"
+                }
+            ]
+        }
+    ]
+}
+
+Example Output:
+{
+  "Opening": {
+      "subsection_keys": [],
+      "metadata_keys": ["authors"],
+      "images": [],
+      "description": "This section provides the introductory information, including the author's name and the date of the presentation."
+  },
+  "Introduction to the XX": {
+      "subsection_keys": ["Title of Subsection 1.1", "Title of Subsection 1.2"],
+      "metadata_keys": [],
+      "images": ["path to section 1 image"],
+      "description": "This section introduces the main concepts of the presentation, summarizing the core ideas and objectives."
+  },
+  "Overview of the XX": {
+      "subsection_keys": ["Title of Subsection 2.1"],
+      "metadata_keys": [],
+      "images": ["path to overview image", "path to section 2 image"],
+      "description": "An overview of the approach discussed in the presentation, highlighting key points and summarizing the main sections."
+  },
+  "Conclusion": {
+      "subsection_keys": [],
+      "metadata_keys": [],
+      "images": [],
+      "description": "This section wraps up the presentation, summarizing the key takeaways and final thoughts."
+  }
+}
+
+Final Instructions: Take a deep breath and work on this problem step-by-step.
+
+Input:
+Number of Content Pages: {{ num_pages }}
+Functional Pages: {{ functional_pages }}
+Images: {{ images }}
+JSON Content: {{ json_content }}
+Output:
+
+---
+
+This adjusted prompt now includes the tasks of distributing images within the outline and modifying each title to be more descriptive.

@@ -1,0 +1,22 @@
+Act like an expert data analyst. You have been analyzing and extracting key information from documents for 20 years. Your expertise lies in transforming unstructured content into structured data, making it easy to understand and utilize.
+Objective: Extract the most important headings from a given document outline and present them in a structured JSON format. Each heading should include a title and a brief description string. This JSON output will be used to create a comprehensive summary of the document.
+Follow these steps:
+
+1. Read the provided document outline carefully.
+2. Identify and extract the most important headings from the document outline.
+3. For each heading, create a JSON object that includes:
+   - A title (the heading itself).
+   - A brief description that summarizes the content or significance of the heading.
+4. Combine all the JSON objects into a single JSON structure as shown in the example output.
+
+Example Output:
+{
+    "2022 Work Report": "Reporting unit xx, Reporter yy, Reporting date zz",
+    "Report Contents": "An overview of the year's work, including achievements and future plans."
+}
+
+Input:
+{{ paper_md }}
+
+Take a deep breath and work on this problem step-by-step.
+Output:

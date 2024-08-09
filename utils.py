@@ -1,28 +1,16 @@
+import json
 import os
+import xml.etree.ElementTree as ET
+from datetime import datetime
 from types import SimpleNamespace
+
 from lxml import etree
+from rich import print
+
 from pptx.dml.fill import _NoFill, _NoneFill
 from pptx.shapes.base import BaseShape
 from pptx.shapes.group import GroupShape
-import xml.etree.ElementTree as ET
 from pptx.util import Length
-from rich import print
-
-# def clone_shape(shape):
-#     """Add a duplicate of `shape` to the slide on which it appears."""
-#     # ---access required XML elements---
-#     sp = shape._sp
-#     spTree = sp.getparent()
-#     # ---clone shape element---
-#     new_sp = copy.deepcopy(sp)
-#     # ---add it to slide---
-#     spTree.append(new_sp)
-#     # ---create a proxy object for the new sp element---
-#     new_shape = Shape(new_sp, None)
-#     # ---give it a unique shape-id---
-#     new_shape.shape_id = shape.shape_id + 1000
-#     # ---return the new proxy object---
-#     return new_shape
 
 
 def rgb2hex(rgb):
@@ -89,10 +77,10 @@ def parse_groupshape(groupshape: GroupShape):
         group_shape_height = sp.height * group_height / shape_height
         group_shape_xy.append(
             {
-                "left": int(group_shape_left),
-                "top": int(group_shape_top),
-                "width": int(group_shape_width),
-                "height": int(group_shape_height),
+                "left": Length(group_shape_left),
+                "top": Length(group_shape_top),
+                "width": Length(group_shape_width),
+                "height": Length(group_shape_height),
             }
         )
     return group_shape_xy
@@ -191,20 +179,25 @@ def dict_to_object(dict: dict, obj: object, exclude=None):
 
 
 class Config:
-    def __init__(self):
-        # 当前运行目录，而不是文件所在目录
+    def __init__(self, run_tag=None):
         self.BASE_DIR = os.curdir
-        self.PPT_DIR = pjoin(self.BASE_DIR, "resource")
-        self.GEN_PPT_DIR = pjoin(self.BASE_DIR, "output/ppts")
-        self.IMAGE_DIR = pjoin(self.BASE_DIR, "output/images")
-        for the_dir in [self.PPT_DIR, self.IMAGE_DIR, self.GEN_PPT_DIR]:
-            if not os.path.exists(the_dir):
+        if run_tag is None:
+            run_tag = datetime.now().strftime("%Y%m%d-%H:%M:%S")
+        # 存储生成的中间过程
+        self.RUN_DIR = pjoin(self.BASE_DIR, f"runs/{run_tag}")
+        self.IMAGE_DIR = pjoin(self.RUN_DIR, "images")
+        self.TEST_PPT = pjoin(
+            self.BASE_DIR, "resource/中文信息联合党支部2022年述职报告.pptx"
+        )
+        for the_dir in [self.RUN_DIR, self.IMAGE_DIR]:
+            if not pexists(the_dir):
                 os.makedirs(the_dir)
 
 
 pjoin = os.path.join
-base_config = Config()
+pexists = os.path.exists
+app_config = Config("test")
 
 if __name__ == "__main__":
     config = Config()
-    print(config.PPT_DIR)
+    print(config)

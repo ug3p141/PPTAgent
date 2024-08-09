@@ -7,44 +7,67 @@ import requests
 from pdf2image import convert_from_path
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from llms import functional_split
+from llms import long_model
 from model_utils import fid_score, get_cluster
 from presentation import Presentation, SlidePage
 from utils import app_config, pexists, pjoin
 
 
-class TemplateCluster:
+class TemplateInducter:
     # 至多八个layout
-    def __init__(self, prs: Presentation, output_dir: str):
+    def __init__(self, prs: Presentation):
         self.prs = prs
         self.layout_mapping = defaultdict(list)
+        output_dir = pjoin(app_config.RUN_DIR, "template_induct")
         self.slide_split_file = pjoin(output_dir, "slides_split.json")
         self.slide_cluster_file = pjoin(output_dir, "slides_cluster.json")
         self.similarity_file = pjoin(output_dir, "similarity.json")
+        self.template_pre = pjoin(output_dir, "template.pptx")
         self.template_pdf = pjoin(output_dir, "template.pdf")
         self.template_image_folder = pjoin(output_dir, "template_images")
 
+    # work 中主要写缓存思路吧
     def work(self):
-        if pexists(self.slide_cluster_file):
-            return json.load(open(self.template_file))
         if pexists(self.slide_split_file):
             self.slides_split = json.load(open(self.slide_split_file))
         else:
-            self.slides_split = functional_split(self.prs.to_html())
-        functional_slides = self.slides_split["Auxiliary Slides"]
-        content_slides_index = self.slides_split["Content Slides"]
+            self.slides_split = self.functional_split()
+            json.dump(self.slides_split, open(self.slide_split_file, "w"), indent=4)
+        content_slides_index = list(map(int, self.slides_split["content"]))
         content_slides = [
             slide
             for slide in self.prs.slides
             if slide.slide_idx in content_slides_index
         ]
-        similarity = self.calc_similarity(content_slides)
+        if pexists(self.similarity_file):
+            similarity = np.array(json.load(open(self.similarity_file)))
+        else:
+            similarity = self.calc_similarity(content_slides)
+            json.dump(similarity.tolist(), open(self.similarity_file, "w"), indent=4)
+        if pexists(self.slide_cluster_file):
+            return json.load(open(self.slide_cluster_file))
         content_cluster = self.layout_split(
             content_slides_index, content_slides, similarity
         )
-        slides_cluster = {"content": content_cluster, "functional": functional_slides}
-        json.dump(slides_cluster, open(self.slide_split_file, "w"), indent=4)
-        return slides_cluster
+        self.slides_cluster = {
+            "content": content_cluster,
+            "functional": self.slides_split["functional"],
+        }
+        json.dump(
+            self.slides_cluster,
+            open(self.slide_cluster_file, "w"),
+            indent=4,
+            ensure_ascii=False,
+        )
+        return self.slides_cluster
+
+    def functional_split(self):
+        function_split_prompt = open(
+            "prompts/template_induct/functional_split.txt"
+        ).read()
+        return long_model(
+            function_split_prompt + self.prs.to_html() + "Output:"
+        ).strip()
 
     def layout_split(
         self,
@@ -74,6 +97,9 @@ class TemplateCluster:
         # text class的类型标注
         return clusters
 
+        # textframe_tags = ["幻灯片标题", "小节标题", "标题", "固定文本"]
+        # background_tags = ["固定文本"]
+        # content layouts 的命名
         # layout_analyze_prompt = open("prompts/layout_analyze.txt").read()
         # layout_analyze_result = gemini(
         #     layout_analyze_prompt
@@ -97,8 +123,6 @@ class TemplateCluster:
     # 用来对具体元素进行识别
     # is background image的不figure在这一步不输出了吧，因为其实没有意义
     def calc_similarity(self, content_slides: list[SlidePage]):
-        if pexists(self.similarity_file):
-            return np.array(json.load(open(self.similarity_file)))
         template_pr = Presentation(
             content_slides,
             self.prs.slide_width,
@@ -106,17 +130,17 @@ class TemplateCluster:
             self.prs.source_file,
             len(content_slides),
         )
-        template_pr.save(f"{app_config.RUN_DIR}/template.pptx")
+        template_pr.save(self.template_pre)
         self.ppt_to_images(len(content_slides))
         similarity = fid_score(self.template_image_folder)
-        json.dump(similarity.tolist(), open(self.similarity_file, "w"), indent=4)
+
         return similarity
 
     @retry(
         wait=wait_fixed(10),
         stop=stop_after_attempt(6),
     )
-    def ppt_to_images(self, num_pages: int):
+    def ppt_to_images(self):
         if not pexists(self.template_pdf):
             response = requests.request(
                 "POST",
@@ -124,11 +148,7 @@ class TemplateCluster:
                 headers={
                     "Authorization": "Bearer pdf_live_wejPGyz2D4vyYKtvK7JgEKQ0rHCfT8QrEf2qFFYzvBv"
                 },
-                files={
-                    "file": open(
-                        "./resource/中文信息联合党支部2022年述职报告.pptx", "rb"
-                    )
-                },
+                files={"file": open(self.template_pre, "rb")},
                 data={"instructions": json.dumps({"parts": [{"file": "file"}]})},
                 stream=True,
             )
@@ -137,8 +157,7 @@ class TemplateCluster:
             with open("result.pdf", "wb") as fd:
                 for chunk in response.iter_content(chunk_size=8096):
                     fd.write(chunk)
-        if not pexists(self.template_image_folder):
-            os.mkdir(self.template_image_folder)
+        os.makedirs(self.template_image_folder, exist_ok=True)
         pages = convert_from_path(self.template_pdf, 224)
         for i, page in enumerate(pages):
             page.save(f"{self.template_image_folder}/page_{(i+1):04d}.jpg", "JPEG")
@@ -146,8 +165,4 @@ class TemplateCluster:
 
 if __name__ == "__main__":
     prs = Presentation.from_file(app_config.TEST_PPT)
-    mg = TemplateCluster(prs)
-    # slides_split = mg.functional_split()
-    # functional_slides = slides_split["Auxiliary Slides"]
-    # content_slides = slides_split["Content Slides"]
-    # 将content slides按照布局划分，不要给出bg image
+    mg = TemplateInducter(prs)

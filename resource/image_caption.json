@@ -1,0 +1,14 @@
+[
+    {
+        "resource/doc2ppt_images/fig.3.png": "The image is a slide deck from a research paper, detailing a method for generative modeling and its application to urban scene segmentation. The slide includes sections on introduction, methods, model analysis, and conclusions. It also includes qualitative examples of generated slide decks and quantitative results on performance metrics. The paper is by Izmailov et al. (2020) and Chen et al. (2020)."
+    },
+    {
+        "resource/doc2ppt_images/fig.2.png": "The image is a diagram illustrating the architecture of a system that reads a document and generates a slide deck in a hierarchical manner. The system consists of the following modules:\n\n1. **Document Reader (DR)**: Reads the document and outputs sentences and figures.\n2. **Progress Tracker (PT)**: Tracks the progress of the document reading.\n3. **Object Placer (OP)**: Places objects in the document.\n4. **Paraphraser (PAR)**: Paraphrases sentences and figures.\n\nThe flow of information is as follows:\n- The Document Reader (DR) processes the document and outputs sentences and figures.\n- The Progress Tracker (PT) monitors the reading progress.\n- The Object Placer (OP) places objects in the document.\n- The Paraphraser (PAR) paraphrases the sentences and figures.\n\nThe output of this system is a hierarchically structured slide deck, as shown in the example slides (slide 1, slide 2, and slide 3)."
+    },
+    {
+        "resource/doc2ppt_images/fig.4.png": "The bar chart titled \"Human Evaluation\" compares the performance of different methods in generating slides that closely match text and figures in ground-truth slides. The methods compared are Flat PT, Ours w/o PAR,TIM, and Ours. The scores range from 1 to 7, with higher scores indicating better performance. The chart shows that Ours w/o PAR,TIM and Ours methods have higher scores than Flat PT in all three categories (Text, Figure, and Text-Figure). Error bars indicate standard error, and significance tests (two-sample t-test, p < 0.05) show that the differences between methods are statistically significant."
+    },
+    {
+        "resource/doc2ppt_images/fig.1.png": "The image depicts a flowchart for the DOC2PPT system, which converts a document into a slide deck. The process involves two main components: the Document Reader and the Slide Generator. The Document Reader uses a Text Encoder and an Image Encoder to process the input document. The Slide Generator includes a Multimodal Summarizer, a Text Paraphraser, and a Layout Designer. The output is a slide deck that includes text, bullet points, and stylized layouts. The system addresses challenges in the vision-and-language domain, such as visual-semantic embedding and multimodal summarization."
+    }
+]
