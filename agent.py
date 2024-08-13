@@ -5,9 +5,11 @@
 # - 如果
 # - 或者简单一点不能增删只能改
 import json
+from copy import deepcopy
 
 from jinja2 import Template
 
+import apis
 from apis import API_TYPES, model_api
 from llms import long_model
 from presentation import Picture, Presentation
@@ -26,9 +28,10 @@ class PPTAgent:
         images: list[dict[str, str]],
         num_pages: int,
     ):
-        self.api = model_api
         self.presentation = presentation
-        self.slides_template = template
+        self.gen_prs = deepcopy(presentation)
+        self.gen_prs.slides = []
+        self.slide_templates = template
         self.markdown_str = markdown_str
         self.num_pages = num_pages
         self.images = images
@@ -37,7 +40,7 @@ class PPTAgent:
         self.slides_file = pjoin(output_dir, "slide_contents.json")
         self.outline_file = pjoin(output_dir, "slide_outline.json")
         self.slides_api_file = pjoin(output_dir, "slide_apis.json")
-        # img.unset = img.is_background
+        self.gen_prs_file = pjoin(output_dir, "generated_presentation.pptx")
 
     def work(self):
         if pexists(self.refined_doc):
@@ -47,6 +50,7 @@ class PPTAgent:
             json.dump(
                 self.doc_json, open(self.refined_doc, "w"), ensure_ascii=False, indent=4
             )
+
         if pexists(self.outline_file):
             self.outline = json.load(open(self.outline_file, "r"))
         else:
@@ -54,31 +58,27 @@ class PPTAgent:
             json.dump(
                 self.outline, open(self.outline_file, "w"), ensure_ascii=False, indent=4
             )
-        if pexists(self.slides_file):
-            self.slides_contents = json.load(open(self.slides_file, "r"))
-        else:
-            self.slides_contents = self.generate_slides()
-            json.dump(
-                self.slides_contents,
-                open(self.slides_file, "w"),
-                ensure_ascii=False,
-                indent=4,
-            )
-        self.set_content()
+
+        stylized_outline = ""
+        for slide_idx, slide_title in enumerate(self.outline):
+            slide = self.outline[slide_title]
+            stylized_outline += f"Slide {slide_idx+1}: {slide_title}\nDescription: {slide['description']}\nKeyPoints: {slide['metadata_keys']+ slide['subsection_keys']}\n\n"
+        self.stylized_outline = stylized_outline
+        long_model.set_plain()
+        self.generate_slides()
 
     def refine_doc(self):
         template = Template(open("prompts/agent/document_refine.txt").read())
         prompt = template.render(markdown_document=self.markdown_str)
         return long_model(prompt)
 
-    # outline这部还应该要加上图片
     def generate_outline(self):
         template = Template(open("prompts/agent/slide_outline.txt").read())
         prompt = template.render(
             num_pages=self.num_pages,
             functional_pages={
                 k: v.get("metadata", None)
-                for k, v in self.slides_template["functional"].items()
+                for k, v in self.slide_templates["functional"].items()
             },
             json_content=self.doc_json,
             images=self.images,
@@ -86,28 +86,49 @@ class PPTAgent:
         return long_model(prompt)
 
     def generate_slides(self):
-        template = Template(open("prompts/agent/slides_maker.txt").read())
-        prompt = template.render(
-            functional_types=list(self.slides_template["functional"].keys()),
-            number_of_slides=self.num_pages,
-            markdown_content=self.markdown_str,
-            image_list=str(self.images),
-        )
-        return long_model(prompt)
-
-    def verify(self):
-        pass
-
-    def execute(self):
-        pass
-
-    def set_content(self):
-        template = Template(open("prompts/agent/ppt_agent_content.txt").read())
+        content_template = Template(open("prompts/agent/content_replacing.txt").read())
+        layout_template = Template(open("prompts/agent/layout_adjust.txt").read())
         slide_apis = []
-        for slide in self.slides_contents:
-            template_id = self.slides_template[slide["type"]][slide["subtype"]][0]
-            slide_template = self.presentation.slides[int(template_id)]
-            if slide["type"] == "functional":
+        generated_slides = []
+        # 先把functional的做了，如果templates>1 ，则让模型自己选一个，否则直接用第一个
+        # 添加页码和n/m functional，帮助模型选择
+        for slide_idx, slide_title in enumerate(self.outline):
+            slide = self.outline[slide_title]
+            slide_content = f"Slide {slide_idx+1} {slide_title}\nSlide Description: {slide['description']}\nSlide Content: "
+            for key in slide["metadata_keys"]:
+                slide_content += f"{key}: {self.doc_json['metadata'][key]}\n"
+            for key in slide["subsection_keys"]:
+                for section in self.doc_json["sections"]:
+                    for subsection in section["subsections"]:
+                        if key in subsection:
+                            slide_content += f"SubSection {key}: {subsection[key]}\n"
+            if slide["images"]:
+                slide_content += "Images: "
+                for image_path in slide["images"]:
+                    slide_content += f"{image_path}: {self.images[image_path]}\n"
+            if slide_title in self.slide_templates["functional"]:
+                template_ids = self.slide_templates["functional"][slide_title]
+                apis.template_slides = [
+                    self.presentation.slides[int(i)] for i in template_ids["slides"]
+                ]
+                layout_prompt = layout_template.render(
+                    api_documentation=model_api.get_apis_docs(
+                        [API_TYPES.LAYOUT_ADJUST]
+                    ),
+                    template_html_code="\n".join(
+                        [
+                            f"Template {idx}\n---" + i.to_html()
+                            for idx, i in enumerate(apis.template_slides)
+                        ]
+                    ),
+                    slide_outline=self.stylized_outline,
+                    slide_content=slide_content,
+                    layout_usage_count=0,  # TODO 记录layout的使用次数
+                )
+                slide_apis.append(long_model(layout_prompt))
+                model_api.execute_apis(slide_apis[-1])
+                slide_template = apis.slide
+
                 shape_idxs = []
                 for shape in slide_template.shapes:
                     if isinstance(shape, Picture) and not shape.is_background:
@@ -118,27 +139,27 @@ class PPTAgent:
                                 shape_idxs.append(
                                     f"{shape.shape_idx}_{paragraph['idx']}"
                                 )
-                prompt = template.render(
-                    api_documentation=model_api.get_apis_docs(
-                        [API_TYPES.LAYOUT_ADJUST, API_TYPES.SET_CONTENT]
-                    ),
-                    slide_html_code=slide_template.to_html(),
-                    element_ids=shape_idxs,
-                    slide_content=str(slide),
+                content_prompt = content_template.render(
+                    api_documentation=model_api.get_apis_docs([API_TYPES.SET_CONTENT]),
+                    template_html_code=slide_template.to_html(),
+                    slide_outline=self.stylized_outline,
+                    slide_content=slide_content,
+                    layout_usage_count=0,
                 )
-                slide_apis.append(long_model(prompt))
-                # slide_apis = json.load(open(self.slides_api_file))
-                model_api.execute_apis(
-                    slide_template, slide_apis[-1]["layout_adjustment"]
-                )
-            else:
-                raise NotImplementedError
-            json.dump(
-                slide_apis,
-                open(self.slides_api_file, "w"),
-                ensure_ascii=False,
-                indent=4,
-            )
+                slide_apis.append(long_model(content_prompt))
+            model_api.execute_apis(slide_apis[-1])
+            generated_slides.append(apis.slide)
+            self.gen_prs.slides = generated_slides
+            self.gen_prs.save(self.gen_prs_file)
+            # TODO MLLM 作为agent对生成内容进行collate chat session
+            # TODO 目前存在问题：生成字数不匹配
+
+    def select_template(self):
+        pass
 
     def adjust_layout(self):
         pass
+
+
+if __name__ == "__main__":
+    prs = Presentation(app_config.TEST_PPT)

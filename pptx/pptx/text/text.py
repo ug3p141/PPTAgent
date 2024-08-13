@@ -2,6 +2,8 @@
 
 """Text-related objects such as TextFrame and Paragraph."""
 
+from lxml import etree
+
 from pptx.compat import to_unicode
 from pptx.dml.fill import FillFormat
 from pptx.enum.dml import MSO_FILL
@@ -12,8 +14,7 @@ from pptx.oxml.simpletypes import ST_TextWrappingType
 from pptx.shapes import Subshape
 from pptx.text.fonts import FontFiles
 from pptx.text.layout import TextFitter
-from pptx.util import Centipoints, Emu, lazyproperty, Pt
-from lxml import etree
+from pptx.util import Centipoints, Emu, Pt, lazyproperty
 
 
 class TextFrame(Subshape):
@@ -315,7 +316,7 @@ class Font(object):
         if self.fill.type != MSO_FILL.SOLID:
             self.fill.solid()
         try:
-            return self.fill.fore_color.rgb
+            return str(self.fill.fore_color.rgb)
         except:
             return None
 

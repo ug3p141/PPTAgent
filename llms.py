@@ -90,9 +90,7 @@ class Gemini:
                 "threshold": "BLOCK_NONE",
             },
         ]
-        self.generation_config = genai.GenerationConfig(
-            response_mime_type="application/json",  # response_schema=list[*DATACLASSES]
-        )
+        self.set_json()
         self.api_config = (
             [
                 "AIzaSyBks5-bQ96-uyhvIOCtoPToVqKIdl4szcQ",
@@ -104,6 +102,14 @@ class Gemini:
         )
         self._call_idx = random.randint(0, len(self.api_config[0]) - 1)
         self._chat = self.model.start_chat(history=[])
+
+    def set_json(self):
+        self.generation_config = genai.GenerationConfig(
+            response_mime_type="application/json",  # response_schema=list[*DATACLASSES]
+        )
+
+    def set_plain(self):
+        self.generation_config = genai.GenerationConfig()
 
     def prepare(self):
         self._call_idx = (self._call_idx + 1) % len(self.api_config[0])

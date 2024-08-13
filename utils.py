@@ -1,4 +1,3 @@
-import json
 import os
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -13,15 +12,11 @@ from pptx.shapes.group import GroupShape
 from pptx.util import Length
 
 
-def rgb2hex(rgb):
-    return "#{:02x}{:02x}{:02x}".format(rgb[0], rgb[1], rgb[2])
-
-
 def get_text_inlinestyle(para: dict):
     font = SimpleNamespace(**para["font"])
     font_size = f"font-size: {Length(font.size).pt}pt;" if font.size else ""
     font_family = f"font-family: {font.name};" if font.name else ""
-    font_color = f"color={rgb2hex(font.color)};" if font.color else ""
+    font_color = f"color={font.color};" if font.color else ""
     font_bold = "font-weight: bold;" if font.bold else ""
     return 'style="{}"'.format("".join([font_size, font_family, font_color, font_bold]))
 
@@ -183,7 +178,6 @@ class Config:
         self.BASE_DIR = os.curdir
         if run_tag is None:
             run_tag = datetime.now().strftime("%Y%m%d-%H:%M:%S")
-        # 存储生成的中间过程
         self.RUN_DIR = pjoin(self.BASE_DIR, f"runs/{run_tag}")
         self.IMAGE_DIR = pjoin(self.RUN_DIR, "images")
         self.TEST_PPT = pjoin(

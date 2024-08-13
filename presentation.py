@@ -1,8 +1,7 @@
 import re
+from copy import deepcopy
 
-from matplotlib.colors import rgb2hex
 from rich import print
-from typing_extensions import Type
 
 from pptx import Presentation as PPTXPre
 from pptx.chart.chart import Chart as PPTXChart
@@ -61,7 +60,6 @@ class TextFrame:
                     _Run(r, paragraph)
                     for r in parse_xml(paragraph._element.xml.replace("fld", "r")).r_lst
                 ]
-            # 只有fill属性懒得解析了
             content = object_to_dict(paragraph, exclude=["runs"])
             if len(runs) == 0:
                 data.append(content)
@@ -97,7 +95,7 @@ class TextFrame:
             run = p.add_run()  # default have no runs
             if font["color"] is not None:
                 run.font.fill.solid()
-                run.font.fill.fore_color.rgb = RGBColor(*font["color"])
+                run.font.fill.fore_color.rgb = RGBColor.from_string(font["color"])
             run.text = para["text"]
             dict_to_object(font, run.font, exclude=["color"])
         dict_to_object(self.style, tf)
@@ -114,7 +112,7 @@ class TextFrame:
                 bullets.clear()
             if para["bullet"] is None and para["text"]:
                 repr_list.append(
-                    f"<p {get_text_inlinestyle(para)} id={self.father_idx}_{para['idx']}>{para['text']}</p>"
+                    f"<p id='{self.father_idx}_{para['idx']}' {get_text_inlinestyle(para)}>{para['text']}</p>"
                 )
             elif para["text"]:
                 bullets.append(
@@ -122,6 +120,17 @@ class TextFrame:
                 )
             pre_bullet = para["bullet"]
         return "\n".join(repr_list)
+
+    def __eq__(self, __value: object) -> bool:
+        if not isinstance(__value, TextFrame):
+            return False
+        return (
+            self.is_textframe == __value.is_textframe
+            and self.style == __value.style
+            and self.data == __value.data
+            and self.father_idx == __value.father_idx
+            and self.text == __value.text
+        )
 
 
 class UnsupportedShape:
@@ -134,10 +143,8 @@ class UnsupportedShape:
         style: dict,
         text_frame: TextFrame,
     ):
-        # print(f"Unsupport Shape --- {shape.__class__}\n", object_to_dict(shape))
         assert not any([shape.has_chart, shape.has_table, shape.has_text_frame])
         obj = cls()
-        # obj.style = style
         obj.descr = ""
         return obj
 
@@ -146,6 +153,11 @@ class UnsupportedShape:
 
     def to_html(self) -> str:
         return ""
+
+    def __eq__(self, __value: object) -> bool:
+        if not isinstance(__value, UnsupportedShape):
+            return False
+        return True
 
 
 class ShapeElement:
@@ -190,7 +202,7 @@ class ShapeElement:
             slide_idx, shape_idx, shape, style, text_frame
         )
         # ? mask to enable pickling
-        obj.from_shape = shape
+        # obj.from_shape = shape
         if shape.is_placeholder:
             print("placeholder", obj)
         return obj
@@ -209,13 +221,13 @@ class ShapeElement:
 
     # style and shape idx eq
     def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, ShapeElement):
+        if not isinstance(__value, type(self)):
             return False
         return (
             self.shape_idx == __value.shape_idx
             and self.style == __value.style
-            # and self.data == __value.data
-            # and self.text_frame == __value.text_frame
+            and self.data == __value.data
+            and self.text_frame == __value.text_frame
         )
 
     def __repr__(self) -> str:
@@ -232,9 +244,8 @@ class ShapeElement:
         fill_dict = self.style["fill"]
         if fill_dict is None or "type" not in fill_dict:
             return ""
-        for key, value in fill_dict.items():
-            if "color" in key:
-                return f"background-color:{rgb2hex(value)}"
+        if "color" in fill_dict:
+            return f"background-color: #{fill_dict['color']};"
         return f"background-color:{fill_dict['type']};"
 
     @property
@@ -244,10 +255,9 @@ class ShapeElement:
             return ""
         border_style = f"; border-width: {line_dict['width'].pt}pt; border-style: {line_dict['dash_style']};"
         fill_dict = line_dict["fill"]
-        for key, value in fill_dict.items():
-            if "color" in key:
-                return f"border-color:{rgb2hex(value)}" + border_style
-        return f"border-color:{fill_dict['type']}" + border_style
+        if "color" in fill_dict:
+            return f"border-color: #{fill_dict['color']}" + border_style
+        return f"border-color: #{fill_dict['type']}" + border_style
 
     @property
     def inline_box(self):
@@ -340,7 +350,7 @@ class AutoShape(ShapeElement):
             self.style["fill"] = None
             for para in self.text_frame.data:
                 if "font" in para:
-                    para["font"]["color"] = (0, 0, 0)
+                    para["font"]["color"] = "000000"
         if self.data["is_line_nofill"]:
             shape.line.fill.background()
             self.style["line"] = None
@@ -370,7 +380,7 @@ class TextBox(ShapeElement):
         return super().build(slide, shape)
 
     def to_html(self) -> str:
-        return f"<article id='{self.shape_idx}' {self.inline_style}>\n{self.text_frame.to_html()}\n</article>"
+        return f"<text id='{self.shape_idx}' {self.inline_style}>\n{self.text_frame.to_html()}\n</text>"
 
 
 class Placeholder(ShapeElement):
@@ -416,7 +426,6 @@ class Picture(ShapeElement):
             "crop_top": shape.crop_top,
             "crop_left": shape.crop_left,
             "crop_right": shape.crop_right,
-            "auto_shape_type": shape.auto_shape_type,  # most are rectangles
         }
         with open(img_path, "wb") as f:
             f.write(shape.image.blob)
@@ -487,7 +496,6 @@ class GroupShape(ShapeElement):
         shapes = []
         for sub_shape in self.data:
             shapes.append(sub_shape.build(slide))
-            # super().build(slide, )
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}: {self.data}"
@@ -718,47 +726,31 @@ class Presentation:
         self.slide_height = slide_height
         self.num_pages = num_pages
         self.source_file = file_path
-        self.prs = PPTXPre(file_path)
-        self.prs.core_properties.last_modified_by = "OminiPreGen"
-        self.prs.core_properties.author += "OminiPreGen with: "
-        while len(self.prs.slides) != 0:
-            rId = self.prs.slides._sldIdLst[0].rId
-            self.prs.part.drop_rel(rId)
-            del self.prs.slides._sldIdLst[0]
 
     @classmethod
     def from_file(cls, file_path):
         prs = PPTXPre(file_path)
         slide_width = prs.slide_width
         slide_height = prs.slide_height
-        # TODO set slide range here
         slides = [
             SlidePage.from_slide(slide, i + 1, slide_width.pt, slide_height.pt)
-            for i, slide in enumerate(list(prs.slides)[:])
+            for i, slide in enumerate(list(prs.slides))
         ]
         num_pages = len(slides)
         return cls(slides, slide_width, slide_height, file_path, num_pages)
 
     def save(self, file_path, layout_only=False):
+        self.prs = PPTXPre(self.source_file)
+        self.prs.core_properties.last_modified_by = "OminiPreGen"
+        self.prs.core_properties.author += "OminiPreGen with: "
+        while len(self.prs.slides) != 0:
+            rId = self.prs.slides._sldIdLst[0].rId
+            self.prs.part.drop_rel(rId)
+            del self.prs.slides._sldIdLst[0]
         layout_mapping = {layout.name: layout for layout in self.prs.slide_layouts}
         for slide in self.slides:
             slide.build(self.prs, layout_mapping[slide.slide_layout_name], layout_only)
         self.prs.save(file_path)
-
-    def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, Presentation):
-            return False
-        slides_eq = True
-        for i, slide in enumerate(self.slides):
-            if not slide == __value.slides[i]:
-                slides_eq = False
-                break
-        return (
-            slides_eq
-            and self.slide_width == __value.slide_width
-            and self.slide_height == __value.slide_height
-            and self.num_pages == __value.num_pages
-        )
 
     def to_html(self, pages=None) -> str:
         if pages is None:
@@ -771,8 +763,18 @@ class Presentation:
             ]
         )
 
+    def __eq__(self, __value: object) -> bool:
+        if not isinstance(__value, Presentation):
+            return False
+        return (
+            self.slides == __value.slides
+            and self.slide_width == __value.slide_width
+            and self.slide_height == __value.slide_height
+            and self.num_pages == __value.num_pages
+        )
 
-SHAPECAST: dict[int, Type[ShapeElement]] = {
+
+SHAPECAST: dict[int, ShapeElement] = {
     MSO_SHAPE_TYPE.AUTO_SHAPE: AutoShape,
     MSO_SHAPE_TYPE.PLACEHOLDER: Placeholder,
     MSO_SHAPE_TYPE.PICTURE: Picture,
@@ -784,9 +786,12 @@ SHAPECAST: dict[int, Type[ShapeElement]] = {
 
 
 if __name__ == "__main__":
-    Presentation.from_file(
-        pjoin(
-            app_config.PPT_DIR,
-            "中文信息联合党支部2022年述职报告.pptx",
-        )
-    ).save(pjoin(app_config.GEN_PPT_DIR, "ppt_handlers_test.pptx"))
+    prs = Presentation.from_file(
+        app_config.TEST_PPT,
+    )
+    copied_prs = deepcopy(prs)
+    for i in range(len(copied_prs.slides)):
+        for j in range(len(copied_prs.slides[i].shapes)):
+            if prs.slides[i].shapes[j] != copied_prs.slides[i].shapes[j]:
+                pass
+    copied_prs.save(pjoin(app_config.RUN_DIR, "ppt_handlers.pptx"))

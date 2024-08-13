@@ -78,9 +78,10 @@ class TemplateInducter:
         content_split = defaultdict(list)
         for slide in content_slides:
             # TODO image和textframe 的数量 modality = json.dumps(slide.get_content_types())
-            layout_name = (
-                f"{slide.slide_layout_name}:({','.join(slide.get_content_types())})"
-            )
+            content_types = slide.get_content_types()
+            layout_name = slide.slide_layout_name
+            if content_types:
+                layout_name += f": ({','.join(content_types)})"
             content_split[layout_name].append(slide.slide_idx)
 
         clusters = dict()
