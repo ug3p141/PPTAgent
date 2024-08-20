@@ -61,7 +61,9 @@ class InternVL(metaclass=SingletonMeta):
             self.generation_config,
         )
 
-    def batch_chat(self, pixel_values: torch.Tensor, prompt: str):
+    def batch_chat(
+        self, pixel_values: torch.Tensor, prompt: str, num_patches_list: list
+    ):
         if not self._initialized:
             self._initialize()
         return self.model.batch_chat(
@@ -69,6 +71,7 @@ class InternVL(metaclass=SingletonMeta):
             pixel_values.to(torch.bfloat16).cuda(),
             prompt,
             self.generation_config,
+            num_patches_list,
         )
 
 
@@ -201,17 +204,19 @@ long_model = gemini
 api_model = gpt4o
 
 
-def caption_image(image_files: list[str], batch_size: int = 1):
+def caption_image(image_files: list[str], batchsize: int = 1):
     pixel_values = []
     prompt = open("prompts/image_label/caption.txt").read()
     results = []
     for idx, image_file in enumerate(image_files):
         _, pixel_value = load_image(image_file)
         pixel_values.append(pixel_value)
-
-        if (idx + 1) % batch_size == 0 or (idx + 1) == len(image_files):
+        if (idx + 1) % batchsize == 0 or (idx + 1) == len(image_files):
+            num_patches_list = [pixel_value.size(0) for pixel_value in pixel_values]
             batch_pixel_values = torch.cat(pixel_values).to(torch.bfloat16).cuda()
-            batch_results = vl_model.batch_chat(batch_pixel_values, prompt)
+            batch_results = vl_model.batch_chat(
+                batch_pixel_values, prompt, num_patches_list
+            )
             results.extend(batch_results)
             pixel_values = []  # 清空批次列表以准备下一个批次
 

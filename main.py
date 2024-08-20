@@ -15,20 +15,20 @@ def ppt_gen(pdf_markdown: str, ppt_file: str, images_dir: str, num_pages: int = 
         (pdf_markdown + ppt_file + images_dir + str(num_pages)).encode()
     ).hexdigest()
     print(f"Session ID: {session_id}")
-    utils.app_config = utils.Config(session_id)
+    utils.app_config.set_session(session_id)
     # 1. 解析ppt
     presentation = Presentation.from_file(ppt_file)
     if len(presentation.error_history) > len(presentation.slides) // 3:
         raise ValueError(
             f"Too many errors (>25%) in the ppt: {presentation.error_history}"
         )
-    if len(presentation.slides) < 6 or len(presentation.slides) > 50:
-        raise ValueError("The number of effective slides should be between 6 and 50.")
+    if len(presentation.slides) < 6 or len(presentation.slides) > 100:
+        raise ValueError("The number of effective slides should be between 6 and 100.")
 
     # 2. 图片标注
     # images = {pjoin(images_dir,k): caption_image(pjoin(images_dir,k)) for k in os.listdir(images_dir)}
     images = json.load(open("resource/image_caption.json"))
-    ImageLabler(presentation).work()
+    ImageLabler(presentation, batchsize=8).work()
 
     # 3. 模板生成
     slide_cluster = TemplateInducter(presentation).work()

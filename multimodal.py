@@ -9,11 +9,12 @@ from utils import app_config, pjoin, print
 
 
 class ImageLabler:
-    def __init__(self, presentation: Presentation, batchsize: int = 8):
+    def __init__(self, presentation: Presentation, batchsize: int):
         self.presentation = presentation
         self.slide_area = presentation.slide_width.pt * presentation.slide_height.pt
         self.image_stats = {}
         self.out_file = pjoin(app_config.RUN_DIR, "image_stats.json")
+        self.batchsize = batchsize
 
     def work(self):
         if os.path.exists(self.out_file):
@@ -35,7 +36,7 @@ class ImageLabler:
                 shape.is_background = "background" == stats["result"]["label"]
 
     def caption_images(self):
-        captions = caption_image(self.image_stats.keys(), batchsize=8)
+        captions = caption_image(self.image_stats.keys(), batchsize=self.batchsize)
         for image_path, caption in captions.items():
             self.image_stats[image_path]["caption"] = caption
 

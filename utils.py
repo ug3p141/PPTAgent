@@ -180,13 +180,15 @@ def dict_to_object(dict: dict, obj: object, exclude=None):
 
 
 class Config:
-    def __init__(self, run_tag=None):
-        if run_tag is None:
-            run_tag = datetime.now().strftime("%Y%m%d-%H:%M:%S")
-        self.MASTER_DIR = "./resource/masters/"
-        self.TEST_PPT = "./resource/陆垚杰_博士论文答辩PPT_0530.pptx"
-        self.RUN_DIR = f"./runs/{run_tag}"
+    def __init__(self, session_id=None):
+        if session_id is not None:
+            self.set_session(session_id)
+
+    def set_session(self, session_id):
+        self.session_id = session_id
+        self.RUN_DIR = f"./runs/{session_id}"
         self.IMAGE_DIR = pjoin(self.RUN_DIR, "images")
+        self.TEST_PPT = "./resource/陆垚杰_博士论文答辩PPT_0530.pptx"
         for the_dir in [self.RUN_DIR, self.IMAGE_DIR]:
             if not pexists(the_dir):
                 os.makedirs(the_dir)
