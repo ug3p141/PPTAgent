@@ -1,18 +1,17 @@
+import base64
 import json
 import random
-from copy import deepcopy
 from time import sleep, time
 
 import google.generativeai as genai
 import PIL
-import requests
 import torch
 from jinja2 import Template
-from tenacity import retry, stop_after_attempt, wait_fixed
+from openai import OpenAI
+from tenacity import retry, stop_after_attempt, wait_exponential, wait_fixed
 from transformers import AutoModel, AutoTokenizer
 
 from model_utils import load_image
-from presentation import Presentation
 from utils import print
 
 
@@ -65,11 +64,6 @@ class InternVL(metaclass=SingletonMeta):
 
 class Gemini:
     def __init__(self, time_limit: int = 60) -> None:
-        # proxy = "http://124.16.138.148:7890"
-        # os.environ["https_proxy"] = proxy
-        # os.environ["http_proxy"] = proxy
-        # os.environ["HTTP_PROXY"] = proxy
-        # os.environ["HTTPS_PROXY"] = proxy
         self.time_limit = time_limit
         self.model = genai.GenerativeModel("gemini-1.5-pro-latest")
         self.safety_settings = [
@@ -90,7 +84,6 @@ class Gemini:
                 "threshold": "BLOCK_NONE",
             },
         ]
-        self.set_json()
         self.api_config = (
             [
                 "AIzaSyBks5-bQ96-uyhvIOCtoPToVqKIdl4szcQ",
@@ -101,15 +94,10 @@ class Gemini:
             [0, 0, 0, 0],
         )
         self._call_idx = random.randint(0, len(self.api_config[0]) - 1)
-        self._chat = self.model.start_chat(history=[])
-
-    def set_json(self):
-        self.generation_config = genai.GenerationConfig(
-            response_mime_type="application/json",  # response_schema=list[*DATACLASSES]
-        )
-
-    def set_plain(self):
         self.generation_config = genai.GenerationConfig()
+
+    def start_chart(self):
+        self._chat = self.model.start_chat(history=[])
 
     def prepare(self):
         self._call_idx = (self._call_idx + 1) % len(self.api_config[0])
@@ -124,7 +112,13 @@ class Gemini:
         wait=wait_fixed(10),
         stop=stop_after_attempt(6),
     )
-    def __call__(self, content: str, image_file: str = None) -> str:
+    def __call__(
+        self, content: str, image_file: str = None, use_json: bool = True
+    ) -> dict:
+        if use_json:
+            self.generation_config.response_mime_type = "application/json"
+        else:
+            self.generation_config.response_mime_type = "text/plain"
         self.prepare()
         if image_file is not None:
             content = [content, PIL.Image.open(image_file)]
@@ -133,7 +127,10 @@ class Gemini:
             safety_settings=self.safety_settings,
             generation_config=self.generation_config,
         )
-        return json.loads(response.text.strip())
+        if use_json:
+            return json.loads(response.text.strip())
+        else:
+            return response.text.strip()
 
     def chat(self, content: str, image_file: str = None) -> str:
         self.prepare()
@@ -143,33 +140,55 @@ class Gemini:
         return json.loads(response.text.strip())
 
 
-class QWEN2:
-    def __init__(self) -> None:
-        self.api = "http://124.16.138.147:7819/v1/chat/completions"
-        self.headers = {"Content-Type": "application/json"}
-        self.template_data = {
-            "model": "Qwen2-72B-Instruct-GPTQ-Int4",
-            "temperature": 0.0,
-            "max_tokens": 10240,
-            "stream": False,
-        }
+class OPENAI:
+    def __init__(self, model: str = "gpt-4o-2024-08-06") -> None:
+        self.client = OpenAI()
+        self.model = model
 
-    def __call__(self, content: str) -> str:
-        data = deepcopy(self.template_data) | {
-            "messages": [{"role": "user", "content": content}]
-        }
-        response = requests.post(self.api, headers=self.headers, data=json.dumps(data))
-        assert response.status_code == 200, response.text
-        return response.json()["choices"][0]["message"]["content"]
+    @retry(
+        wait=wait_exponential(min=1, max=8),
+        stop=stop_after_attempt(3),
+    )
+    def __call__(
+        self,
+        content: str,
+        image_file: str = None,
+        system_message: str = None,
+        chat_history: list = None,
+    ) -> dict:
+        messages = [{"role": "user", "content": [{"type": "text", "text": content}]}]
+        if chat_history is not None:
+            messages = chat_history + messages
+        elif system_message is not None:
+            messages.insert(
+                0,
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": system_message}],
+                },
+            )
+        if image_file is not None:
+            with open(image_file, "rb") as image:
+                messages[-1]["content"].append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64.b64encode(image.read()).decode('utf-8')}"
+                        },
+                    }
+                )
+        completion = self.client.chat.completions.create(
+            model=self.model, messages=messages
+        )
+        return completion["choices"][0]["message"]
 
-    # 给个markdown的example吧
 
-
-qwen = QWEN2()
 gemini = Gemini()
 intern = InternVL()
-vl_model = gemini
+gpt4o = OPENAI()
+vl_model = intern
 long_model = gemini
+api_model = gpt4o
 
 
 def caption_image(image_file: str):
@@ -216,4 +235,4 @@ if __name__ == "__main__":
     # print(qwen("你是谁"))
     gemini = Gemini()
     gemini.chat("小红是小明的爸爸")
-    print(gemini.chat("小红是谁"))
+    print(gemini.chat("小红和小明的关系是什么"))

@@ -1,0 +1,25 @@
+Your task is to analyze multiple provided HTML page layouts and determine which one is the most suitable for the given content. The content includes a mix of text and images, and the chosen layout must effectively convey the message while maintaining a logical flow and aesthetic consistency.
+Analyze the Content:
+   - Review the provided content, paying close attention to its structure, key points, and the relationships between different sections.
+   - Identify whether the content is comparative (e.g., comparing objects) or descriptive (e.g., explaining a concept).
+
+Evaluate Layouts:
+   - Review each HTML page layout provided. For each layout, consider the following factors:
+     - Text Similarity: Assess whether the original text on the page is similar in style, tone, or structure to the provided content. The more aligned the text styles, the better the content will integrate into the layout.
+     - Content Fit: Check if the content (text, images, etc.) can be appropriately arranged within the layout without overcrowding or leaving too much empty space.
+	 - Image Compatibility:
+	    • Compare the number of images in the provided content to the number the layout is designed to support. Ensure that the images in the content can be placed without disrupting the page’s visual balance.
+	    • Image Type: Review the types of images in the content (e.g., tables, charts, or pictures) and prioritize layouts that support similar image types and quantities. Matching image types should take precedence over matching image quantities.
+
+Example Output:
+Layout-1
+
+Input:
+HTML Templates Pages:
+{{ template_html_code }}
+Slide Outline:
+{{ slide_outline }}
+Slide Content:
+{{ slide_content }}
+
+Output:

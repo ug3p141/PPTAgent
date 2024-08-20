@@ -4,12 +4,16 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from lxml import etree
-from rich import print
-
 from pptx.dml.fill import _NoFill, _NoneFill
 from pptx.shapes.base import BaseShape
 from pptx.shapes.group import GroupShape
 from pptx.util import Length
+from rich import print
+
+
+def set_proxy(proxy_url: str):
+    os.environ["http_proxy"] = proxy_url
+    os.environ["https_proxy"] = proxy_url
 
 
 def get_text_inlinestyle(para: dict):
@@ -28,7 +32,7 @@ def extract_fill(shape: BaseShape):
         "fill_xml": shape.fill._xPr.xml,
     } | {k: v for k, v in object_to_dict(shape.fill).items() if "color" in k}
     if not isinstance(shape.fill._fill, (_NoneFill, _NoFill)):
-        fill_dict["type"] = shape.fill.type._member_name.lower()
+        fill_dict["type"] = shape.fill.type.name.lower()
     return fill_dict
 
 
@@ -175,14 +179,12 @@ def dict_to_object(dict: dict, obj: object, exclude=None):
 
 class Config:
     def __init__(self, run_tag=None):
-        self.BASE_DIR = os.curdir
         if run_tag is None:
             run_tag = datetime.now().strftime("%Y%m%d-%H:%M:%S")
-        self.RUN_DIR = pjoin(self.BASE_DIR, f"runs/{run_tag}")
+        self.MASTER_DIR = "./resource/masters/"
+        self.TEST_PPT = "./resource/中文信息联合党支部2022年述职报告.pptx"
+        self.RUN_DIR = f"./runs/{run_tag}"
         self.IMAGE_DIR = pjoin(self.RUN_DIR, "images")
-        self.TEST_PPT = pjoin(
-            self.BASE_DIR, "resource/中文信息联合党支部2022年述职报告.pptx"
-        )
         for the_dir in [self.RUN_DIR, self.IMAGE_DIR]:
             if not pexists(the_dir):
                 os.makedirs(the_dir)

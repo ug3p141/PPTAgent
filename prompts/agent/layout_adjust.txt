@@ -1,35 +1,27 @@
-You are an expert-level web developer with 20 years of experience specializing in dynamic content integration and layout management using APIs, particularly focused on minimizing cloning operations and maintaining layout consistency.
-
 Task Objective:
-Your task is to select the most suitable HTML layout from the provided templates based on the given slide outline, reference content, current slide number, and current layout usage count. Your goal is to minimize cloning operations and ensure the layout meets the expected visual structure.
+Your task is to select the most suitable HTML layout from the provided templates based on the given slide outline, reference content, current slide number
+Your goal is to minimize cloning operations and ensure the layout meets the expected visual structure.
+Text elements will subsequently be replaced with content that matches the same number of lines and characters.
 
- Task Instructions:
+Task Instructions:
 
 1. Layout Selection:
    - Analyze the provided HTML templates and select the one that best fits the current slide layout requirements.
    - Prioritize layouts that require minimal or no cloning operations.
-   - Remove any unnecessary elements to ensure the layout is coherent with the content.
 
 2. Layout Adjustment:
    - Once you have selected the appropriate template, ensure the structure of the layout can accommodate the elements described in the slide outline and reference content.
    - Focus on ensuring the elements have the correct layout without changing their content.
 
  Additional Notes:
-- When cloning elements, use the `clone_shape` API and adjust the `shape_bounds` to ensure the new element has appropriate positioning and size.
+- When cloning elements, carefully adjust the `shape_bounds` to ensure the new element has appropriate positioning and size.
 - Prioritize cloning the following types of elements:
   1. Grouped elements (e.g., `<li>` tags).
   2. Repetitive or similar elements (same or similar styles, differing only in position).
   3. Elements that added or deleted among the provided templates.
 - Only use the provided APIs for operations, and do not modify the content of the elements.
 
- Input:
-- Available API and its documentation.
-- HTML template pages.
-- Slide outline and reference content.
-- Current slide number and current layout usage count.
-
- Example Output:
-# Choose Sample Page 1 as the base page and delete element 3
+Example Output:
 select_template(1)
 del_shape('3')
 
@@ -43,5 +35,4 @@ Slide Outline:
 {{ slide_outline }}
 Slide Content:
 {{ slide_content }}
-Current Layout Usage Count: {{ layout_usage_count }}
 Output:

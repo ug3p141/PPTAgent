@@ -39,6 +39,7 @@ class TemplateInducter:
             for slide in self.prs.slides
             if slide.slide_idx in content_slides_index
         ]
+        # TODO 每个cluster最多只接受3个slides和至多的cluster
         if pexists(self.similarity_file):
             similarity = np.array(json.load(open(self.similarity_file)))
         else:
@@ -77,11 +78,10 @@ class TemplateInducter:
     ):
         content_split = defaultdict(list)
         for slide in content_slides:
-            # TODO image和textframe 的数量 modality = json.dumps(slide.get_content_types())
             content_types = slide.get_content_types()
             layout_name = slide.slide_layout_name
             if content_types:
-                layout_name += f": ({','.join(content_types)})"
+                layout_name += f": ({', '.join(content_types)})"
             content_split[layout_name].append(slide.slide_idx)
 
         clusters = dict()

@@ -1,17 +1,24 @@
+import hashlib
 import json
 import os
 
+import utils
 from agent import PPTAgent
 from llms import caption_image
 from multimodal import ImageLabler
-from presentation import Presentation
+from presentation import ERR_SHAPE_MSG, Presentation
 from template_inducter import TemplateInducter
-from utils import app_config
 
 
-def ppt_gen(pdf_markdown: str, ppt_file: str, images_dir: str, num_pages: int):
+def ppt_gen(pdf_markdown: str, ppt_file: str, images_dir: str, num_pages: int = 8):
+    # session_id = hashlib.md5((pdf_markdown+ppt_file+images_dir+str(num_pages)).encode()).hexdigest()
+    # print(f"Session ID: {session_id}")
+    # utils.app_config = utils.Config(session_id)
     # 1. 解析ppt
-    presentation = Presentation.from_file(ppt_file)
+    try:
+        presentation = Presentation.from_file(ppt_file)
+    except:
+        return ERR_SHAPE_MSG
 
     # 2. 图片标注
     # images = {pjoin(images_dir,k): caption_image(pjoin(images_dir,k)) for k in os.listdir(images_dir)}
@@ -26,9 +33,9 @@ def ppt_gen(pdf_markdown: str, ppt_file: str, images_dir: str, num_pages: int):
 
 
 if __name__ == "__main__":
+    utils.set_proxy("http://124.16.138.148:7890")
     ppt_gen(
         open("resource/DOC2PPT.md").read(),
-        app_config.TEST_PPT,
-        "data/readme/img/468319",
-        5,
+        utils.app_config.TEST_PPT,
+        "resource/doc2ppt_images",
     )

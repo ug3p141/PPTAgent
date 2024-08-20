@@ -5,7 +5,7 @@ from enum import Enum
 
 from jinja2 import Template
 
-from llms import long_model
+from llms import api_model
 from presentation import Picture, SlidePage
 
 slide: SlidePage = None
@@ -13,7 +13,6 @@ template_slides: list[SlidePage] = []
 # 在重新绑定变量名与全局变量时需要写global声明，否则不需要
 
 
-# 最好能返回traceback
 class ModelAPI:
 
     def __init__(self, local_vars: dict[str, list[callable]], terminate_times: int):
@@ -21,6 +20,7 @@ class ModelAPI:
         self.local_vars = {func.__name__: func for func in sum(local_vars.values(), [])}
         self.correct_template = Template(open("prompts/code_feedback.txt").read())
         self.terminate_times = terminate_times
+        self.history = []
 
     def get_apis_docs(self, op_types: list[str]):
         return "\n".join([self._api_doc(op_type) for op_type in op_types])
@@ -41,13 +41,14 @@ class ModelAPI:
             api_doc.append(f"{signature}\n\t{doc}")
         return "\n\n".join(api_doc)
 
-    # TODO 加个纠错的功能，传入prompt和原答案，给模型传递（prompt，anwser，traceback）
     def execute_apis(self, prompt: str, apis: str):
+        global slide, template_slides
         lines = apis.strip().split("\n")
         code_traces = []
         err_time = 0
         line_idx = 0
         backup_state = (deepcopy(slide), deepcopy(template_slides))
+        self.history.append({"prompt": prompt, "apis": apis})
         while line_idx < len(lines):
             line = lines[line_idx]
             if line.startswith("#") or line.startswith("`") or not line.strip():
@@ -63,18 +64,18 @@ class ModelAPI:
                 code_traces.append(error_message)
                 api_lines = (
                     "\n".join(lines[:line_idx])
-                    + "--> Error Line: "
-                    + line
-                    + "\n"
+                    + f"\n--> Error Line: {line}\n"
                     + "\n".join(lines[line_idx:])
                 )
-                slide, template_slides = backup_state
+                slide, template_slides = deepcopy(backup_state)
                 prompt = self.correct_template.render(
                     previous_task_prompt=prompt,
                     error_message=error_message,
                     faulty_api_sequence=api_lines,
                 )
-                lines = long_model(prompt).strip().split("\n")
+                lines = api_model(prompt).strip().split("\n")
+                line_idx = 0
+                self.history.append({"prompt": prompt, "apis": apis})
 
         assert err_time < self.terminate_times, "\n".join(code_traces)
         return code_traces

@@ -1,7 +1,6 @@
+import os
 import re
 from copy import deepcopy
-
-from rich import print
 
 from pptx import Presentation as PPTXPre
 from pptx.chart.chart import Chart as PPTXChart
@@ -11,12 +10,15 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.oxml import parse_xml
 from pptx.shapes.autoshape import Shape as PPTXAutoShape
 from pptx.shapes.base import BaseShape
+from pptx.shapes.graphfrm import GraphicFrame
 from pptx.shapes.group import GroupShape as PPTXGroupShape
 from pptx.shapes.picture import Picture as PPTXPicture
-from pptx.shapes.placeholder import SlidePlaceholder
+from pptx.shapes.placeholder import PlaceholderPicture, SlidePlaceholder
 from pptx.slide import Slide as PPTXSlide
 from pptx.table import Table
 from pptx.text.text import _Run
+from rich import print
+
 from utils import (
     app_config,
     apply_fill,
@@ -27,6 +29,8 @@ from utils import (
     parse_groupshape,
     pjoin,
 )
+
+ERR_SHAPE_MSG = None
 
 
 # set element id
@@ -66,7 +70,10 @@ class TextFrame:
                 continue
             runs_ronts = {run.font: 0 for run in runs}
             for run in runs:
-                runs_ronts[run.font] += len(run.text)
+                try:
+                    runs_ronts[run.font] += len(run.text)
+                except:
+                    pass
             content["font"] = object_to_dict(max(runs_ronts, key=runs_ronts.get))
             if content["font"]["name"] == "+mj-ea":
                 content["font"]["name"] = "宋体"
@@ -133,33 +140,6 @@ class TextFrame:
         )
 
 
-class UnsupportedShape:
-    @classmethod
-    def from_shape(
-        cls,
-        slide_idx: int,
-        shape_idx: int,
-        shape: BaseShape,
-        style: dict,
-        text_frame: TextFrame,
-    ):
-        assert not any([shape.has_chart, shape.has_table, shape.has_text_frame])
-        obj = cls()
-        obj.descr = ""
-        return obj
-
-    def build(self, slide: PPTXSlide):
-        pass
-
-    def to_html(self) -> str:
-        return ""
-
-    def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, UnsupportedShape):
-            return False
-        return True
-
-
 class ShapeElement:
     def __init__(
         self,
@@ -203,8 +183,6 @@ class ShapeElement:
         )
         # ? mask to enable pickling
         # obj.from_shape = shape
-        if shape.is_placeholder:
-            print("placeholder", obj)
         return obj
 
     def build(self, slide, shape):
@@ -323,6 +301,38 @@ class ShapeElement:
             return 0  # 没有交集
 
 
+class UnsupportedShape(ShapeElement):
+    @classmethod
+    def from_shape(
+        cls,
+        slide_idx: int,
+        shape_idx: int,
+        shape: BaseShape,
+        style: dict,
+        text_frame: TextFrame,
+    ):
+        # freeform 类型
+        assert shape.shape_type == MSO_SHAPE_TYPE.FREEFORM or not any(
+            [shape.has_chart, shape.has_table, shape.has_text_frame]
+        )
+        print(shape)
+        obj = cls(slide_idx, shape_idx, style, None, text_frame)
+        obj.descr = ""
+        return obj
+
+    def build(self, slide: PPTXSlide):
+        pass
+
+    def to_html(self) -> str:
+        return ""
+
+    def __eq__(self, __value: object) -> bool:
+        if not isinstance(__value, UnsupportedShape):
+            return False
+        return True
+
+
+# TODO 直接删除shape type 为line的形状
 class AutoShape(ShapeElement):
     @classmethod
     def from_shape(
@@ -393,19 +403,29 @@ class Placeholder(ShapeElement):
         style: dict,
         text_frame: TextFrame,
     ):
-        style |= {
-            "placeholder_type": shape.placeholder_format.type,
-        }
-        if not shape.has_text_frame or shape.has_chart or shape.has_table:
-            print(f"Unsupported Shape: {shape}")
-        data = []
-        return cls(slide_idx, shape_idx, style, data, text_frame)
+        assert (
+            sum(
+                [
+                    shape.has_text_frame,
+                    shape.has_chart,
+                    shape.has_table,
+                    isinstance(shape, PlaceholderPicture),
+                ]
+            )
+            == 1
+        ), "placeholder should have only one type"
+        if isinstance(shape, PlaceholderPicture):
+            return Picture.from_shape(slide_idx, shape_idx, shape, style, text_frame)
+        elif shape.has_text_frame:
+            return TextBox.from_shape(slide_idx, shape_idx, shape, style, text_frame)
+        elif shape.has_chart:
+            return Chart.from_shape(slide_idx, shape_idx, shape, style, text_frame)
+        elif shape.has_table:
+            return Table.from_shape(slide_idx, shape_idx, shape, style, text_frame)
 
-    def build(self, slide: PPTXSlide):
-        pass
-        # super().build(slide, self.shape)
 
-
+# 缩放高度，缩放宽度
+# placeholder的格式获取不到
 class Picture(ShapeElement):
     @classmethod
     def from_shape(
@@ -419,7 +439,7 @@ class Picture(ShapeElement):
         img_name = re.sub(r"[\/\0]", "_", shape.name)
         img_path = pjoin(
             app_config.IMAGE_DIR,
-            f"{img_name}.{shape.image.ext}",
+            f"{slide_idx}_{img_name}.{shape.image.ext}",
         )
         style["img_style"] = {
             "crop_bottom": shape.crop_bottom,
@@ -548,6 +568,7 @@ class Chart(ShapeElement):
 
 
 # 目前的问题，rows和cols的宽度或高度获取不到
+# chart 和table的caption 通过对html的llm解析来获取
 class Table(ShapeElement):
     @classmethod
     def from_shape(
@@ -581,9 +602,24 @@ class Table(ShapeElement):
         self.text_frame.build(graphic_frame)
 
 
-# template包含哪些东西，如何定义一个template
-# 1. template pics：例如banner、background pic、logo，此部分只需要手动识别插入以及build
-# 2. cloneable shapes：例如listed text, parallel text等，此部分需要手动安排布局
+# TODO  GraphicFrame and connector
+class GraphicFrame(ShapeElement):
+    @classmethod
+    def from_shape(
+        cls,
+        slide_idx: int,
+        shape_idx: int,
+        shape: GraphicFrame,
+        style: dict,
+        text_frame: TextFrame,
+    ):
+        pass
+
+    def build(self, slide, shape):
+        return super().build(slide, shape)
+
+
+# function_args = json.loads(response_message.tool_calls[0].function.arguments)
 class SlidePage:
     def __init__(
         self,
@@ -611,10 +647,16 @@ class SlidePage:
         slide_width: int,
         slide_height: int,
     ):
-        shapes = [
-            ShapeElement.from_shape(slide_idx, i, shape)
-            for i, shape in enumerate(slide.shapes)
-        ]
+        global ERR_SHAPE_MSG
+        shapes = []
+        for i, shape in enumerate(slide.shapes):
+            try:
+                shapes.append(ShapeElement.from_shape(slide_idx, i, shape))
+            except Exception as e:
+                ERR_SHAPE_MSG = (
+                    f"Error in slide {slide_idx}, shape-{i} {type(shape).__name__}: {e}"
+                )
+                raise NotImplementedError(ERR_SHAPE_MSG)
         slide_layout_name = slide.slide_layout.name if slide.slide_layout else None
         slide_title = slide.shapes.title.text if slide.shapes.title else None
         slide_notes = (
@@ -674,22 +716,6 @@ class SlidePage:
                 content_types.union(self.get_content_types(shape.data))
         return sorted(list(content_types))
 
-    # def get_content_types(self, shapes: list[ShapeElement] = None, content_types: dict=None):
-    #     if content_types is None:
-    #         content_types = defaultdict(int)
-    #     if shapes is None:
-    #         shapes = self.shapes
-    #     for shape in shapes:
-    #         if isinstance(shape, Chart):
-    #             content_types["Chart"]+=1
-    #         elif isinstance(shape, Table):
-    #             content_types["Table"]
-    #         elif isinstance(shape, Picture) and not shape.is_background:
-    #             content_types["Picture"]
-    #         elif isinstance(shape, GroupShape):
-    #             self.get_content_types(shape.data, content_types)
-    #     return content_types
-
     def __eq__(self, __value) -> bool:
         if not isinstance(__value, SlidePage):
             return False
@@ -698,8 +724,6 @@ class SlidePage:
             and self.slide_layout_name == __value.slide_layout_name
         )
 
-    # lang style width height
-    # TODO 把layout的信息加到这里来
     def to_html(self) -> str:
         return "".join(
             [
@@ -734,7 +758,7 @@ class Presentation:
         slide_height = prs.slide_height
         slides = [
             SlidePage.from_slide(slide, i + 1, slide_width.pt, slide_height.pt)
-            for i, slide in enumerate(list(prs.slides))
+            for i, slide in enumerate(list(prs.slides)[:])  # ? page range
         ]
         num_pages = len(slides)
         return cls(slides, slide_width, slide_height, file_path, num_pages)
@@ -782,16 +806,29 @@ SHAPECAST: dict[int, ShapeElement] = {
     MSO_SHAPE_TYPE.CHART: Chart,
     MSO_SHAPE_TYPE.TABLE: Table,
     MSO_SHAPE_TYPE.TEXT_BOX: TextBox,
+    # MSO_SHAPE_TYPE.GR
 }
 
 
+# 使用生成后的pptx作为测试模板，这样可以保证内容一致性
 if __name__ == "__main__":
-    prs = Presentation.from_file(
-        app_config.TEST_PPT,
+    Presentation.from_file(app_config.TEST_PPT).save(
+        pjoin(app_config.RUN_DIR, "test.pptx")
     )
-    copied_prs = deepcopy(prs)
-    for i in range(len(copied_prs.slides)):
-        for j in range(len(copied_prs.slides[i].shapes)):
-            if prs.slides[i].shapes[j] != copied_prs.slides[i].shapes[j]:
-                pass
-    copied_prs.save(pjoin(app_config.RUN_DIR, "ppt_handlers.pptx"))
+    exit()
+    sorted_ppts = sorted(
+        os.listdir(app_config.MASTER_DIR), key=lambda x: int(x.split(".")[0])
+    )
+    os.makedirs(pjoin(app_config.RUN_DIR, "handle_test"), exist_ok=True)
+    # group shape zero, autoshape line, dash style dot
+    err_idx = [1, 5, 7, 10, 16, 22, 23, 27, 28, 31, 32, 39, 42]
+    for idx, file in enumerate(sorted_ppts):
+        if idx in err_idx:
+            continue
+        prs = Presentation.from_file(pjoin(app_config.MASTER_DIR, file))
+        for i in range(len(prs.slides)):
+            for j in range(len(prs.slides[i].shapes)):
+                if prs.slides[i].shapes[j] != deepcopy(prs.slides[i].shapes[j]):
+                    pass
+        copied_prs = deepcopy(prs)
+        copied_prs.save(pjoin(app_config.RUN_DIR, "handle_test", file))
