@@ -10,6 +10,8 @@ from pptx.shapes.group import GroupShape
 from pptx.util import Length
 from rich import print
 
+IMAGE_EXTENSIONS = {"bmp", "jpg", "jpeg", "pgm", "png", "ppm", "tif", "tiff", "webp"}
+
 
 def set_proxy(proxy_url: str):
     os.environ["http_proxy"] = proxy_url
@@ -182,7 +184,7 @@ class Config:
         if run_tag is None:
             run_tag = datetime.now().strftime("%Y%m%d-%H:%M:%S")
         self.MASTER_DIR = "./resource/masters/"
-        self.TEST_PPT = "./resource/中文信息联合党支部2022年述职报告.pptx"
+        self.TEST_PPT = "./resource/陆垚杰_博士论文答辩PPT_0530.pptx"
         self.RUN_DIR = f"./runs/{run_tag}"
         self.IMAGE_DIR = pjoin(self.RUN_DIR, "images")
         for the_dir in [self.RUN_DIR, self.IMAGE_DIR]:

@@ -1,2 +1,17 @@
 git+https://github.com/Force1ess/python-pptx
 jinja2
+openai
+google-generativeai
+tenacity
+transformers
+timm
+einops
+pillow
+googlesearch-python
+pdf2image
+rich
+sentencepiece
+lxml
+torch
+torchvision
+pytorch_fid

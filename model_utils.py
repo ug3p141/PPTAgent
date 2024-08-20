@@ -33,7 +33,7 @@ def fid_score(img_dir: str):
             fid_value = fid.calculate_fid_given_paths(
                 [".temp_1", ".temp_2"],
                 batch_size=1,
-                device="cuda" if torch.cuda.is_available() else "cpu",
+                device="cuda",
                 dims=2048,
             )
             fid_scores[i, j] = fid_value

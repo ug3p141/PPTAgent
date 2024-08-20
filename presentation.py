@@ -20,6 +20,7 @@ from pptx.text.text import _Run
 from rich import print
 
 from utils import (
+    IMAGE_EXTENSIONS,
     app_config,
     apply_fill,
     dict_to_object,
@@ -29,8 +30,6 @@ from utils import (
     parse_groupshape,
     pjoin,
 )
-
-ERR_SHAPE_MSG = None
 
 
 # set element id
@@ -315,7 +314,9 @@ class UnsupportedShape(ShapeElement):
         assert shape.shape_type == MSO_SHAPE_TYPE.FREEFORM or not any(
             [shape.has_chart, shape.has_table, shape.has_text_frame]
         )
-        print(shape)
+        print(
+            f"Unsupport shape at slide {slide_idx} shape {shape_idx}: {shape.shape_type}"
+        )
         obj = cls(slide_idx, shape_idx, style, None, text_frame)
         obj.descr = ""
         return obj
@@ -437,6 +438,8 @@ class Picture(ShapeElement):
         text_frame: TextFrame,
     ):
         img_name = re.sub(r"[\/\0]", "_", shape.name)
+        if shape.image.ext not in IMAGE_EXTENSIONS:
+            raise ValueError(f"unsupported image type {shape.image.ext}")
         img_path = pjoin(
             app_config.IMAGE_DIR,
             f"{slide_idx}_{img_name}.{shape.image.ext}",
@@ -647,16 +650,10 @@ class SlidePage:
         slide_width: int,
         slide_height: int,
     ):
-        global ERR_SHAPE_MSG
-        shapes = []
-        for i, shape in enumerate(slide.shapes):
-            try:
-                shapes.append(ShapeElement.from_shape(slide_idx, i, shape))
-            except Exception as e:
-                ERR_SHAPE_MSG = (
-                    f"Error in slide {slide_idx}, shape-{i} {type(shape).__name__}: {e}"
-                )
-                raise NotImplementedError(ERR_SHAPE_MSG)
+        shapes = [
+            ShapeElement.from_shape(slide_idx, i, shape)
+            for i, shape in enumerate(slide.shapes)
+        ]
         slide_layout_name = slide.slide_layout.name if slide.slide_layout else None
         slide_title = slide.shapes.title.text if slide.shapes.title else None
         slide_notes = (
@@ -740,12 +737,14 @@ class Presentation:
     def __init__(
         self,
         slides: list[SlidePage],
+        error_history: list[str],
         slide_width: float,
         slide_height: float,
         file_path: str,
         num_pages: int,
     ) -> None:
         self.slides = slides
+        self.error_history = error_history
         self.slide_width = slide_width
         self.slide_height = slide_height
         self.num_pages = num_pages
@@ -756,12 +755,20 @@ class Presentation:
         prs = PPTXPre(file_path)
         slide_width = prs.slide_width
         slide_height = prs.slide_height
-        slides = [
-            SlidePage.from_slide(slide, i + 1, slide_width.pt, slide_height.pt)
-            for i, slide in enumerate(list(prs.slides)[:])  # ? page range
-        ]
+        slides = []
+        error_history = []
+        for i, slide in enumerate(prs.slides):  # ? page range
+            try:
+                slides.append(
+                    SlidePage.from_slide(slide, i + 1, slide_width.pt, slide_height.pt)
+                )
+            except Exception as e:
+                error_history.append(f"Error in slide {i+1}: {e}")
+
         num_pages = len(slides)
-        return cls(slides, slide_width, slide_height, file_path, num_pages)
+        return cls(
+            slides, error_history, slide_width, slide_height, file_path, num_pages
+        )
 
     def save(self, file_path, layout_only=False):
         self.prs = PPTXPre(self.source_file)

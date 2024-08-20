@@ -35,10 +35,12 @@ class ImageLabler:
                 shape.is_background = "background" == stats["result"]["label"]
 
     def caption_images(self):
-        for image, stats in tqdm(self.image_stats.items()):
-            self.image_stats[image]["caption"] = caption_image(image)
+        captions = caption_image(self.image_stats.keys(), batchsize=8)
+        for image_path, caption in captions.items():
+            self.image_stats[image_path]["caption"] = caption
 
     def label_images(self):
+        # TODO 复制到run下
         for image, stats in tqdm(self.image_stats.items()):
             self.image_stats[image]["result"] = label_image(image, **stats)
 
