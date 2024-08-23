@@ -7,7 +7,7 @@ import requests
 from pdf2image import convert_from_path
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from llms import long_model
+from llms import agent_model
 from model_utils import fid_score, get_cluster
 from presentation import Presentation, SlidePage
 from utils import app_config, pexists, pjoin
@@ -18,6 +18,8 @@ class TemplateInducter:
     def __init__(self, prs: Presentation):
         self.prs = prs
         self.layout_mapping = defaultdict(list)
+        for slide in self.prs.slides:
+            self.layout_mapping[slide.slide_layout_name].append(slide)
         output_dir = pjoin(app_config.RUN_DIR, "template_induct")
         self.slide_split_file = pjoin(output_dir, "slides_split.json")
         self.slide_cluster_file = pjoin(output_dir, "slides_cluster.json")
@@ -26,13 +28,19 @@ class TemplateInducter:
         self.template_pdf = pjoin(output_dir, "template.pdf")
         self.template_image_folder = pjoin(output_dir, "template_images")
 
-    # work 中主要写缓存思路吧
+    # 每次发送一个layout 可能会更好 应该只有字数比较少的才会是 functional
+    # functional/content->clusters
     def work(self):
         if pexists(self.slide_split_file):
-            self.slides_split = json.load(open(self.slide_split_file))
+            self.slides_cluster = json.load(open(self.slide_split_file))
         else:
-            self.slides_split = self.functional_split()
-            json.dump(self.slides_split, open(self.slide_split_file, "w"), indent=4)
+            self.slides_cluster = self.functional_split()
+            json.dump(
+                self.slides_split,
+                open(self.slide_split_file, "w"),
+                indent=4,
+                ensure_ascii=False,
+            )
         content_slides_index = list(map(int, self.slides_split["content"]))
         content_slides = [
             slide
@@ -44,7 +52,12 @@ class TemplateInducter:
             similarity = np.array(json.load(open(self.similarity_file)))
         else:
             similarity = self.calc_similarity(content_slides)
-            json.dump(similarity.tolist(), open(self.similarity_file, "w"), indent=4)
+            json.dump(
+                similarity.tolist(),
+                open(self.similarity_file, "w"),
+                indent=4,
+                ensure_ascii=False,
+            )
         if pexists(self.slide_cluster_file):
             return json.load(open(self.slide_cluster_file))
         content_cluster = self.layout_split(
@@ -62,13 +75,29 @@ class TemplateInducter:
         )
         return self.slides_cluster
 
+    # 200k
     def functional_split(self):
+        self.slide_custer = {"functional": {}, "content": []}
         function_split_prompt = open(
             "prompts/template_induct/functional_split.txt"
         ).read()
-        return long_model(
-            function_split_prompt + self.prs.to_html() + "Output:"
-        ).strip()
+        for slides in self.layout_mapping.values():
+            split = json.loads(
+                agent_model(
+                    function_split_prompt
+                    + "\n".join(
+                        [
+                            f"slide {slide.slide_idx}/{len(self.prs.slides)}: \n"
+                            + slide.to_text()
+                            + "----"
+                            for slide in slides
+                        ]
+                    )
+                    + "Output:"
+                ).strip()
+            )
+            self.slide_custer["functional"] |= split["functional"]
+            self.slide_custer["content"].extend(split["content"])
 
     def layout_split(
         self,

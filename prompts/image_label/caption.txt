@@ -1,1 +1,9 @@
-Please describe the main content of the image in Chinese in no more than 30 words. Avoid unnecessary details.\n<image>
+Describe the main content of the image in less than 20 words, avoiding unnecessary details.
+Additionally, classify the image as 'Table,' 'Chart,', 'Diagram', 'Banner', 'Background', 'Icon', 'Logo', etc. or 'Picture' if it cannot be classified as one of the above.
+Give your answer in the following format:
+<type>:<description>
+Example Output:
+Chart:Bar graph showing sales growth over the past five years.
+Input:
+<image>
+Output:

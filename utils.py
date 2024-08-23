@@ -1,16 +1,21 @@
 import os
+import re
 import xml.etree.ElementTree as ET
-from datetime import datetime
 from types import SimpleNamespace
 
 from lxml import etree
 from pptx.dml.fill import _NoFill, _NoneFill
+from pptx.enum.shapes import MSO_CONNECTOR_TYPE
 from pptx.shapes.base import BaseShape
 from pptx.shapes.group import GroupShape
 from pptx.util import Length
 from rich import print
 
 IMAGE_EXTENSIONS = {"bmp", "jpg", "jpeg", "pgm", "png", "ppm", "tif", "tiff", "webp"}
+
+
+def filename_normalize(filename: str):
+    return re.sub(r"[\/\0]", "_", filename)
 
 
 def set_proxy(proxy_url: str):

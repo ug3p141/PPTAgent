@@ -4,10 +4,15 @@ openai
 google-generativeai
 tenacity
 transformers
+FlagEmbedding
+peft
 timm
 einops
+vllm
+func_argparse
 pillow
 googlesearch-python
+socksio
 pdf2image
 rich
 sentencepiece

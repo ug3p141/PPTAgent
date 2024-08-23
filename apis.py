@@ -5,7 +5,7 @@ from enum import Enum
 
 from jinja2 import Template
 
-from llms import api_model
+from llms import agent_model
 from presentation import Picture, SlidePage
 
 slide: SlidePage = None
@@ -73,12 +73,18 @@ class ModelAPI:
                     error_message=error_message,
                     faulty_api_sequence=api_lines,
                 )
-                lines = api_model(prompt).strip().split("\n")
+                lines = agent_model(prompt).strip().split("\n")
                 line_idx = 0
                 self.history.append({"prompt": prompt, "apis": apis})
 
         assert err_time < self.terminate_times, "\n".join(code_traces)
         return code_traces
+
+
+def find_shape(element_id: str):
+    for shape in slide.shapes:
+        if shape.element_idx == element_id:
+            return shape
 
 
 # element_id 在前，让gpt添加注释和例子
@@ -87,15 +93,17 @@ def delete_text(element_id: str):
     This function deletes the text of the element with the given element_id.
     """
     element_id, text_id = element_id.split("_")
-    for shape in slide.shapes:
-        if shape.element_idx == element_id:
-            assert shape.text_frame.is_textframe, "The shape does't have a TextFrame."
-            idx = -1
-            for i in shape.text_frame.data:
-                if i["text"]:
-                    idx += 1
-                if idx == text_id:
-                    shape.text_frame.data.remove(i)
+    shape = find_shape(element_id)
+    assert shape.text_frame.is_textframe, "The shape does't have a TextFrame."
+    idx = -1
+    for i in shape.text_frame.data:
+        if i["text"]:
+            idx += 1
+        if idx == text_id:
+            # TODO change for build finished
+            shape.text_frame.data.remove(i)
+            return
+    raise ValueError("The element_id is invalid.")
 
 
 def set_text(element_id: str, text: str):
@@ -104,21 +112,22 @@ def set_text(element_id: str, text: str):
     """
     assert "_" in element_id, "The element_id of a text element should contain a `_` "
     element_id, text_id = list(map(int, element_id.split("_")))
-    for shape in slide.shapes:
-        if shape.shape_idx == element_id:
-            assert shape.text_frame.is_textframe, "The shape does't have a TextFrame."
-            for para in shape.text_frame.data:
-                if para["idx"] == text_id:
-                    if len(para["text"].splitlines()) != len(text.splitlines()):
-                        raise ValueError(
-                            "The new text should have the same number of lines as the old text."
-                        )
-                    para["text"] = text
-                    return
-    raise ValueError("The element_id is not valid.")
+    shape = find_shape(element_id)
+    assert shape.text_frame.is_textframe, "The shape does't have a TextFrame."
+    for para in shape.text_frame.data:
+        if para["idx"] == text_id:
+            if len(para["text"].splitlines()) != len(text.splitlines()):
+                raise ValueError(
+                    "The new text should have the same number of lines as the old text."
+                )
+            para["text"] = text
+            return
+    raise ValueError("The element_id is invalid.")
 
 
 # 这里需要调整aspect ratio
+# 对于clone 的shape单独调用build
+# jia ge builded? image可以最后再build
 def set_image(element_id: str, image_path: str):
     """
     This function sets the image of the element with the given id.
@@ -126,6 +135,11 @@ def set_image(element_id: str, image_path: str):
     for shape in slide.shapes:
         if shape.element_idx == element_id:
             assert isinstance(shape, Picture), "The shape is not a Picture."
+            with open(image_path, "rb") as f:
+                img_blob = f.read()
+            rid = shape._pic.xpath("./p:blipFill/a:blip/@r:embed")[0]
+            imgPart = slide.part.related_part(rid)
+            imgPart._blob = img_blob
             shape.img_path = image_path
 
 
@@ -145,13 +159,15 @@ def clone_shape(element_id: str, new_element_id: str, shape_bounds: dict):
         shape_bounds (dict): A dictionary containing the bounding box parameters of the shape, including `left`, `top`, `width`, and `height`.
         eg. `clone_shape('1', '1-1', {'left': 100, 'top': 200, 'width': 300, 'height': 400})`
     """
-    pass
+    shape = find_shape(element_id)
+    shape.shape_idx = new_element_id
+    shape.style["shape_bounds"] = shape_bounds
+    slide.shapes.append(shape)
 
 
 def del_shape(element_id: str):
     """
     This function deletes the shape with the given id,
-    除了shape_bounds以外的
     """
     for shape in slide.shapes:
         if shape.element_idx == element_id:
@@ -172,19 +188,20 @@ def swap_style(source_element_id: str, target_element_id: str):
     if is_textframe:
         source_element_id, source_text_id = source_element_id.split("_")
         target_element_id, target_text_id = target_element_id.split("_")
-    source_shape, target_shape = None, None
-    for shape in slide.shapes:
-        if shape.element_idx == source_element_id:
-            source_shape = shape
-        if shape.element_idx == target_element_id:
-            target_shape = shape
+    source_shape, target_shape = find_shape(source_element_id), find_shape(
+        target_element_id
+    )
     assert isinstance(
         source_shape, type(target_shape)
     ), "The source and target shapes should be the same type."
+    # TODO 这里需要调整
     if not is_textframe:
         source_shape.style, target_shape.style = target_shape.style, source_shape.style
     else:
-        pass
+        source_shape.text_frame.data, target_shape.text_frame.data = (
+            target_shape.text_frame.data,
+            source_shape.text_frame.data,
+        )
 
 
 class API_TYPES(Enum):

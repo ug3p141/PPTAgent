@@ -3,27 +3,29 @@ import os
 
 from tqdm.auto import tqdm
 
-from llms import caption_image, label_image
+from llms import caption_model, label_image
 from presentation import Picture, Presentation
 from utils import app_config, pjoin, print
 
 
 class ImageLabler:
-    def __init__(self, presentation: Presentation, batchsize: int):
+    def __init__(self, presentation: Presentation):
         self.presentation = presentation
         self.slide_area = presentation.slide_width.pt * presentation.slide_height.pt
         self.image_stats = {}
-        self.out_file = pjoin(app_config.RUN_DIR, "image_stats.json")
-        self.batchsize = batchsize
+        self.stats_file = pjoin(app_config.RUN_DIR, "image_stats.json")
+        os.makedirs(pjoin(app_config.RUN_DIR, "images", "background"), exist_ok=True)
+        os.makedirs(pjoin(app_config.RUN_DIR, "images", "content"), exist_ok=True)
 
     def work(self):
-        if os.path.exists(self.out_file):
-            self.image_stats = json.load(open(self.out_file, "r"))
+        if os.path.exists(self.stats_file):
+            self.image_stats = json.load(open(self.stats_file, "r"))
         else:
             self.collect_images()
             self.caption_images()
-            self.label_images()
-            json.dump(self.image_stats, open(self.out_file, "w"), indent=4)
+        json.dump(
+            self.image_stats, open(self.stats_file, "w"), indent=4, ensure_ascii=False
+        )
         self.apply_stats()
 
     def apply_stats(self):
@@ -34,16 +36,27 @@ class ImageLabler:
                 stats = self.image_stats[shape.data[0]]
                 shape.caption = stats["caption"]
                 shape.is_background = "background" == stats["result"]["label"]
+                shape.data[0] = pjoin(
+                    app_config.RUN_DIR, stats["result"]["label"], shape.data[0]
+                )
 
     def caption_images(self):
-        captions = caption_image(self.image_stats.keys(), batchsize=self.batchsize)
-        for image_path, caption in captions.items():
-            self.image_stats[image_path]["caption"] = caption
+        for image, stats in tqdm(self.image_stats.items()):
+            stats["caption"] = caption_model(
+                open("prompts/image_label/caption.txt").read(), image
+            )
 
     def label_images(self):
-        # TODO 复制到run下
         for image, stats in tqdm(self.image_stats.items()):
             self.image_stats[image]["result"] = label_image(image, **stats)
+            os.rename(
+                image,
+                pjoin(
+                    app_config.RUN_DIR + "/images",
+                    self.image_stats[image]["result"]["label"],
+                    image.split("/")[-1],
+                ),
+            )
 
     def collect_images(self):
         for slide_index, slide in enumerate(self.presentation.slides):

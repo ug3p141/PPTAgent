@@ -7,7 +7,7 @@ from jinja2 import Template
 
 import apis
 from apis import API_TYPES, model_api
-from llms import api_model, long_model
+from llms import agent_model
 from presentation import Picture, Presentation, SlidePage
 from utils import app_config, pexists, pjoin
 
@@ -112,7 +112,7 @@ class PPTAgent:
                         slide_outline=self.stylized_outline,
                         slide_content=slide_content,
                     )
-                    layout = api_model(select_prompt).split("-")[1]
+                    layout = agent_model(select_prompt).split("-")[1]
                     for cluster in option_clusters:
                         if layout in cluster[1]:
                             template_ids = cluster[1]
@@ -134,7 +134,7 @@ class PPTAgent:
                 slide_outline=self.stylized_outline,
                 slide_content=slide_content,
             )
-            model_api.execute_apis(layout_prompt, api_model(layout_prompt))
+            model_api.execute_apis(layout_prompt, agent_model(layout_prompt))
             slide_template = apis.slide
 
             # content replacement
@@ -146,7 +146,7 @@ class PPTAgent:
                 slide_content=slide_content,
                 element_ids=shape_idxs,
             )
-            model_api.execute_apis(content_prompt, api_model(content_prompt))
+            model_api.execute_apis(content_prompt, agent_model(content_prompt))
 
             # result saving
             step_results["generated_slides"].append(apis.slide)
@@ -165,7 +165,7 @@ class PPTAgent:
             json_content=self.doc_json,
             images=self.images,
         )
-        return long_model(prompt)
+        return agent_model(prompt)
 
     def get_replace_ids(self, slide: SlidePage):
         shape_idxs = []
@@ -196,7 +196,7 @@ class PPTAgent:
     def refine_doc(self):
         template = Template(open("prompts/agent/document_refine.txt").read())
         prompt = template.render(markdown_document=self.markdown_str)
-        return long_model(prompt, use_json=False)
+        return agent_model(prompt, use_json=False)
 
 
 if __name__ == "__main__":
