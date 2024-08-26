@@ -5,12 +5,78 @@ import numpy as np
 import pytorch_fid.fid_score as fid
 import torch
 import torchvision.transforms as T
+from FlagEmbedding import BGEM3FlagModel
 from PIL import Image
 from torchvision.transforms.functional import InterpolationMode
+from transformers import AutoFeatureExtractor, AutoModel
 
-from utils import pjoin
+from utils import IMAGE_EXTENSIONS, pjoin
 
 fid.tqdm = lambda x: x
+
+DEVICE_MAP = "mps"
+
+text_embed_model = None
+image_embed_model = None
+extractor = None
+
+
+def text_embedding(text: str):
+    global text_embed_model
+    if text_embed_model is None:
+        text_embed_model = BGEM3FlagModel(
+            "BAAI/bge-m3", use_fp16=True, device=DEVICE_MAP
+        )
+    return text_embed_model.encode(text)["dense_vecs"]
+
+
+def image_embedding(image_dir: str, batchsize: int = 16):
+    if extractor is None:
+        extractor = AutoFeatureExtractor.from_pretrained(
+            "google/vit-base-patch16-224-in21k"
+        )
+    transform = T.Compose(
+        [
+            T.Resize(int((256 / 224) * extractor.size["height"])),
+            T.CenterCrop(extractor.size["height"]),
+            T.ToTensor(),
+            T.Normalize(mean=extractor.image_mean, std=extractor.image_std),
+        ]
+    )
+    global image_embed_model
+    if image_embed_model is None:
+        image_embed_model = AutoModel.from_pretrained(
+            "google/vit-base-patch16-224-in21k",
+            torch_dtype=torch.float16,
+            device_map=DEVICE_MAP,
+        ).eval()
+    inputs = []
+    embeddings = []
+    images = [
+        i for i in sorted(os.listdir(image_dir)) if i.split(".")[-1] in IMAGE_EXTENSIONS
+    ]
+    for file in images:
+        image = Image.open(pjoin(image_dir, file)).convert("RGB")
+        inputs.append(transform(image))
+        if len(inputs) % batchsize == 0 or file == images[-1]:
+            batch = {"pixel_values": torch.stack(inputs).to(image_embed_model.device)}
+            embeddings.extend(
+                image_embed_model(**batch).last_hidden_state.detach().cpu()
+            )
+            inputs.clear()
+    return {image: embedding for image, embedding in zip(images, embeddings)}
+
+
+def images_cosine_similarity(embeddings: list[torch.Tensor]):
+    embeddings = [embedding.to(image_embed_model.device) for embedding in embeddings]
+    sim_matrix = torch.zeros((len(embeddings), len(embeddings)))
+    for i in range(len(embeddings)):
+        for j in range(i + 1, len(embeddings)):
+            sim_matrix[i, j] = sim_matrix[j, i] = torch.nn.functional.cosine_similarity(
+                embeddings[i].view(-1), embeddings[j].view(-1), dim=0
+            )
+    return sim_matrix
+
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -47,65 +113,58 @@ def fid_score(img_dir: str):
     print(fid_scores)
 
 
-MAX_SIM = 999
-SIM_BOUND = 50
-
-
 def average_distance(similarity, idx, cluster_idx):
     """
     Calculate the average distance between a point (idx) and a cluster (cluster_idx).
     """
-    total_distance = 0
+    if idx in cluster_idx:
+        return 0
+    total_similarity = 0
     for idx_in_cluster in cluster_idx:
-        total_distance += similarity[idx, idx_in_cluster]
-    return total_distance / len(cluster_idx)
+        total_similarity += similarity[idx, idx_in_cluster]
+    return total_similarity / len(cluster_idx)
 
 
-def get_cluster(similarity: np.ndarray):
-    similarity[similarity == 0] = MAX_SIM
+def get_cluster(similarity: np.ndarray, sim_bound: float = 0.65):
     num_points = similarity.shape[0]
-    cluster = []
+    clusters = []
     sim_copy = deepcopy(similarity)
-
+    added = [False] * num_points
     while True:
-        min_avg_dist = SIM_BOUND
+        max_avg_dist = sim_bound
         best_cluster = None
         best_point = None
 
-        for c in cluster:
+        for c in clusters:
             for point_idx in range(num_points):
+                if added[point_idx]:
+                    continue
                 avg_dist = average_distance(sim_copy, point_idx, c)
-                if avg_dist < min_avg_dist:
-                    min_avg_dist = avg_dist
+                if avg_dist > max_avg_dist:
+                    max_avg_dist = avg_dist
                     best_cluster = c
                     best_point = point_idx
 
-        if best_point is not None:  # or 考虑方差
+        if best_point is not None:
             best_cluster.append(best_point)
-            similarity[best_point, :] = MAX_SIM
-            similarity[:, best_point] = MAX_SIM
+            added[best_point] = True
+            sim_copy[best_point, :] = 0
+            sim_copy[:, best_point] = 0
         else:
-            miss_flag = False
-            min_edge_val = similarity.min()
-            if min_edge_val > SIM_BOUND:
-                miss_flag = True
+            if similarity.max() < sim_bound:
                 break
-            i, j = np.unravel_index(np.argmin(similarity), similarity.shape)
-            # if added[i] or added[j]: # 凡是added过了，已经MAX_SIM了
-            cluster.append([i, j])
-            similarity[i, :] = MAX_SIM
-            similarity[:, i] = MAX_SIM
-            similarity[j, :] = MAX_SIM
-            similarity[:, j] = MAX_SIM
-            if miss_flag:
-                break
-    cluster.extend(
-        [[idx] for idx in range(num_points) if all([idx not in c for c in cluster])]
-    )
-    return cluster
+            i, j = np.unravel_index(np.argmax(similarity), similarity.shape)
+            clusters.append([int(i), int(j)])
+            added[i] = True
+            added[j] = True
+            similarity[i, :] = 0
+            similarity[:, i] = 0
+            similarity[j, :] = 0
+            similarity[:, j] = 0
+    return clusters
 
 
-def build_transform(input_size):
+def internvl_build_transform(input_size):
     MEAN, STD = IMAGENET_MEAN, IMAGENET_STD
     transform = T.Compose(
         [
@@ -121,7 +180,9 @@ def build_transform(input_size):
     return transform
 
 
-def find_closest_aspect_ratio(aspect_ratio, target_ratios, width, height, image_size):
+def internvl_find_closest_aspect_ratio(
+    aspect_ratio, target_ratios, width, height, image_size
+):
     best_ratio_diff = float("inf")
     best_ratio = (1, 1)
     area = width * height
@@ -137,13 +198,12 @@ def find_closest_aspect_ratio(aspect_ratio, target_ratios, width, height, image_
     return best_ratio
 
 
-def dynamic_preprocess(
+def internvl_dynamic_preprocess(
     image, min_num=1, max_num=6, image_size=448, use_thumbnail=False
 ):
     orig_width, orig_height = image.size
     aspect_ratio = orig_width / orig_height
 
-    # calculate the existing image aspect ratio
     target_ratios = set(
         (i, j)
         for n in range(min_num, max_num + 1)
@@ -153,17 +213,14 @@ def dynamic_preprocess(
     )
     target_ratios = sorted(target_ratios, key=lambda x: x[0] * x[1])
 
-    # find the closest aspect ratio to the target
-    target_aspect_ratio = find_closest_aspect_ratio(
+    target_aspect_ratio = internvl_find_closest_aspect_ratio(
         aspect_ratio, target_ratios, orig_width, orig_height, image_size
     )
 
-    # calculate the target width and height
     target_width = image_size * target_aspect_ratio[0]
     target_height = image_size * target_aspect_ratio[1]
     blocks = target_aspect_ratio[0] * target_aspect_ratio[1]
 
-    # resize the image
     resized_img = image.resize((target_width, target_height))
     processed_images = []
     for i in range(blocks):
@@ -173,7 +230,6 @@ def dynamic_preprocess(
             ((i % (target_width // image_size)) + 1) * image_size,
             ((i // (target_width // image_size)) + 1) * image_size,
         )
-        # split the image
         split_img = resized_img.crop(box)
         processed_images.append(split_img)
     assert len(processed_images) == blocks
@@ -183,10 +239,10 @@ def dynamic_preprocess(
     return target_aspect_ratio, processed_images
 
 
-def load_image(image_file, input_size=448, max_num=16):
+def internvl_load_image(image_file, input_size=448, max_num=16):
     image = Image.open(image_file).convert("RGB")
-    transform = build_transform(input_size=input_size)
-    target_aspect_ratio, images = dynamic_preprocess(
+    transform = internvl_build_transform(input_size=input_size)
+    target_aspect_ratio, images = internvl_dynamic_preprocess(
         image, image_size=input_size, use_thumbnail=True, max_num=max_num
     )
     pixel_values = [transform(image) for image in images]

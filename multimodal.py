@@ -5,7 +5,7 @@ from tqdm.auto import tqdm
 
 from llms import caption_model, label_image
 from presentation import Picture, Presentation
-from utils import app_config, pjoin, print
+from utils import app_config, pexists, pjoin, print
 
 
 class ImageLabler:
@@ -14,41 +14,42 @@ class ImageLabler:
         self.slide_area = presentation.slide_width.pt * presentation.slide_height.pt
         self.image_stats = {}
         self.stats_file = pjoin(app_config.RUN_DIR, "image_stats.json")
+        self.collect_images()
+        if pexists(self.stats_file):
+            self.image_stats = json.load(open(self.stats_file, "r"))
         os.makedirs(pjoin(app_config.RUN_DIR, "images", "background"), exist_ok=True)
         os.makedirs(pjoin(app_config.RUN_DIR, "images", "content"), exist_ok=True)
 
-    def work(self):
-        if os.path.exists(self.stats_file):
-            self.image_stats = json.load(open(self.stats_file, "r"))
-        else:
-            self.collect_images()
-            self.caption_images()
+    def apply_stats(self):
         json.dump(
             self.image_stats, open(self.stats_file, "w"), indent=4, ensure_ascii=False
         )
-        self.apply_stats()
-
-    def apply_stats(self):
         for slide in self.presentation.slides:
             for shape in slide.shapes:
                 if not isinstance(shape, Picture):
                     continue
                 stats = self.image_stats[shape.data[0]]
-                shape.caption = stats["caption"]
-                shape.is_background = "background" == stats["result"]["label"]
-                shape.data[0] = pjoin(
-                    app_config.RUN_DIR, stats["result"]["label"], shape.data[0]
-                )
+                if "caption" in stats:
+                    shape.caption = stats["caption"]
+                if "result" in stats:
+                    shape.is_background = "background" == stats["result"]["label"]
+                    shape.data[0] = pjoin(
+                        app_config.RUN_DIR, stats["result"]["label"], shape.data[0]
+                    )
 
     def caption_images(self):
+        caption_prompt = open("prompts/image_label/caption.txt").read()
         for image, stats in tqdm(self.image_stats.items()):
-            stats["caption"] = caption_model(
-                open("prompts/image_label/caption.txt").read(), image
-            )
+            if "caption" not in stats:
+                stats["caption"] = caption_model(caption_prompt, image)
+                if app_config.DEBUG:
+                    print(image, ": ", stats["caption"])
+        self.apply_stats()
 
     def label_images(self):
         for image, stats in tqdm(self.image_stats.items()):
-            self.image_stats[image]["result"] = label_image(image, **stats)
+            if "result" not in stats:
+                self.image_stats[image]["result"] = label_image(image, **stats)
             os.rename(
                 image,
                 pjoin(
@@ -57,6 +58,7 @@ class ImageLabler:
                     image.split("/")[-1],
                 ),
             )
+        self.apply_stats()
 
     def collect_images(self):
         for slide_index, slide in enumerate(self.presentation.slides):

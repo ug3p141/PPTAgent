@@ -1,17 +1,28 @@
 import os
 import re
+import traceback
 import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 
 from lxml import etree
 from pptx.dml.fill import _NoFill, _NoneFill
-from pptx.enum.shapes import MSO_CONNECTOR_TYPE
 from pptx.shapes.base import BaseShape
 from pptx.shapes.group import GroupShape
 from pptx.util import Length
 from rich import print
+from tenacity import RetryCallState, retry, stop_after_attempt, wait_fixed
 
 IMAGE_EXTENSIONS = {"bmp", "jpg", "jpeg", "pgm", "png", "ppm", "tif", "tiff", "webp"}
+
+
+def tenacity_log(retry_state: RetryCallState):
+    print(f"Retry attempt {retry_state.attempt_number}")
+    traceback.print_tb(retry_state.outcome.exception().__traceback__)
+
+
+tenacity = retry(
+    wait=wait_fixed(10), stop=stop_after_attempt(3), after=tenacity_log, reraise=True
+)
 
 
 def filename_normalize(filename: str):
@@ -92,9 +103,7 @@ def parse_groupshape(groupshape: GroupShape):
     return group_shape_xy
 
 
-# 这个xpr中包含了x:left, y:top, cx:widht, cy:height四个属性，用于描述矩形的位置和大小
 def replace_xml_node(old_element, new_xml):
-    # 用子节点替换旧节点
     new_element = etree.fromstring(new_xml)
     old_element.getparent().replace(old_element, new_element)
 
@@ -186,6 +195,7 @@ def dict_to_object(dict: dict, obj: object, exclude=None):
 
 class Config:
     def __init__(self, session_id=None):
+        self.DEBUG = False
         if session_id is not None:
             self.set_session(session_id)
 
@@ -197,6 +207,9 @@ class Config:
         for the_dir in [self.RUN_DIR, self.IMAGE_DIR]:
             if not pexists(the_dir):
                 os.makedirs(the_dir)
+
+    def set_debug(self, debug: bool):
+        self.DEBUG = debug
 
 
 pjoin = os.path.join

@@ -8,11 +8,9 @@ import PIL
 import torch
 from jinja2 import Template
 from openai import OpenAI
-from tenacity import retry, stop_after_attempt, wait_exponential, wait_fixed
-from transformers import AutoModel, AutoTokenizer
 
-from model_utils import load_image
-from utils import print
+from model_utils import internvl_load_image
+from utils import print, tenacity
 
 
 class SingletonMeta(type):
@@ -23,56 +21,6 @@ class SingletonMeta(type):
             instance = super().__call__(*args, **kwargs)
             cls._instances[cls] = instance
         return cls._instances[cls]
-
-
-class InternVL(metaclass=SingletonMeta):
-
-    def __init__(self, model_id="models/InternVL2-8B", device_map: dict = None):
-        self._initialized = False
-        self._model_id = model_id
-        self._device_map = device_map if device_map is not None else "auto"
-
-    def _initialize(self):
-        self.model = AutoModel.from_pretrained(
-            pretrained_model_name_or_path=self._model_id,
-            torch_dtype=torch.bfloat16,
-            low_cpu_mem_usage=True,
-            trust_remote_code=True,
-            device_map=self._device_map,
-        ).eval()
-        self.generation_config = dict(
-            num_beams=1,
-            max_new_tokens=10240,
-            do_sample=False,
-        )
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self._model_id,
-            trust_remote_code=True,
-        )
-        self._initialized = True
-
-    def __call__(self, pixel_values: torch.Tensor, prompt: str):
-        if not self._initialized:
-            self._initialize()
-        return self.model.chat(
-            self.tokenizer,
-            pixel_values.to(torch.bfloat16).cuda(),
-            prompt,
-            self.generation_config,
-        )
-
-    def batch_chat(
-        self, pixel_values: torch.Tensor, prompt: str, num_patches_list: list
-    ):
-        if not self._initialized:
-            self._initialize()
-        return self.model.batch_chat(
-            self.tokenizer,
-            pixel_values.to(torch.bfloat16).cuda(),
-            prompt,
-            self.generation_config,
-            num_patches_list,
-        )
 
 
 class Gemini:
@@ -121,10 +69,7 @@ class Gemini:
             sleep(self.time_limit - (call_time - self.api_config[1][self._call_idx]))
         self.api_config[1][self._call_idx] = call_time
 
-    @retry(
-        wait=wait_fixed(10),
-        stop=stop_after_attempt(6),
-    )
+    @tenacity
     def __call__(
         self, content: str, image_file: str = None, use_json: bool = True
     ) -> dict:
@@ -154,14 +99,11 @@ class Gemini:
 
 
 class OPENAI:
-    def __init__(self, model: str = "gpt-4o-2024-08-06") -> None:
-        self.client = OpenAI()
+    def __init__(self, model: str = "gpt-4o-2024-08-06", api_base: str = None) -> None:
+        self.client = OpenAI(base_url=api_base)
         self.model = model
 
-    @retry(
-        wait=wait_exponential(min=1, max=8),
-        stop=stop_after_attempt(3),
-    )
+    @tenacity
     def __call__(
         self,
         content: str,
@@ -193,34 +135,17 @@ class OPENAI:
         completion = self.client.chat.completions.create(
             model=self.model, messages=messages
         )
-        return completion["choices"][0]["message"]
+        return completion.choices[0].message.content
 
 
 gemini = Gemini()
-intern = InternVL()
+intern = OPENAI(
+    model="OminiPreGen/models/InternVL2-8B", api_base="http://124.16.138.143:8000/v1"
+)
 gpt4o = OPENAI()
-vl_model = intern
-long_model = gemini
-api_model = gpt4o
-
-
-def caption_image(image_files: list[str], batchsize: int = 1):
-    pixel_values = []
-    prompt = open("prompts/image_label/caption.txt").read()
-    results = []
-    for idx, image_file in enumerate(image_files):
-        _, pixel_value = load_image(image_file)
-        pixel_values.append(pixel_value)
-        if (idx + 1) % batchsize == 0 or (idx + 1) == len(image_files):
-            num_patches_list = [pixel_value.size(0) for pixel_value in pixel_values]
-            batch_pixel_values = torch.cat(pixel_values).to(torch.bfloat16).cuda()
-            batch_results = vl_model.batch_chat(
-                batch_pixel_values, prompt, num_patches_list
-            )
-            results.extend(batch_results)
-            pixel_values = []  # 清空批次列表以准备下一个批次
-
-    return results
+gpt4omini = OPENAI(model="gpt-4o-mini")
+caption_model = gpt4omini
+agent_model = gpt4o
 
 
 def label_image(
@@ -231,8 +156,8 @@ def label_image(
     caption: str,
     **kwargs,
 ):
-    prompt_head = open("prompts/image_cls_withcap.txt").read()
-    aspect_ratio, _ = load_image(image_file)
+    prompt_head = open("prompts/image_label/image_cls_withcap.txt").read()
+    aspect_ratio, _ = internvl_load_image(image_file)
     prompt = (
         prompt_head
         + "Input:\n"
@@ -246,13 +171,13 @@ def label_image(
             }
         )
     )
-    return json.loads(vl_model(prompt, image_file).strip())
+    return agent_model(prompt, image_file)
 
 
 def get_outline(content: str):
     template = Template(open("prompts/get_outline.txt").read())
     prompt = template(paper_md=content).render()
-    return long_model(prompt)
+    return agent_model(prompt)
 
 
 if __name__ == "__main__":

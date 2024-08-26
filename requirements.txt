@@ -14,6 +14,7 @@ pillow
 googlesearch-python
 socksio
 pdf2image
+numpy
 rich
 sentencepiece
 lxml
