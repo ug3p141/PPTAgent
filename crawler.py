@@ -5,6 +5,7 @@ import aiohttp
 from googlesearch import search
 
 from presentation import Presentation
+from utils import filename_normalize
 
 ppt_topics = [
     "Business Plan",
@@ -54,7 +55,7 @@ async def download_pptx_files():
             links = get_pptx_links(topic)
             pptx_links.extend(links)
             for link in links:
-                filepath = f"resource/crawler/{link['title'].replace(' ', '_')}"
+                filepath = f"resource/crawler/{filename_normalize(link['title'])}"
                 tasks.append(download_file(session, link["url"], filepath))
         await asyncio.gather(*tasks)
 

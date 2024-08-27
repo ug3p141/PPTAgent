@@ -1,72 +1,77 @@
 import json
 import os
+import tempfile
+import zipfile
 from collections import defaultdict
+from copy import deepcopy
+from re import M
 
-import numpy as np
 import requests
+from jinja2 import Template
 from pdf2image import convert_from_path
-from tenacity import retry, stop_after_attempt, wait_fixed
 
 from llms import agent_model
-from model_utils import fid_score, get_cluster
+from model_utils import get_cluster, image_embedding, images_cosine_similarity
 from presentation import Presentation, SlidePage
-from utils import app_config, pexists, pjoin
+from utils import app_config, filename_normalize, pexists, pjoin, tenacity
 
 
 class TemplateInducter:
-    # 至多八个layout
     def __init__(self, prs: Presentation):
         self.prs = prs
         self.layout_mapping = defaultdict(list)
         for slide in self.prs.slides:
             self.layout_mapping[slide.slide_layout_name].append(slide)
-        output_dir = pjoin(app_config.RUN_DIR, "template_induct")
-        self.slide_split_file = pjoin(output_dir, "slides_split.json")
-        self.slide_cluster_file = pjoin(output_dir, "slides_cluster.json")
-        self.similarity_file = pjoin(output_dir, "similarity.json")
-        self.template_pre = pjoin(output_dir, "template.pptx")
-        self.template_pdf = pjoin(output_dir, "template.pdf")
-        self.template_image_folder = pjoin(output_dir, "template_images")
+        self.output_dir = pjoin(app_config.RUN_DIR, "template_induct")
+        os.makedirs(self.output_dir, exist_ok=True)
+        self.slide_split_file = pjoin(self.output_dir, "slides_split.json")
+        self.slide_cluster_file = pjoin(self.output_dir, "slides_cluster.json")
+        self.template_image_folder = pjoin(self.output_dir, "template_images")
+        self.ppt_image_folder = pjoin(self.output_dir, "ppt_images")
 
-    # 每次发送一个layout 可能会更好 应该只有字数比较少的才会是 functional
-    # functional/content->clusters
     def work(self):
-        if pexists(self.slide_split_file):
-            self.slides_cluster = json.load(open(self.slide_split_file))
-        else:
-            self.slides_cluster = self.functional_split()
-            json.dump(
-                self.slides_split,
-                open(self.slide_split_file, "w"),
-                indent=4,
-                ensure_ascii=False,
-            )
-        content_slides_index = list(map(int, self.slides_split["content"]))
-        content_slides = [
-            slide
-            for slide in self.prs.slides
-            if slide.slide_idx in content_slides_index
-        ]
-        # TODO 每个cluster最多只接受3个slides和至多的cluster
-        if pexists(self.similarity_file):
-            similarity = np.array(json.load(open(self.similarity_file)))
-        else:
-            similarity = self.calc_similarity(content_slides)
-            json.dump(
-                similarity.tolist(),
-                open(self.similarity_file, "w"),
-                indent=4,
-                ensure_ascii=False,
-            )
         if pexists(self.slide_cluster_file):
-            return json.load(open(self.slide_cluster_file))
-        content_cluster = self.layout_split(
-            content_slides_index, content_slides, similarity
-        )
-        self.slides_cluster = {
-            "content": content_cluster,
-            "functional": self.slides_split["functional"],
-        }
+            self.slide_cluster = json.load(open(self.slide_cluster_file))
+            return self.slide_cluster
+        self.ppt_to_images(self.prs.source_file, self.ppt_image_folder)
+        self.slide_cluster = self.category_split()
+        self.slide_cluster, content_slides_index = self.slide_cluster[
+            "categories"
+        ], set(self.slide_cluster["uncategorized"])
+        functional_keys = list(self.slide_cluster.keys())
+        if len(self.prs.slides) != len(content_slides_index) + sum(
+            [len(i) for i in self.slide_cluster.values()]
+        ):
+            raise ValueError("slides number not match")
+        self.layout_split(content_slides_index)
+        for layout_name, cluster in self.slide_cluster.items():
+            if app_config.DEBUG:
+                os.makedirs(
+                    pjoin(self.ppt_image_folder, filename_normalize(layout_name)),
+                    exist_ok=True,
+                )
+                for slide_idx in cluster:
+                    os.rename(
+                        pjoin(
+                            self.ppt_image_folder,
+                            f"slide_{slide_idx:04d}.jpg",
+                        ),
+                        pjoin(
+                            self.ppt_image_folder,
+                            layout_name,
+                            f"slide_{slide_idx:04d}.jpg",
+                        ),
+                    )
+            if len(cluster) > 3:
+                cluster = sorted(
+                    cluster, key=lambda x: len(self.prs.slides[x].to_text())
+                )
+                self.slide_cluster[layout_name] = [
+                    cluster[0],
+                    cluster[len(cluster) // 2],
+                    cluster[-1],
+                ]
+        self.slide_cluster["functional_keys"] = functional_keys
         json.dump(
             self.slides_cluster,
             open(self.slide_cluster_file, "w"),
@@ -75,122 +80,86 @@ class TemplateInducter:
         )
         return self.slides_cluster
 
-    # 200k
-    def functional_split(self):
-        self.slide_custer = {"functional": {}, "content": []}
-        function_split_prompt = open(
-            "prompts/template_induct/functional_split.txt"
-        ).read()
-        for slides in self.layout_mapping.values():
-            split = json.loads(
-                agent_model(
-                    function_split_prompt
-                    + "\n".join(
+    def category_split(self):
+        topic_split_template = Template(
+            open("prompts/template_induct/category_split.txt").read()
+        )
+        return json.loads(
+            agent_model(
+                topic_split_template.render(
+                    slides="\n----\n".join(
                         [
-                            f"slide {slide.slide_idx}/{len(self.prs.slides)}: \n"
-                            + slide.to_text()
-                            + "----"
-                            for slide in slides
+                            (
+                                f"Slide {slide.slide_idx} of {len(self.prs.slides)}\n"
+                                + (
+                                    f"Title:{slide.slide_title}\n"
+                                    if slide.slide_title
+                                    else ""
+                                )
+                                + slide.to_text()
+                            )
+                            for slide in self.prs.slides
                         ]
-                    )
-                    + "Output:"
-                ).strip()
+                    ),
+                )
             )
-            self.slide_custer["functional"] |= split["functional"]
-            self.slide_custer["content"].extend(split["content"])
+        )
 
     def layout_split(
         self,
-        content_slides_index: list[int],
-        content_slides: list[SlidePage],
-        similarity: np.ndarray,
+        content_slides_index: set[int],
     ):
+        deepcopy(self.prs).save(pjoin(self.output_dir, "template.pptx"))
+        self.ppt_to_images(
+            pjoin(self.output_dir, "template.pptx"),
+            self.template_image_folder,
+        )
+        embeddings = image_embedding(self.template_image_folder)
+        template = Template(open("prompts/template_induct/ask_category.txt").read())
         content_split = defaultdict(list)
-        for slide in content_slides:
+        for slide_idx in content_slides_index:
+            slide = self.prs.slides[slide_idx]
             content_types = slide.get_content_types()
             layout_name = slide.slide_layout_name
             if content_types:
                 layout_name += f": ({', '.join(content_types)})"
-            content_split[layout_name].append(slide.slide_idx)
+            content_split[layout_name].append(slide)
 
-        clusters = dict()
-        for layout_name, slides_idx in content_split.items():
-            sim_index = [content_slides_index.index(i) for i in slides_idx]
-            sub_similarity = similarity[np.ix_(sim_index, sim_index)]
-            sub_clusters = get_cluster(sub_similarity)
-            # text frame 或者图片数量不同似乎就该不是同一个template
-            # 不过现在这个版本也能将就用，先用着吧
-            clusters[layout_name] = [
-                sorted([slides_idx[i] for i in cluster]) for cluster in sub_clusters
+        for layout_name, slides in content_split.items():
+            if len(slides) < 3:
+                continue
+            sub_embeddings = [
+                embeddings[f"slide_{slide.slide_idx:04d}.jpg"] for slide in slides
             ]
+            similarity = images_cosine_similarity(sub_embeddings)
+            for cluster in get_cluster(similarity):
+                cluster = [slides[i] for i in cluster]
+                cluster_name = agent_model(
+                    template.render(
+                        existed_layoutnames=list(self.slide_cluster.keys())
+                    ),
+                    [f"slide_{slide.slide_idx:04d}.jpg" for slide in cluster],
+                )
+                self.slide_cluster[cluster_name] = [
+                    slide.slide_idx for slide in cluster
+                ]
 
-        # text class的类型标注
-        return clusters
-
-        # textframe_tags = ["幻灯片标题", "小节标题", "标题", "固定文本"]
-        # background_tags = ["固定文本"]
-        # content layouts 的命名
-        # layout_analyze_prompt = open("prompts/layout_analyze.txt").read()
-        # layout_analyze_result = gemini(
-        #     layout_analyze_prompt
-        #     + prs.to_html(content_slides) + "Output:"
-        # )
-        # content_layouts = json.loads(layout_analyze_result.strip()) | functional_slides
-        # assert sum(len(i) for i in content_layouts.values()) == len(prs.slides)
-        # # 记得 -1
-        # for slide_idx, slide in enumerate(prs.slides):
-        #     for layout in prs.prs.slide_layouts:  # 按照modality进行划分
-        #         if slide.slide_layout_name != layout.name:
-        #             continue
-        #         for k, v in content_layouts.items():
-        #             if slide_idx in v:
-        #                 layout_name = (
-        #                     f"{k}-{layout.name}:({','.join(slide.get_content_types())})"
-        #                 )
-
-        #         self.layout_mapping[layout_name].append(slide)
-
-    # 用来对具体元素进行识别
-    # is background image的不figure在这一步不输出了吧，因为其实没有意义
-    def calc_similarity(self, content_slides: list[SlidePage]):
-        template_pr = Presentation(
-            content_slides,
-            self.prs.slide_width,
-            self.prs.slide_height,
-            self.prs.source_file,
-            len(content_slides),
-        )
-        template_pr.save(self.template_pre)
-        self.ppt_to_images(len(content_slides))
-        similarity = fid_score(self.template_image_folder)
-
-        return similarity
-
-    @retry(
-        wait=wait_fixed(10),
-        stop=stop_after_attempt(6),
-    )
-    def ppt_to_images(self):
-        if not pexists(self.template_pdf):
-            response = requests.request(
-                "POST",
-                "https://api.pspdfkit.com/build",
-                headers={
-                    "Authorization": "Bearer pdf_live_wejPGyz2D4vyYKtvK7JgEKQ0rHCfT8QrEf2qFFYzvBv"
-                },
-                files={"file": open(self.template_pre, "rb")},
-                data={"instructions": json.dumps({"parts": [{"file": "file"}]})},
-                stream=True,
+    @tenacity
+    def ppt_to_images(self, file: str, output_dir: str):
+        if not file.endswith(".pptx"):
+            raise ValueError("file must be a pptx")
+        if pexists(file.replace(".pptx", ".pdf", 1)) and pexists(output_dir):
+            return
+        with open(file, "rb") as ppt_file:
+            response = requests.post(
+                app_config.PPT_TO_IMAGES_URL, files={"file": ppt_file}
             )
-
-            assert response.ok
-            with open("result.pdf", "wb") as fd:
-                for chunk in response.iter_content(chunk_size=8096):
-                    fd.write(chunk)
-        os.makedirs(self.template_image_folder, exist_ok=True)
-        pages = convert_from_path(self.template_pdf, 224)
-        for i, page in enumerate(pages):
-            page.save(f"{self.template_image_folder}/page_{(i+1):04d}.jpg", "JPEG")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_zip:
+            tmp_zip.write(response.content)
+            tmp_zip_path = tmp_zip.name
+        os.makedirs(output_dir, exist_ok=True)
+        with zipfile.ZipFile(tmp_zip_path, "r") as zip_ref:
+            zip_ref.extractall(output_dir)
 
 
 if __name__ == "__main__":

@@ -1,10 +1,11 @@
 import json
 import os
 
+from jinja2 import Template
 from tqdm.auto import tqdm
 
-from llms import caption_model, label_image
-from presentation import Picture, Presentation
+from llms import api_model, caption_model
+from presentation import Picture, Presentation, SlidePage
 from utils import app_config, pexists, pjoin, print
 
 
@@ -25,9 +26,7 @@ class ImageLabler:
             self.image_stats, open(self.stats_file, "w"), indent=4, ensure_ascii=False
         )
         for slide in self.presentation.slides:
-            for shape in slide.shapes:
-                if not isinstance(shape, Picture):
-                    continue
+            for shape in slide.shape_filter(Picture):
                 stats = self.image_stats[shape.data[0]]
                 if "caption" in stats:
                     shape.caption = stats["caption"]
@@ -46,25 +45,38 @@ class ImageLabler:
                     print(image, ": ", stats["caption"])
         self.apply_stats()
 
-    def label_images(self):
-        for image, stats in tqdm(self.image_stats.items()):
-            if "result" not in stats:
-                self.image_stats[image]["result"] = label_image(image, **stats)
-            os.rename(
-                image,
-                pjoin(
-                    app_config.RUN_DIR + "/images",
-                    self.image_stats[image]["result"]["label"],
-                    image.split("/")[-1],
-                ),
-            )
+    def label_images(self, slide_cluster: dict[str, list[int]], images: dict[str, str]):
+        template = Template(open("prompts/image_label/vision_cls.txt").read())
+        image_labels = {
+            "replace": [],
+            "background": [],
+        }
+        for slide_idxs in slide_cluster.values():
+            for slide_idx in slide_idxs:
+                slide = self.presentation.slides[slide_idx]
+                if not "Picture" in slide.get_content_types():
+                    continue
+                self.apply_labels(image_labels, slide)
+                result = json.loads(
+                    api_model(template.render(slide=slide, images=images))
+                )
+                for key, value in result.items():
+                    image_labels[key].extend(value)
+                self.apply_labels(result, slide)
         self.apply_stats()
+
+    def apply_labels(self, image_labels: dict[str, str], slide: SlidePage):
+        for shape in slide.shape_filter(Picture):
+            if shape.img_path in image_labels["replace"]:
+                shape.img_path = image_labels[shape.img_path]
+                shape.is_background = True
+            elif shape.img_path in image_labels["background"]:
+                shape.is_background = True
 
     def collect_images(self):
         for slide_index, slide in enumerate(self.presentation.slides):
-            for shape in slide.shapes:
-                if not isinstance(shape, Picture):
-                    continue
+            for shape in slide.shape_filter(Picture):
+                image_path = shape.data[0]
                 image_path = shape.data[0]
                 if image_path not in self.image_stats:
                     self.image_stats[image_path] = {
@@ -95,38 +107,3 @@ class ImageLabler:
                 end = num
         ranges.append((start, end))
         return ranges
-
-
-if __name__ == "__main__":
-    prs = Presentation.from_file(app_config.TEST_PPT)
-    LABEL = ["background", "content"]
-    ground_truth = {
-        "./output/images/图片 26.jpg": 0,
-        "./output/images/图片 33.png": 0,
-        "./output/images/图片 30.png": 0,
-        "./output/images/图片 23.png": 0,
-        "./output/images/图片 22.png": 0,
-        "./output/images/图片 7.png": 0,
-        "./output/images/图片 6.jpg": 1,
-        "./output/images/图片 7.jpg": 1,
-        "./output/images/图片 8.jpg": 1,
-        "./output/images/图片 9.jpg": 1,
-        "./output/images/Picture 2.jpg": 1,
-        "./output/images/图片 9.png": 1,
-        "./output/images/图片 15.png": 1,
-        "./output/images/图片 21.png": 1,
-        "./output/images/图片 2.png": 1,
-        "./output/images/图片 2.jpg": 0,
-    }
-    image_stats = json.load(open("image_stats.json", "r"))
-    false_samples = []
-    for k, v in tqdm(image_stats.items()):
-        output = label_image(image_file=k, outline=None, **v)
-        image_stats[k]["result"] = output
-        if output["label"] != LABEL[ground_truth[k]]:
-            false_samples.append([k, v, output])
-        json.dump(image_stats, open("image_stats.json", "w"))
-
-    print(
-        f"Accuracy of {label_image.__name__}: {100*(1-len(false_samples)/len(image_stats))}%"
-    )

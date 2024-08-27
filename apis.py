@@ -13,12 +13,17 @@ template_slides: list[SlidePage] = []
 # 在重新绑定变量名与全局变量时需要写global声明，否则不需要
 
 
+class HistoryMark(Enum):
+    API_CALL_ERROR = "api_call_error"
+    API_CALL_CORRECT = "api_call_correct"
+
+
 class ModelAPI:
 
     def __init__(self, local_vars: dict[str, list[callable]], terminate_times: int):
         self.registered_functions = local_vars
         self.local_vars = {func.__name__: func for func in sum(local_vars.values(), [])}
-        self.correct_template = Template(open("prompts/code_feedback.txt").read())
+        self.correct_template = Template(open("prompts/agent/code_feedback.txt").read())
         self.terminate_times = terminate_times
         self.history = []
 
@@ -27,7 +32,7 @@ class ModelAPI:
 
     def _api_doc(self, op_type: str):
         op_funcs = self.registered_functions[op_type]
-        api_doc = [op_type.value.capitalize() + " APIs:"]
+        api_doc = [op_type.name + " API Docs:"]
         for func in op_funcs:
             sig = inspect.signature(func)
             params = []
@@ -48,7 +53,7 @@ class ModelAPI:
         err_time = 0
         line_idx = 0
         backup_state = (deepcopy(slide), deepcopy(template_slides))
-        self.history.append({"prompt": prompt, "apis": apis})
+        self.history.append([HistoryMark.API_CALL_ERROR, prompt, apis])
         while line_idx < len(lines):
             line = lines[line_idx]
             if line.startswith("#") or line.startswith("`") or not line.strip():
@@ -56,6 +61,7 @@ class ModelAPI:
             try:
                 eval(line)
                 line_idx += 1
+                self.history[-1][0] = HistoryMark.API_CALL_CORRECT
             except Exception as e:
                 err_time += 1
                 if err_time > self.terminate_times:
@@ -75,7 +81,7 @@ class ModelAPI:
                 )
                 lines = agent_model(prompt).strip().split("\n")
                 line_idx = 0
-                self.history.append({"prompt": prompt, "apis": apis})
+                self.history.append([HistoryMark.API_CALL_ERROR, prompt, apis])
 
         assert err_time < self.terminate_times, "\n".join(code_traces)
         return code_traces
@@ -106,7 +112,7 @@ def delete_text(element_id: str):
     raise ValueError("The element_id is invalid.")
 
 
-def set_text(element_id: str, text: str):
+def replace_text(element_id: str, text: str):
     """
     This function replaces the text of the element with the given element_id.
     """
@@ -128,19 +134,14 @@ def set_text(element_id: str, text: str):
 # 这里需要调整aspect ratio
 # 对于clone 的shape单独调用build
 # jia ge builded? image可以最后再build
-def set_image(element_id: str, image_path: str):
+def replace_image(element_id: str, image_path: str):
     """
     This function sets the image of the element with the given id.
     """
-    for shape in slide.shapes:
-        if shape.element_idx == element_id:
-            assert isinstance(shape, Picture), "The shape is not a Picture."
-            with open(image_path, "rb") as f:
-                img_blob = f.read()
-            rid = shape._pic.xpath("./p:blipFill/a:blip/@r:embed")[0]
-            imgPart = slide.part.related_part(rid)
-            imgPart._blob = img_blob
-            shape.img_path = image_path
+    shape = find_shape(element_id)
+    if not isinstance(shape, Picture):
+        raise ValueError("The shape is not a Picture.")
+    shape.img_path = image_path
 
 
 def select_template(template_idx):
@@ -172,6 +173,16 @@ def del_shape(element_id: str):
     for shape in slide.shapes:
         if shape.element_idx == element_id:
             slide.shapes.remove(shape)
+
+
+def del_image(element_id: str):
+    """
+    This function deletes the image of the element with the given id.
+    """
+    shape = find_shape(element_id)
+    if not isinstance(shape, Picture):
+        raise ValueError("The shape is not a Picture.")
+    slide.shapes.remove(shape)
 
 
 # including shape bounds
@@ -212,9 +223,10 @@ class API_TYPES(Enum):
 
 model_api = ModelAPI(
     {
+        # group shape
         API_TYPES.LAYOUT_ADJUST: [clone_shape, del_shape, select_template],
         API_TYPES.STYLE_ADJUST: [swap_style],
-        API_TYPES.SET_CONTENT: [set_text, set_image],
+        API_TYPES.SET_CONTENT: [replace_text, replace_image, del_image],
     },
     5,
 )

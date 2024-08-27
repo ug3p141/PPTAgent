@@ -107,7 +107,7 @@ class OPENAI:
     def __call__(
         self,
         content: str,
-        image_file: str = None,
+        image_files: list[str] = None,
         system_message: str = None,
         chat_history: list = None,
     ) -> dict:
@@ -122,16 +122,19 @@ class OPENAI:
                     "content": [{"type": "text", "text": system_message}],
                 },
             )
-        if image_file is not None:
-            with open(image_file, "rb") as image:
-                messages[-1]["content"].append(
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64.b64encode(image.read()).decode('utf-8')}"
-                        },
-                    }
-                )
+        if image_files is not None:
+            if not isinstance(image_files, list):
+                image_files = [image_files]
+            for image_file in image_files:
+                with open(image_file, "rb") as image:
+                    messages[-1]["content"].append(
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64.b64encode(image.read()).decode('utf-8')}"
+                            },
+                        }
+                    )
         completion = self.client.chat.completions.create(
             model=self.model, messages=messages
         )
@@ -146,38 +149,6 @@ gpt4o = OPENAI()
 gpt4omini = OPENAI(model="gpt-4o-mini")
 caption_model = gpt4omini
 agent_model = gpt4o
-
-
-def label_image(
-    image_file: str,
-    appear_times: int,
-    top_ranges_str: str,
-    relative_area: float,
-    caption: str,
-    **kwargs,
-):
-    prompt_head = open("prompts/image_label/image_cls_withcap.txt").read()
-    aspect_ratio, _ = internvl_load_image(image_file)
-    prompt = (
-        prompt_head
-        + "Input:\n"
-        + str(
-            {
-                "caption": caption,
-                "appear_times": appear_times,
-                "slide_range": top_ranges_str,
-                "aspect_ratio": aspect_ratio,
-                "relative_area": relative_area,
-            }
-        )
-    )
-    return agent_model(prompt, image_file)
-
-
-def get_outline(content: str):
-    template = Template(open("prompts/get_outline.txt").read())
-    prompt = template(paper_md=content).render()
-    return agent_model(prompt)
 
 
 if __name__ == "__main__":

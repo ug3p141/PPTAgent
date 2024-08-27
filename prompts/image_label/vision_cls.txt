@@ -1,0 +1,27 @@
+Task:
+
+1. Identify which image elements in the slide image are likely background images.
+2. For each identified background image:
+   - If there is a similar image in the provided set (e.g., replacing a logo with a logo, or a banner with a banner), choose the most appropriate image for replacement.
+   - If there is no similar image available in the provided set, retain the original background image.
+
+Output:
+
+Return a JSON object containing two fields without markdown code block:
+- `"replace"`: A list of mappings for the replaced images. Each mapping should include `"old_image_path"` and `"new_image_path"`, representing the original image being replaced and the new image being used.
+- `"background"`: A list of paths for all images identified as background images that were not replaced.
+
+Example Output:
+{
+  "replace": [
+    {"old_image_path": "path/to/old/logo.png", "new_image_path": "path/to/new/logo.png"},
+    {"old_image_path": "path/to/old/banner.jpg", "new_image_path": "path/to/new/banner.jpg"}
+  ],
+  "background": [
+    "path/to/old/background.jpg"
+  ]
+}
+Input:
+
+Slide Image Information: {{ slide_images }}
+Provided Images: {{ provided_images }}

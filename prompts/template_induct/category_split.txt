@@ -1,0 +1,25 @@
+I have a collection of slides from a PowerPoint presentation, provided in plain text format. I would like you to complete the following tasks based on the content of the slides:
+
+1. Extract slides related to non-content-specific categories or those that serve a specific function. Non-content-specific categories include things like "Experimental Setup" or "Conclusion," which are related to the structure or purpose of the presentation. However, specific topics tied to entities, such as "GPT" or "Company XYZ," should not be extracted as separate categories.
+
+2. Ensure that each category is described using no more than 5 words.
+
+3. Merge similar categories if they serve the same purpose or relate to the same structural element.
+
+4. For slides that cannot be categorized based on the above criteria, place them in a separate list.
+
+Example Output:
+{
+    "categories": {
+        "Opening": [1],
+        "Experimental Setup": [2, 3],
+        "Conclusion": [8],
+    },
+    "uncategorized": [4, 5, 6, 7]
+}
+
+Remember, all provided slides must be processed, and slides that cannot be categorized based on the defined criteria should be placed in the uncategorized list. Now, analyze the following slides and provide your answer in JSON format without using a markdown code block:
+
+Inputs:
+{{ slides }}
+Output:

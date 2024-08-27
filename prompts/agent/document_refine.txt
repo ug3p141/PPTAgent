@@ -23,7 +23,7 @@ Step-by-Step Instructions:
 Example Output:
 {
     "title": "title of document",
-    "meatadata": "the metadata of the document, such as author, date, etc. format as a dict",
+    "metadata": "the metadata of the document, such as author, date, etc. format as a dict",
     "sections": [
         {
             "title": "title of section1",
@@ -48,6 +48,7 @@ Example Output:
 }
 
 Take a deep breath and work on this problem step-by-step.
+Give your output in JSON format without markdown code block
 Input:
 {{ markdown_document }}
 Output:

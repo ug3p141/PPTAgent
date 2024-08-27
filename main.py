@@ -59,12 +59,11 @@ def ppt_gen(pdf_markdown: str, ppt_file: str, images_dir: str, num_pages: int = 
     #     for k in os.listdir(images_dir)
     # }
     images = json.load(open("resource/image_caption.json"))
-    # 去掉对metadata keys的需求
     slide_cluster = TemplateInducter(presentation).work()
-    # 其实这一步有点没必要了
-    # labler.label_images()  # TODO 重写prompt size_match的原则？
+    presentation.normalize()
+    labler.label_images(slide_cluster, images)
 
-    # 4. 使用模板生成PPT
+    # 3. 使用模板生成PPT
     PPTAgent(presentation, slide_cluster, pdf_markdown, images, num_pages).work()
 
 

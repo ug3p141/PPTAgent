@@ -211,6 +211,9 @@ class Config:
     def set_debug(self, debug: bool):
         self.DEBUG = debug
 
+    def set_ppt_to_images_url(self, url: str):
+        self.PPT_TO_IMAGES_URL = url
+
 
 pjoin = os.path.join
 pexists = os.path.exists

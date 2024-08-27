@@ -1,0 +1,17 @@
+Task Description:
+
+Analyze the content layout and media types in the given slides.
+Your goal is to create a descriptive title for a groups of slides that accurately reflects the presentation style, layout, and relationships between the content elements without referencing specific entities or technical terms.
+
+Requirements:
+	- Focus on the presentation style, layout, and the relationship between the media and text.
+	- Avoid using specific entities or detailed technical terms in the titles.
+	- Ensure the titles reflect the overall theme and structure of the slide.
+
+You cannot use the following layout names:
+{{ existed_layoutnames }}
+
+Sample Output:
+“Timeline-Based Presentation of Technological Evolution”
+
+Output: Provide a one-line descriptive title

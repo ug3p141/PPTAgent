@@ -31,6 +31,14 @@ def text_embedding(text: str):
 
 
 def image_embedding(image_dir: str, batchsize: int = 16):
+    global extractor
+    global image_embed_model
+    if image_embed_model is None:
+        image_embed_model = AutoModel.from_pretrained(
+            "google/vit-base-patch16-224-in21k",
+            torch_dtype=torch.float16,
+            device_map=DEVICE_MAP,
+        ).eval()
     if extractor is None:
         extractor = AutoFeatureExtractor.from_pretrained(
             "google/vit-base-patch16-224-in21k"
@@ -43,13 +51,7 @@ def image_embedding(image_dir: str, batchsize: int = 16):
             T.Normalize(mean=extractor.image_mean, std=extractor.image_std),
         ]
     )
-    global image_embed_model
-    if image_embed_model is None:
-        image_embed_model = AutoModel.from_pretrained(
-            "google/vit-base-patch16-224-in21k",
-            torch_dtype=torch.float16,
-            device_map=DEVICE_MAP,
-        ).eval()
+
     inputs = []
     embeddings = []
     images = [
@@ -148,8 +150,8 @@ def get_cluster(similarity: np.ndarray, sim_bound: float = 0.65):
         if best_point is not None:
             best_cluster.append(best_point)
             added[best_point] = True
-            sim_copy[best_point, :] = 0
-            sim_copy[:, best_point] = 0
+            similarity[best_point, :] = 0
+            similarity[:, best_point] = 0
         else:
             if similarity.max() < sim_bound:
                 break

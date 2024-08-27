@@ -631,7 +631,6 @@ class Table(ShapeElement):
         self.text_frame.build(graphic_frame)
 
 
-# TODO  GraphicFrame
 # class GraphicFrame(ShapeElement):
 #     @classmethod
 #     def from_shape(
@@ -694,14 +693,13 @@ class SlidePage:
         self.slide_width = slide_width
         self.slide_height = slide_height
         groups_shapes_labels = []
-        for shape in shapes:
-            if isinstance(shape, GroupShape):
-                for group_shape in groups_shapes_labels:
-                    if group_shape == shape:
-                        shape.group_label = group_shape.group_label
-                        continue
-                    groups_shapes_labels.append(shape)
-                    shape.group_label = f"group_{len(groups_shapes_labels)}"
+        for shape in self.shape_filter(GroupShape):
+            for group_shape in groups_shapes_labels:
+                if group_shape == shape:
+                    shape.group_label = group_shape.group_label
+                    continue
+                groups_shapes_labels.append(shape)
+                shape.group_label = f"group_{len(groups_shapes_labels)}"
 
     @classmethod
     def from_slide(
@@ -748,6 +746,13 @@ class SlidePage:
             ph.element.getparent().remove(ph.element)
         return slide
 
+    def shape_filter(self, shape_type: list[ShapeElement]):
+        if not isinstance(shape_type, list):
+            shape_type = [shape_type]
+        for shape in self.shapes:
+            if isinstance(shape, shape_type):
+                yield shape
+
     def get_content_types(self, shapes: list[ShapeElement] = None):
         content_types = set()
         if shapes is None:
@@ -763,13 +768,19 @@ class SlidePage:
                 content_types.union(self.get_content_types(shape.data))
         return sorted(list(content_types))
 
-    def to_html(self) -> str:
+    def to_html(self, filter_out: list[type] = None) -> str:
         return "".join(
             [
                 "<!DOCTYPE html>\n<html>\n",
                 (f"<title>{self.slide_title}</title>\n" if self.slide_title else ""),
-                f'<body style="width:{self.slide_width}pt; height:{self.slide_height}pt;">\n'
-                + "\n".join(shape.to_html() for shape in self.shapes),
+                f'<body style="width:{self.slide_width}pt; height:{self.slide_height}pt;">\n',
+                "\n".join(
+                    [
+                        shape.to_html()
+                        for shape in self.shapes
+                        if filter_out is None or type(shape) not in filter_out
+                    ]
+                ),
                 "</body>\n</html>\n",
             ]
         )
@@ -777,12 +788,31 @@ class SlidePage:
     def to_text(self) -> str:
         return "\n".join(
             [
-                shape.text_frame.text
+                shape.text_frame.text.strip()
                 for shape in self.shapes
                 if shape.text_frame.is_textframe
             ]
-            + [shape.caption for shape in self.shapes if isinstance(shape, Picture)]
+            + [
+                shape.caption
+                for shape in self.shape_filter(Picture)
+                if not shape.is_background
+            ]
         )
+
+    def normalize(self):
+        for shape in self.shape_filter((Chart, Table)):
+            shape = Picture(
+                shape.slide_idx,
+                shape.shape_idx,
+                {"img_style": {}} | shape.style,
+                [
+                    "picture placeholder",
+                    f"{type(shape).__name__}_{shape.shape_idx}",
+                    "",
+                ],
+                shape.text_frame,
+            )
+            shape.is_background = False
 
     @property
     def text_length(self):
@@ -892,6 +922,10 @@ class Presentation:
                 if slide_idx in pages
             ]
         )
+
+    def normalize(self):
+        for slide in self.slides:
+            slide.normalize()
 
     def __len__(self):
         return len(self.slides)
