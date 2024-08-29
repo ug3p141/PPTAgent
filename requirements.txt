@@ -9,7 +9,6 @@ peft
 timm
 einops
 vllm
-func_argparse
 pillow
 googlesearch-python
 socksio
@@ -21,3 +20,4 @@ lxml
 torch
 torchvision
 pytorch_fid
+# binary: poppler-utils libreoffice

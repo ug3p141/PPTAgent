@@ -2,7 +2,6 @@ import os
 from copy import deepcopy
 
 import numpy as np
-import pytorch_fid.fid_score as fid
 import torch
 import torchvision.transforms as T
 from FlagEmbedding import BGEM3FlagModel
@@ -10,9 +9,8 @@ from PIL import Image
 from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoFeatureExtractor, AutoModel
 
+from presentation import Presentation
 from utils import IMAGE_EXTENSIONS, pjoin
-
-fid.tqdm = lambda x: x
 
 DEVICE_MAP = "mps"
 
@@ -28,6 +26,24 @@ def text_embedding(text: str):
             "BAAI/bge-m3", use_fp16=True, device=DEVICE_MAP
         )
     return text_embed_model.encode(text)["dense_vecs"]
+
+
+def prs_dedup(presentation: Presentation):
+    pre_embedding = text_embedding(presentation.slides[0].to_text())
+    slide_idx = 1
+    slides = []
+    while slide_idx < len(presentation.slides):
+        cur_embedding = text_embedding(presentation.slides[slide_idx].to_text())
+        if (
+            np.dot(pre_embedding, cur_embedding)
+            / (np.linalg.norm(pre_embedding) * np.linalg.norm(cur_embedding))
+            > 0.8
+        ):
+            slides.append(presentation.slides.pop(slide_idx - 1))  # 去重
+        else:
+            slide_idx += 1
+        pre_embedding = cur_embedding
+    return slides
 
 
 def image_embedding(image_dir: str, batchsize: int = 16):
@@ -82,37 +98,6 @@ def images_cosine_similarity(embeddings: list[torch.Tensor]):
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
-
-
-def fid_score(img_dir: str):
-    img_files = sorted([f for f in os.listdir(img_dir)])
-    num_images = len(img_files)
-    fid_scores = np.zeros((num_images, num_images))
-    os.system("rm -rf .temp_1")
-    os.system("rm -rf .temp_2")
-    os.makedirs(".temp_1")
-    os.makedirs(".temp_2")
-    for i in range(num_images):
-        for j in range(i + 1, num_images):
-            img_i_path = pjoin(img_dir, img_files[i])
-            img_j_path = pjoin(img_dir, img_files[j])
-            os.rename(img_i_path, pjoin(".temp_1", img_files[i]))
-            os.rename(img_j_path, pjoin(".temp_2", img_files[j]))
-            fid_value = fid.calculate_fid_given_paths(
-                [".temp_1", ".temp_2"],
-                batch_size=1,
-                device="cuda",
-                dims=2048,
-            )
-            fid_scores[i, j] = fid_value
-            fid_scores[j, i] = fid_value
-
-            if fid_value < 150:
-                print(f"{img_files[i]} - {img_files[j]}: {fid_value}")
-            os.rename(pjoin(".temp_1", img_files[i]), img_i_path)
-            os.rename(pjoin(".temp_2", img_files[j]), img_j_path)
-
-    print(fid_scores)
 
 
 def average_distance(similarity, idx, cluster_idx):

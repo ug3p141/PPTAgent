@@ -47,7 +47,6 @@ Example Output:
     ]
 }
 
-Take a deep breath and work on this problem step-by-step.
 Give your output in JSON format without markdown code block
 Input:
 {{ markdown_document }}

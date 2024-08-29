@@ -13,16 +13,6 @@ from model_utils import internvl_load_image
 from utils import print, tenacity
 
 
-class SingletonMeta(type):
-    _instances = {}
-
-    def __call__(cls, *args, **kwargs):
-        if cls not in cls._instances:
-            instance = super().__call__(*args, **kwargs)
-            cls._instances[cls] = instance
-        return cls._instances[cls]
-
-
 class Gemini:
     def __init__(self, time_limit: int = 60) -> None:
         self.time_limit = time_limit
@@ -99,29 +89,39 @@ class Gemini:
 
 
 class OPENAI:
-    def __init__(self, model: str = "gpt-4o-2024-08-06", api_base: str = None) -> None:
+    def __init__(
+        self,
+        model: str = "gpt-4o-2024-08-06",
+        api_base: str = None,
+        history_limit: int = 8,
+    ) -> None:
         self.client = OpenAI(base_url=api_base)
         self.model = model
+        self.system_message = [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": "You are a helpful assistant"}],
+            }
+        ]
+        self.history = []
+        self.history_limit = history_limit
+        assert history_limit % 2 == 0, "history_limit must be even"
 
     @tenacity
     def __call__(
         self,
         content: str,
         image_files: list[str] = None,
-        system_message: str = None,
-        chat_history: list = None,
-    ) -> dict:
-        messages = [{"role": "user", "content": [{"type": "text", "text": content}]}]
-        if chat_history is not None:
-            messages = chat_history + messages
-        elif system_message is not None:
-            messages.insert(
-                0,
-                {
-                    "role": "system",
-                    "content": [{"type": "text", "text": system_message}],
-                },
-            )
+        save_history: bool = False,
+    ) -> str:
+        if len(self.history) > self.history_limit:
+            self.history = self.history[-self.history_limit :]
+        if content.startswith("You are"):
+            system_message, content = content.split("\n", 1)
+            self.system_message[0]["content"][0]["text"] = system_message
+        messages = self.history + [
+            {"role": "user", "content": [{"type": "text", "text": content}]}
+        ]
         if image_files is not None:
             if not isinstance(image_files, list):
                 image_files = [image_files]
@@ -136,9 +136,16 @@ class OPENAI:
                         }
                     )
         completion = self.client.chat.completions.create(
-            model=self.model, messages=messages
+            model=self.model, messages=self.system_message + messages
         )
-        return completion.choices[0].message.content
+        response = completion.choices[0].message.content
+        messages.append({"role": "assistant", "content": response})
+        if save_history:
+            self.history = messages
+        return response
+
+    def clear_history(self):
+        self.history = []
 
 
 gemini = Gemini()

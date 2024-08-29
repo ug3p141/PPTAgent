@@ -1,10 +1,15 @@
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import traceback
 import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 
+import numpy as np
 from lxml import etree
+from pdf2image import convert_from_bytes
 from pptx.dml.fill import _NoFill, _NoneFill
 from pptx.shapes.base import BaseShape
 from pptx.shapes.group import GroupShape
@@ -25,8 +30,36 @@ tenacity = retry(
 )
 
 
+def parse_pdf(file: str, output_dir: str):
+    pass
+
+
+def ppt_to_images(file: str, output_dir: str):
+    if not file.endswith(".pptx"):
+        raise ValueError("file must be a pptx")
+    os.makedirs(output_dir, exist_ok=True)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_pptx = pjoin(temp_dir, pbasename(file))
+        temp_pdf = pjoin(temp_dir, pbasename(file).replace(".pptx", ".pdf"))
+        shutil.copyfile(file, temp_pptx)
+        command_list = [
+            "soffice",
+            "--headless",
+            "--convert-to",
+            "pdf",
+            temp_pptx,
+            "--outdir",
+            temp_dir,
+        ]
+        subprocess.run(command_list, check=True)
+        with open(temp_pdf, "rb") as f:
+            images = convert_from_bytes(f.read(), dpi=96)
+        for i, img in enumerate(images):
+            img.save(pjoin(output_dir, f"slide_{i+1:04d}.jpg"))
+
+
 def filename_normalize(filename: str):
-    return re.sub(r"[\/\0]", "_", filename)
+    return filename.replace("/", "_").replace(" ", "_").replace("\\", "_")
 
 
 def set_proxy(proxy_url: str):
@@ -34,13 +67,15 @@ def set_proxy(proxy_url: str):
     os.environ["https_proxy"] = proxy_url
 
 
-def get_text_inlinestyle(para: dict):
+def get_text_inlinestyle(para: dict, stylish: bool):
+    if not stylish:
+        return ""
     font = SimpleNamespace(**para["font"])
     font_size = f"font-size: {Length(font.size).pt}pt;" if font.size else ""
-    font_family = f"font-family: {font.name};" if font.name else ""
+    # font_family = f"font-family: {font.name};" if font.name else ""
     font_color = f"color={font.color};" if font.color else ""
     font_bold = "font-weight: bold;" if font.bold else ""
-    return 'style="{}"'.format("".join([font_size, font_family, font_color, font_bold]))
+    return 'style="{}"'.format("".join([font_size, font_color, font_bold]))
 
 
 def extract_fill(shape: BaseShape):
@@ -211,12 +246,10 @@ class Config:
     def set_debug(self, debug: bool):
         self.DEBUG = debug
 
-    def set_ppt_to_images_url(self, url: str):
-        self.PPT_TO_IMAGES_URL = url
-
 
 pjoin = os.path.join
 pexists = os.path.exists
+pbasename = os.path.basename
 app_config = Config("test")
 
 if __name__ == "__main__":

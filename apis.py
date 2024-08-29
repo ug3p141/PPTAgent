@@ -16,16 +16,19 @@ template_slides: list[SlidePage] = []
 class HistoryMark(Enum):
     API_CALL_ERROR = "api_call_error"
     API_CALL_CORRECT = "api_call_correct"
+    CODE_RUN_ERROR = "code_run_error"
+    CODE_RUN_CORRECT = "code_run_correct"
 
 
 class ModelAPI:
 
-    def __init__(self, local_vars: dict[str, list[callable]], terminate_times: int):
+    def __init__(self, local_vars: dict[str, list[callable]], terminate_times: int = 5):
         self.registered_functions = local_vars
         self.local_vars = {func.__name__: func for func in sum(local_vars.values(), [])}
         self.correct_template = Template(open("prompts/agent/code_feedback.txt").read())
         self.terminate_times = terminate_times
-        self.history = []
+        self.api_history = []
+        self.code_history = []
 
     def get_apis_docs(self, op_types: list[str]):
         return "\n".join([self._api_doc(op_type) for op_type in op_types])
@@ -53,15 +56,22 @@ class ModelAPI:
         err_time = 0
         line_idx = 0
         backup_state = (deepcopy(slide), deepcopy(template_slides))
-        self.history.append([HistoryMark.API_CALL_ERROR, prompt, apis])
+        self.api_history.append([HistoryMark.API_CALL_ERROR, prompt, apis])
+        code_start = False
         while line_idx < len(lines):
             line = lines[line_idx]
-            if line.startswith("#") or line.startswith("`") or not line.strip():
+            line_idx += 1
+            if line.startswith("<code>"):
+                code_start = True
                 continue
+            if line.startswith("</code>"):
+                code_start = False
+            if not code_start:
+                continue
+            self.code_history.append([HistoryMark.CODE_RUN_ERROR, line])
             try:
                 eval(line)
-                line_idx += 1
-                self.history[-1][0] = HistoryMark.API_CALL_CORRECT
+                self.code_history[-1][0] = HistoryMark.CODE_RUN_CORRECT
             except Exception as e:
                 err_time += 1
                 if err_time > self.terminate_times:
@@ -81,9 +91,13 @@ class ModelAPI:
                 )
                 lines = agent_model(prompt).strip().split("\n")
                 line_idx = 0
-                self.history.append([HistoryMark.API_CALL_ERROR, prompt, apis])
+                self.api_history.append([HistoryMark.API_CALL_ERROR, prompt, apis])
 
-        assert err_time < self.terminate_times, "\n".join(code_traces)
+        if err_time < self.terminate_times:
+            self.api_history[-1][0] = HistoryMark.API_CALL_CORRECT
+        else:
+            self.api_history[-1][0] = HistoryMark.API_CALL_ERROR
+            raise ValueError("The api call is not correct.")
         return code_traces
 
 
@@ -144,13 +158,13 @@ def replace_image(element_id: str, image_path: str):
     shape.img_path = image_path
 
 
-def select_template(template_idx):
+def select_template(template_idx: int):
     global slide
     slide = deepcopy(template_slides[template_idx])
 
 
 # shape groupfy 或者也许模型可以自己控制哪些是同一个group的
-def clone_shape(element_id: str, new_element_id: str, shape_bounds: dict):
+def clone_element_byid(element_id: str, new_element_id: str, shape_bounds: dict):
     """
     This function clones the shape with the given id, applying the specified bounding box to the new shape.
 
@@ -166,7 +180,7 @@ def clone_shape(element_id: str, new_element_id: str, shape_bounds: dict):
     slide.shapes.append(shape)
 
 
-def del_shape(element_id: str):
+def del_element_byid(element_id: str):
     """
     This function deletes the shape with the given id,
     """
@@ -175,17 +189,8 @@ def del_shape(element_id: str):
             slide.shapes.remove(shape)
 
 
-def del_image(element_id: str):
-    """
-    This function deletes the image of the element with the given id.
-    """
-    shape = find_shape(element_id)
-    if not isinstance(shape, Picture):
-        raise ValueError("The shape is not a Picture.")
-    slide.shapes.remove(shape)
-
-
 # including shape bounds
+# 把这个取消了
 def swap_style(source_element_id: str, target_element_id: str):
     """
     This function swaps the style of the source shape with the style of the target shape.
@@ -216,25 +221,22 @@ def swap_style(source_element_id: str, target_element_id: str):
 
 
 class API_TYPES(Enum):
-    LAYOUT_ADJUST = "layout adjust"
     STYLE_ADJUST = "style adjust"
-    SET_CONTENT = "set content"
+    TEXT_EDITING = "text editing"
+    IMAGE_EDITING = "image editing"
+    LAYOUT_ADJUST = "layout adjust"
 
 
+# 现在不允许clone 操作
 model_api = ModelAPI(
     {
-        # group shape
-        API_TYPES.LAYOUT_ADJUST: [clone_shape, del_shape, select_template],
+        API_TYPES.LAYOUT_ADJUST: [select_template, del_element_byid],
         API_TYPES.STYLE_ADJUST: [swap_style],
-        API_TYPES.SET_CONTENT: [replace_text, replace_image, del_image],
+        API_TYPES.TEXT_EDITING: [replace_text],
+        API_TYPES.IMAGE_EDITING: [replace_image],
     },
-    5,
 )
 
 
 if __name__ == "__main__":
-    print(
-        model_api.get_apis_docs(
-            [API_TYPES.SET_CONTENT, API_TYPES.LAYOUT_ADJUST, API_TYPES.STYLE_ADJUST]
-        )
-    )
+    print(model_api.get_apis_docs([API_TYPES.SLIDE_GENERATE, API_TYPES.STYLE_ADJUST]))
