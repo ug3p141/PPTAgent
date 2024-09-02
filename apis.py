@@ -4,9 +4,13 @@ from copy import deepcopy
 from enum import Enum
 
 from jinja2 import Template
+from pptx.dml.color import RGBColor
+from pptx.oxml import parse_xml
+from pptx.text.text import _Paragraph, _Run
+from pptx.util import Pt
 
 from llms import agent_model
-from presentation import Picture, SlidePage
+from presentation import GroupShape, Picture, SlidePage
 
 slide: SlidePage = None
 template_slides: list[SlidePage] = []
@@ -101,123 +105,146 @@ class ModelAPI:
         return code_traces
 
 
-def find_shape(element_id: str):
-    for shape in slide.shapes:
-        if shape.element_idx == element_id:
-            return shape
+def runs_merge(paragraph: _Paragraph):
+    runs = paragraph.runs
+    if len(runs) == 0:
+        runs = [
+            _Run(r, paragraph)
+            for r in parse_xml(paragraph._element.xml.replace("fld", "r")).r_lst
+        ]
+    run = max(runs, key=lambda x: len(x.text))
+    run.text = paragraph.text
+    # remove other run
+    for run in runs:
+        if run != run:
+            run._element.getparent().remove(run._element)
+    return run
 
 
-# element_id 在前，让gpt添加注释和例子
-def delete_text(element_id: str):
-    """
-    This function deletes the text of the element with the given element_id.
-    """
-    element_id, text_id = element_id.split("_")
-    shape = find_shape(element_id)
-    assert shape.text_frame.is_textframe, "The shape does't have a TextFrame."
-    idx = -1
-    for i in shape.text_frame.data:
-        if i["text"]:
-            idx += 1
-        if idx == text_id:
-            # TODO change for build finished
-            shape.text_frame.data.remove(i)
-            return
-    raise ValueError("The element_id is invalid.")
+def get_textframe(textframe_id: str):
+    assert "_" in textframe_id, "The element_id of a text element should contain a `_` "
+    element_id, text_id = textframe_id.split("_")
+    shape = slide[element_id]
+    assert (
+        shape.text_frame.is_textframe and len(shape.text_frame.data) > text_id
+    ), f"Incorrect element id: {element_id}."
+    return shape, text_id
 
 
-def replace_text(element_id: str, text: str):
-    """
-    This function replaces the text of the element with the given element_id.
-    """
-    assert "_" in element_id, "The element_id of a text element should contain a `_` "
-    element_id, text_id = list(map(int, element_id.split("_")))
-    shape = find_shape(element_id)
-    assert shape.text_frame.is_textframe, "The shape does't have a TextFrame."
-    for para in shape.text_frame.data:
-        if para["idx"] == text_id:
-            if len(para["text"].splitlines()) != len(text.splitlines()):
-                raise ValueError(
-                    "The new text should have the same number of lines as the old text."
-                )
-            para["text"] = text
-            return
-    raise ValueError("The element_id is invalid.")
+def delete_text(textframe_id: str):
+    """Delete the text of the element with the given element_id."""
+    shape, text_id = get_textframe(textframe_id)
+
+    def del_para(shape):
+        para = shape.paragraphs[text_id]._p
+        para.getparent().remove(para)
+
+    shape.closures.append(del_para)
 
 
-# 这里需要调整aspect ratio
-# 对于clone 的shape单独调用build
-# jia ge builded? image可以最后再build
-def replace_image(element_id: str, image_path: str):
+def replace_text(textframe_id: str, text: str):
+    """Replaces the text of the element with the given element_id."""
+    shape, text_id = get_textframe(textframe_id)
+
+    def replace_para(shape):
+        run = runs_merge(shape.paragraphs[text_id])
+        run.text = text
+
+    shape.closures.append(replace_para)
+
+
+def set_font_style(
+    textframe_id: str,
+    bold: bool = None,
+    italic: bool = None,
+    underline: bool = None,
+    font_size: int = None,
+    font_color: str = None,
+):
     """
-    This function sets the image of the element with the given id.
+    Set the font style of a text frame.
+
+    Parameters:
+    textframe_id (str, required): The ID of the text frame.
+    bold (bool, optional): Whether the text should be bold. Defaults to None.
+    italic (bool, optional): Whether the text should be italic. Defaults to None.
+    underline (bool, optional): Whether the text should be underlined. Defaults to None.
+    font_size (int, optional): The font size. Defaults to None.
+    font_color (str, optional): The font color in RGB format (e.g., 'FF0000' for red). Defaults to None.
+
+    Example:
+    >>> set_font_style("1_1", bold=True, font_size=24, font_color="FF0000")
     """
-    shape = find_shape(element_id)
+    shape, text_id = get_textframe(textframe_id)
+
+    def set_font(shape):
+        run = runs_merge(shape.paragraphs[text_id])
+        if bold is not None:
+            run.font.bold = bold
+        if italic is not None:
+            run.font.italic = italic
+        if underline is not None:
+            run.font.underline = underline
+        if font_size is not None:
+            run.font.size = Pt(font_size)
+        if font_color is not None:
+            run.font.color.rgb = RGBColor.from_string(font_color)
+
+    shape.closures.append(set_font)
+
+
+def adjust_element_geometry(
+    element_id: str, left: int, top: int, width: int, height: int
+):
+    """
+    Set the position and size of a element.
+
+    Parameters:
+    element_id (str, required): The ID of the element.
+    left (int, required): The left position of the element.
+    top (int, required): The top position of the element.
+    width (int, required): The width of the element.
+    height (int, required): The height of the element.
+
+    Example:
+    >>> set_shape_position("1", 100, 150, 200, 300)
+    """
+    shape = slide[element_id]
+
+    def set_geometry(shape):
+        shape.left = left
+        shape.top = top
+        shape.width = width
+        shape.height = height
+
+    shape.closures.append(set_geometry)
+
+
+def replace_image(figure_id: str, image_path: str):
+    """Replace the image of the element with the given id."""
+    shape = slide[figure_id]
     if not isinstance(shape, Picture):
-        raise ValueError("The shape is not a Picture.")
+        raise ValueError("The element is not a Picture.")
     shape.img_path = image_path
 
 
 def select_template(template_idx: int):
+    """Select the template slide with the specified index."""
     global slide
     slide = deepcopy(template_slides[template_idx])
 
 
-# shape groupfy 或者也许模型可以自己控制哪些是同一个group的
-def clone_element_byid(element_id: str, new_element_id: str, shape_bounds: dict):
-    """
-    This function clones the shape with the given id, applying the specified bounding box to the new shape.
-
-    Args:
-        element_id (str): The unique identifier of the shape to clone.
-        new_element_id (str): The new element id for the cloned shape should be element_id + '-' +the number of cloned times.
-        shape_bounds (dict): A dictionary containing the bounding box parameters of the shape, including `left`, `top`, `width`, and `height`.
-        eg. `clone_shape('1', '1-1', {'left': 100, 'top': 200, 'width': 300, 'height': 400})`
-    """
-    shape = find_shape(element_id)
-    shape.shape_idx = new_element_id
-    shape.style["shape_bounds"] = shape_bounds
-    slide.shapes.append(shape)
-
-
 def del_element_byid(element_id: str):
-    """
-    This function deletes the shape with the given id,
-    """
+    """Delete the element with the given id"""
     for shape in slide.shapes:
         if shape.element_idx == element_id:
             slide.shapes.remove(shape)
-
-
-# including shape bounds
-# 把这个取消了
-def swap_style(source_element_id: str, target_element_id: str):
-    """
-    This function swaps the style of the source shape with the style of the target shape.
-    In certain scenarios, one shape in a list may need to become a focal element (e.g., bold, highlighted with different colors, underlined).
-    During setting elements, it is sometimes necessary to modify the focal element based on its content.
-    """
-    is_textframe = "_" in source_element_id
-    assert is_textframe == (
-        "_" in target_element_id
-    ), "The source and target shapes should be the same type (text or picture)."
-    if is_textframe:
-        source_element_id, source_text_id = source_element_id.split("_")
-        target_element_id, target_text_id = target_element_id.split("_")
-    source_shape, target_shape = find_shape(source_element_id), find_shape(
-        target_element_id
-    )
-    assert isinstance(
-        source_shape, type(target_shape)
-    ), "The source and target shapes should be the same type."
-    # TODO 这里需要调整
-    if not is_textframe:
-        source_shape.style, target_shape.style = target_shape.style, source_shape.style
-    else:
-        source_shape.text_frame.data, target_shape.text_frame.data = (
-            target_shape.text_frame.data,
-            source_shape.text_frame.data,
-        )
+            return
+        if isinstance(shape, GroupShape):
+            for sub_shape in shape.shapes:
+                if sub_shape.element_idx == element_id:
+                    shape.shapes.remove(sub_shape)
+                    return
 
 
 class API_TYPES(Enum):
@@ -227,16 +254,18 @@ class API_TYPES(Enum):
     LAYOUT_ADJUST = "layout adjust"
 
 
-# 现在不允许clone 操作
 model_api = ModelAPI(
     {
         API_TYPES.LAYOUT_ADJUST: [select_template, del_element_byid],
-        API_TYPES.STYLE_ADJUST: [swap_style],
+        API_TYPES.STYLE_ADJUST: [
+            set_font_style,
+            adjust_element_geometry,
+            del_element_byid,
+        ],
         API_TYPES.TEXT_EDITING: [replace_text],
         API_TYPES.IMAGE_EDITING: [replace_image],
     },
 )
-
 
 if __name__ == "__main__":
     print(model_api.get_apis_docs([API_TYPES.SLIDE_GENERATE, API_TYPES.STYLE_ADJUST]))

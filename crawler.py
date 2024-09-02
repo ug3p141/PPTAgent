@@ -7,17 +7,18 @@ from copy import deepcopy
 import aiohttp
 from googlesearch import search
 
-from llms import caption_model
+from llms import caption_model, get_refined_doc
+from model_utils import prs_dedup
 from multimodal import ImageLabler
 from presentation import Presentation
+from template_induct import TemplateInducter
 from utils import (
     IMAGE_EXTENSIONS,
+    app_config,
     filename_normalize,
     parse_pdf,
-    pexists,
     pjoin,
     ppt_to_images,
-    prs_dedup,
 )
 
 topics = [
@@ -101,31 +102,34 @@ def ppt_validate(presentation: Presentation):
 # 模板的主题要和ppt的主题接近
 
 
-def prepare_pdfs():
-    if not pexists("resource/crawled_prs") or not pexists("resource/crawled_pdf"):
-        raise ValueError("crawled_prs or crawled_pdf not exists")
-    crawled_pdf = os.listdir("resource/crawled_pdf")
+def prepare_pdf(filename: str, output_dir: str):
+    text_content = parse_pdf(filename, output_dir)
+    if len(text_content) < 500 or len(text_content) > 10000:
+        return
+    os.makedirs(output_dir)
     caption_prompt = open("prompts/image_label/caption.txt").read()
-    for pdf_file in crawled_pdf:
-        pdf_dir = pjoin("data/pdfs", filename_normalize(pdf_file[:10]))
-        if not pexists(pdf_dir):
-            os.makedirs(pdf_dir)
-            parse_pdf(pjoin("resource/crawled_pdf", pdf_file), pdf_dir)
-            image_stats = {}
-            for image in os.listdir(pjoin(pdf_dir, "images")):
-                if image.split(".")[-1] in IMAGE_EXTENSIONS:
-                    image_stats[image] = caption_model(
-                        caption_prompt, pjoin(pdf_dir, "images", image)
-                    )
-            json.dump(
-                image_stats,
-                open(pjoin(pdf_dir, "image_caption.json"), "w"),
-                indent=4,
-                ensure_ascii=False,
+    image_stats = {}
+    for image in os.listdir(pjoin(output_dir, "images")):
+        if image.split(".")[-1] in IMAGE_EXTENSIONS:
+            image_stats[image] = caption_model(
+                caption_prompt, pjoin(output_dir, "images", image)
             )
+    json.dump(
+        image_stats,
+        open(pjoin(output_dir, "image_caption.json"), "w"),
+        indent=4,
+        ensure_ascii=False,
+    )
+    doc_json = get_refined_doc(text_content)
+    json.dump(
+        doc_json,
+        open(pjoin(output_dir, "refined_doc.json"), "w"),
+        indent=4,
+        ensure_ascii=False,
+    )
 
 
-def prepare_ppts(filename: str, output_dir: str):
+def prepare_ppt(filename: str):
     presentation = Presentation.from_file(filename)
     if not ppt_validate(presentation):
         os.remove(filename)
@@ -136,10 +140,9 @@ def prepare_ppts(filename: str, output_dir: str):
         os.remove(filename)
         return
 
-    ImageLabler(
-        presentation, work_dir=output_dir, image_dir=pjoin(output_dir, "images")
-    ).caption_images()
-    ppt_image_folder = pjoin(output_dir, "slide_images")
+    ImageLabler(presentation).caption_images()
+    # TODO: use internvl-72b
+    ppt_image_folder = pjoin(app_config.RUN_DIR, "slide_images")
     ppt_to_images(presentation.source_file, ppt_image_folder)
     for slide in dedup_slides:
         os.remove(pjoin(ppt_image_folder, f"slide_{slide.slide_idx:04d}.jpg"))
@@ -150,11 +153,17 @@ def prepare_ppts(filename: str, output_dir: str):
         )
         slide.slide_idx = i + 1
 
-    deepcopy(presentation).save(pjoin(output_dir, "template.pptx"), layout_only=True)
-    ppt_to_images(
-        pjoin(output_dir, "template.pptx"), pjoin(output_dir, "template_images")
+    deepcopy(presentation).save(
+        pjoin(app_config.RUN_DIR, "template.pptx"), layout_only=True
     )
-    presentation.normalize().save(pjoin(output_dir, "source.pptx"))
+    ppt_to_images(
+        pjoin(app_config.RUN_DIR, "template.pptx"),
+        pjoin(app_config.RUN_DIR, "template_images"),
+    )
+    presentation.normalize().save(pjoin(app_config.RUN_DIR, "source.pptx"))
+    TemplateInducter(
+        presentation, ppt_image_folder, pjoin(app_config.RUN_DIR, "template_images")
+    ).work()
 
 
 if __name__ == "__main__":
@@ -164,13 +173,15 @@ if __name__ == "__main__":
     for topic in topics:
         topic_dir = pjoin("data", topic)
         for ppt_file in ppt_files:
-            prepare_ppts(
+            app_config.set_rundir(
+                pjoin(topic_dir, "pptx", filename_normalize(ppt_file[:10]))
+            )
+            prepare_ppt(
                 pjoin(topic_dir, "pptx", ppt_file),
-                pjoin(topic_dir, "pptx", filename_normalize(ppt_file[:10])),
             )
         pdf_files = os.listdir(pjoin(topic_dir, "pdf"))
         for pdf_file in pdf_files:
-            prepare_ppts(
+            prepare_pdf(
                 pjoin(topic_dir, "pdf", pdf_file),
                 pjoin(topic_dir, "pdf", filename_normalize(pdf_file[:10])),
             )

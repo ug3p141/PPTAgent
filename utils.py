@@ -1,5 +1,4 @@
 import os
-import re
 import shutil
 import subprocess
 import tempfile
@@ -7,9 +6,8 @@ import traceback
 import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 
-import numpy as np
 from lxml import etree
-from pdf2image import convert_from_bytes
+from pdf2image import convert_from_path
 from pptx.dml.fill import _NoFill, _NoneFill
 from pptx.shapes.base import BaseShape
 from pptx.shapes.group import GroupShape
@@ -52,8 +50,7 @@ def ppt_to_images(file: str, output_dir: str):
             temp_dir,
         ]
         subprocess.run(command_list, check=True)
-        with open(temp_pdf, "rb") as f:
-            images = convert_from_bytes(f.read(), dpi=96)
+        images = convert_from_path(temp_pdf, dpi=72)
         for i, img in enumerate(images):
             img.save(pjoin(output_dir, f"slide_{i+1:04d}.jpg"))
 
@@ -76,6 +73,11 @@ def get_text_inlinestyle(para: dict, stylish: bool):
     font_color = f"color={font.color};" if font.color else ""
     font_bold = "font-weight: bold;" if font.bold else ""
     return 'style="{}"'.format("".join([font_size, font_color, font_bold]))
+
+
+def get_text_pptcstyle(para: dict):
+    font = SimpleNamespace(**para["font"])
+    return f"Font Style: bold={font.bold}, italic={font.italic}, underline={font.underline}, size={font.size}pt, color={font.color}, font style={font.font_name}, line_space={font.line_spacing}, align={font.alignment}\n"
 
 
 def extract_fill(shape: BaseShape):
@@ -239,6 +241,13 @@ class Config:
         self.RUN_DIR = f"./runs/{session_id}"
         self.IMAGE_DIR = pjoin(self.RUN_DIR, "images")
         self.TEST_PPT = "./resource/陆垚杰_博士论文答辩PPT_0530.pptx"
+        for the_dir in [self.RUN_DIR, self.IMAGE_DIR]:
+            if not pexists(the_dir):
+                os.makedirs(the_dir)
+
+    def set_rundir(self, rundir: str):
+        self.RUN_DIR = rundir
+        self.IMAGE_DIR = pjoin(self.RUN_DIR, "images")
         for the_dir in [self.RUN_DIR, self.IMAGE_DIR]:
             if not pexists(the_dir):
                 os.makedirs(the_dir)

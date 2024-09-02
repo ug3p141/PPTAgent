@@ -20,4 +20,6 @@ lxml
 torch
 torchvision
 pytorch_fid
-# binary: poppler-utils libreoffice
+poppler-utils # conda install -c conda-forge poppler
+pdf2image
+# binary: libreoffice

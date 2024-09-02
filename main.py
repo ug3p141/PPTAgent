@@ -43,7 +43,7 @@ def ppt_gen(text_content: str, ppt_file: str, images_dir: str, num_pages: int = 
 
     # 2. 模板生成
 
-    labler = ImageLabler(presentation, app_config.RUN_DIR, app_config.IMAGE_DIR)
+    labler = ImageLabler(presentation)
     ppt_image_folder = pjoin(app_config.RUN_DIR, "slide_images")
     ppt_to_images(presentation.source_file, ppt_image_folder)
     del_idxs = eval(
@@ -83,6 +83,9 @@ def ppt_gen(text_content: str, ppt_file: str, images_dir: str, num_pages: int = 
     deepcopy(presentation).save(
         pjoin(app_config.RUN_DIR, "template.pptx"), layout_only=True
     )
+    prs_text = ""
+    for slide in presentation.slides:
+        prs_text += f"Slide {slide.slide_idx}\n" + slide.to_text() + "\n---\n"
     ppt_to_images(
         pjoin(app_config.RUN_DIR, "template.pptx"),
         pjoin(app_config.RUN_DIR, "template_images"),
@@ -97,10 +100,12 @@ def ppt_gen(text_content: str, ppt_file: str, images_dir: str, num_pages: int = 
     # 3. 使用模板生成PPT
     # 重新安排shape idx方便后续调整
     agent_model.clear_history()
+    doc_json = json.load(open(pjoin(app_config.RUN_DIR, "refined_doc.json"), "r"))
+
     # 先文本，后图像
-    PPTAgent(presentation, slide_cluster, text_content, images, num_pages).work(
-        functional_keys
-    )
+    PPTAgent(
+        presentation, slide_cluster, images, num_pages, doc_json, ppt_image_folder
+    ).work(functional_keys)
 
 
 if __name__ == "__main__":

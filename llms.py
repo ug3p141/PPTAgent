@@ -16,7 +16,8 @@ from utils import print, tenacity
 class Gemini:
     def __init__(self, time_limit: int = 60) -> None:
         self.time_limit = time_limit
-        self.model = genai.GenerativeModel("gemini-1.5-pro-latest")
+        self.model = "gemini-1.5-pro-latest"
+        self.client = genai.GenerativeModel(self.model)
         self.safety_settings = [
             {
                 "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
@@ -48,7 +49,7 @@ class Gemini:
         self.generation_config = genai.GenerationConfig()
 
     def start_chart(self):
-        self._chat = self.model.start_chat(history=[])
+        self._chat = self.client.start_chat(history=[])
 
     def prepare(self):
         self._call_idx = (self._call_idx + 1) % len(self.api_config[0])
@@ -70,7 +71,7 @@ class Gemini:
         self.prepare()
         if image_file is not None:
             content = [content, PIL.Image.open(image_file)]
-        response = self.model.generate_content(
+        response = self.client.generate_content(
             content,
             safety_settings=self.safety_settings,
             generation_config=self.generation_config,
@@ -154,8 +155,33 @@ intern = OPENAI(
 )
 gpt4o = OPENAI()
 gpt4omini = OPENAI(model="gpt-4o-mini")
+vllm_api = "http://124.16.138.143:8000/v1"
+qwen = OPENAI(model="qwen/Qwen2-72B-Chat-Int4", api_base=vllm_api)
+llama3 = OPENAI(model="meta-llama/Meta-Llama-3.1-70B-Instruct", api_base=vllm_api)
 caption_model = gpt4omini
-agent_model = gpt4o
+
+
+class Agent:
+    def __init__(self, model: OPENAI):
+        self.model = model
+
+    def __call__(self, *args, **kwargs) -> str:
+        return self.model(*args, **kwargs)
+
+    def clear_history(self):
+        self.model.clear_history()
+
+    def set_model(self, model):
+        self.model = model
+
+
+agent_model = Agent(gpt4o)
+
+
+def get_refined_doc(text_content: str):
+    template = Template(open("prompts/document_refine.txt").read())
+    prompt = template.render(markdown_document=text_content)
+    return json.loads(gpt4omini(prompt))
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ from utils import (
     dict_to_object,
     extract_fill,
     get_text_inlinestyle,
+    get_text_pptcstyle,
     object_to_dict,
     parse_groupshape,
     pjoin,
@@ -54,7 +55,16 @@ class TextFrame:
         shape = shape.text_frame
         style = object_to_dict(shape, exclude=["text"])
         data = []
-        for idx, paragraph in enumerate(shape.paragraphs):
+        idx = 0
+        # TODO 这里必须是二级结构了
+        #     def delete_paragraph(paragraph):
+        # p = paragraph._p
+        # parent_element = p.getparent()
+        # parent_element.remove(p)
+        # def delete_run(run):
+        # r = run._r
+        # r.getparent().remove(r)
+        for paragraph in shape.paragraphs:
             runs = paragraph.runs
             if len(runs) == 0:
                 runs = [
@@ -75,6 +85,7 @@ class TextFrame:
             if content["font"]["name"] == "+mj-ea":
                 content["font"]["name"] = "宋体"
             content["idx"] = idx
+            idx += 1
             data.append(content)
         return cls(True, style, data, father_idx, shape.text)
 
@@ -123,6 +134,16 @@ class TextFrame:
             pre_bullet = para["bullet"]
         return "\n".join(repr_list)
 
+    def to_pptc(self) -> str:
+        if not self.is_textframe:
+            return ""
+        s = ""
+        for para in self.data:
+            s += f"[Text id={self.father_idx}_{para['idx']}]\n"
+            s += para["text"] + "\n"
+            s += get_text_pptcstyle(para) + "\n"
+        return s
+
     def __repr__(self):
         return f"TextFrame: {self.text}"
 
@@ -158,6 +179,7 @@ class ShapeElement:
         self.data = data
         self.text_frame = text_frame
         self.stylish = False
+        self.closures = []
 
     @classmethod
     def from_shape(cls, slide_idx: int, shape_idx: int, shape: BaseShape):
@@ -220,14 +242,11 @@ class ShapeElement:
         self.stylish = stylish
         return ""
 
+    def to_pptc(self) -> str:
+        pass
+
     def __str__(self) -> str:
         return ""
-
-    @property
-    def inline_style(self):
-        if not self.stylish:
-            return ""
-        return f"style='left: {self.left}pt; top: {self.top}pt; width: {self.width}pt; height: {self.height}pt; ' "
 
     @property
     def left(self):
@@ -246,37 +265,34 @@ class ShapeElement:
         return self.style["shape_bounds"]["height"].pt
 
     @property
-    def right(self):
-        return self.left + self.width
+    def inline_style(self):
+        if not self.stylish:
+            return ""
+        return f"style='left: {self.left}pt; top: {self.top}pt; width: {self.width}pt; height: {self.height}pt; ' "
 
     @property
-    def bottom(self):
-        return self.top + self.height
+    def pptc_text_info(self):
+        return self.text_frame.to_pptc()
 
     @property
-    def area(self):
-        return self.width * self.height
+    def pptc_space_info(self):
+        return f"Visual Positions: left={self.left}pt, top={self.top}pt\n"
 
-    def __or__(self, other):
-        left = min(self.left, other.left)
-        top = min(self.top, other.top)
-        right = max(self.right, other.right)
-        bottom = max(self.bottom, other.bottom)
-        width = right - left
-        height = bottom - top
-        return width * height
+    @property
+    def pptc_size_info(self):
+        return f"Size: height={self.height}pt, width={self.width}pt\n"
 
-    def __and__(self, other):
-        left = max(self.left, other.left)
-        top = max(self.top, other.top)
-        right = min(self.right, other.right)
-        bottom = min(self.bottom, other.bottom)
-        if left < right and top < bottom:
-            width = right - left
-            height = bottom - top
-            return width * height
-        else:
-            return 0
+    @property
+    def pptc_description(self):
+        return f"[{self.__class__.__name__} id={self.shape_idx}]\n"
+
+    def to_pptc(self):
+        s = ""
+        s += self.pptc_description
+        s += self.pptc_size_info
+        s += self.pptc_text_info
+        s += self.pptc_space_info
+        return s
 
 
 class UnsupportedShape(ShapeElement):
@@ -330,6 +346,13 @@ class AutoShape(ShapeElement):
         text = self.text_frame.to_html(stylish)
         return f"<{self.data['svg_tag']} id='{self.shape_idx}'>\n{text}\n</{self.data['svg_tag']}>\n"
 
+    @property
+    def pptc_text_info(self):
+        return self.text_frame.to_pptc()
+
+    def pptc_description(self):
+        return f"[{self.data['svg_tag']} id={self.shape_idx}]\n"
+
 
 class TextBox(ShapeElement):
     @classmethod
@@ -352,48 +375,6 @@ class TextBox(ShapeElement):
         return f"<text id='{self.shape_idx}' {self.inline_style}>\n{self.text_frame.to_html(stylish)}\n</text>"
 
 
-class Placeholder(ShapeElement):
-    @classmethod
-    def from_shape(
-        cls,
-        slide_idx: int,
-        shape_idx: int,
-        shape: SlidePlaceholder,
-        style: dict,
-        text_frame: TextFrame,
-    ):
-        assert (
-            sum(
-                [
-                    shape.has_text_frame,
-                    shape.has_chart,
-                    shape.has_table,
-                    isinstance(shape, PlaceholderPicture),
-                ]
-            )
-            == 1
-        ), "placeholder should have only one type"
-        if isinstance(shape, PlaceholderPicture):
-            data = Picture.from_shape(slide_idx, shape_idx, shape, style, text_frame)
-        elif shape.has_text_frame:
-            data = TextBox.from_shape(slide_idx, shape_idx, shape, style, text_frame)
-        elif shape.has_chart:
-            data = Chart.from_shape(slide_idx, shape_idx, shape, style, text_frame)
-        elif shape.has_table:
-            data = Table.from_shape(slide_idx, shape_idx, shape, style, text_frame)
-        return data
-        # ph = cls(slide_idx, shape_idx, style, data, text_frame)
-        # ph.ph_index = shape.placeholder_format.type.value
-        # return ph
-
-    def build(self, slide: PPTXSlide):
-        pass
-        # if isinstance(self.data, TextBox):
-        #     super().build(slide, slide.shapes[-1])
-
-
-# 缩放高度，缩放宽度
-# placeholder的格式获取不到
 class Picture(ShapeElement):
     @classmethod
     def from_shape(
@@ -469,6 +450,50 @@ class Picture(ShapeElement):
         )
 
 
+class Placeholder(ShapeElement):
+    @classmethod
+    def from_shape(
+        cls,
+        slide_idx: int,
+        shape_idx: int,
+        shape: SlidePlaceholder,
+        style: dict,
+        text_frame: TextFrame,
+    ):
+        assert (
+            sum(
+                [
+                    shape.has_text_frame,
+                    shape.has_chart,
+                    shape.has_table,
+                    isinstance(shape, PlaceholderPicture),
+                ]
+            )
+            == 1
+        ), "placeholder should have only one type"
+        if isinstance(shape, PlaceholderPicture):
+            data = Picture.from_shape(slide_idx, shape_idx, shape, style, text_frame)
+        elif shape.has_text_frame:
+            data = TextBox.from_shape(slide_idx, shape_idx, shape, style, text_frame)
+        elif shape.has_chart:
+            data = Chart.from_shape(slide_idx, shape_idx, shape, style, text_frame)
+        elif shape.has_table:
+            data = Table.from_shape(slide_idx, shape_idx, shape, style, text_frame)
+        return data
+        # ph = cls(slide_idx, shape_idx, style, data, text_frame)
+        # ph.ph_index = shape.placeholder_format.type.value
+        # return ph
+
+    def build(self, slide: PPTXSlide):
+        pass
+        # if isinstance(self.data, TextBox):
+        #     super().build(slide, slide.shapes[-1])
+
+
+# 缩放高度，缩放宽度
+# placeholder的格式获取不到
+
+
 class GroupShape(ShapeElement):
     @classmethod
     def from_shape(
@@ -480,7 +505,7 @@ class GroupShape(ShapeElement):
         text_frame: TextFrame,
     ):
         data = [
-            ShapeElement.from_shape(slide_idx, f"{shape_idx}.{i}", sub_shape)
+            ShapeElement.from_shape(slide_idx, (shape_idx + 1) * 100 + i, sub_shape)
             for i, sub_shape in enumerate(shape.shapes)
         ]
         for idx, shape_bounds in enumerate(parse_groupshape(shape)):
@@ -493,12 +518,17 @@ class GroupShape(ShapeElement):
                 new_shape = sub_shape.build(slide)
             else:
                 new_shape = slide.shapes._spTree.insert_element_before(
-                    slide.shapes._spTree.insert_element_before(
-                        parse_xml(sub_shape.xml), "p:extLst"
-                    )
+                    parse_xml(sub_shape.xml), "p:extLst"
                 )
-            if "closure" in dir(sub_shape):
-                sub_shape.closure(new_shape)
+            for closure in sub_shape.closures:
+                closure(new_shape)
+
+    def __iter__(self):
+        for shape in self.data:
+            if isinstance(shape, GroupShape):
+                yield from shape
+            else:
+                yield shape
 
     # groupshape clone
     def __eq__(self, __value: object) -> bool:
@@ -520,6 +550,12 @@ class GroupShape(ShapeElement):
             + "\n</div>\n"
         )
 
+    def to_pptc(self) -> str:
+        s = ""
+        for shape in self.data:
+            s += shape.to_pptc()
+        return s
+
 
 # these four shapes are only used to label
 class GraphicalShape(ShapeElement):
@@ -535,7 +571,7 @@ class GraphicalShape(ShapeElement):
         return cls(slide_idx, shape_idx, style, None, text_frame)
 
     def build(self, slide: PPTXSlide):
-        raise NotImplementedError("graphical shapes should be converted to picture")
+        pass
 
     @property
     def orig_shape(self):
@@ -555,7 +591,7 @@ class Connector(ShapeElement):
         return cls(slide_idx, shape_idx, style, None, text_frame)
 
     def build(self, slide: PPTXSlide):
-        raise NotImplementedError("connector cannot be built through this method")
+        pass
 
 
 # function_args = json.loads(response_message.tool_calls[0].function.arguments)
@@ -630,13 +666,13 @@ class SlidePage:
                 new_shape = slide.shapes._spTree.insert_element_before(
                     parse_xml(shape.xml), "p:extLst"
                 )
-            if "closure" in dir(shape):
-                shape.closure(new_shape)
+            for closure in shape.closures:
+                closure(new_shape)
         for ph in placeholders.values():
             ph.element.getparent().remove(ph.element)
         return slide
 
-    def shape_filter(self, shape_type: list[ShapeElement]):
+    def shape_filter(self, shape_type: list[type]):
         if not isinstance(shape_type, tuple):
             shape_type = shape_type
         for shape in self.shapes:
@@ -673,6 +709,12 @@ class SlidePage:
             ]
         )
 
+    def to_pptc(self) -> str:
+        s = ""
+        for shape in self.shapes:
+            s += shape.to_pptc()
+        return s
+
     def to_text(self) -> str:
         return "\n".join(
             [
@@ -707,9 +749,21 @@ class SlidePage:
             elif isinstance(shape, GroupShape):
                 self.normalize(shape.data)
 
+    def __getitem__(self, element_id: int):
+        for shape in self:
+            if shape.shape_idx == element_id:
+                return shape
+
     @property
     def text_length(self):
         return sum([len(shape.text_frame) for shape in self.shapes])
+
+    def __iter__(self):
+        for shape in self.shapes:
+            if isinstance(shape, GroupShape):
+                yield from shape
+            else:
+                yield shape
 
     def __len__(self):
         return len(self.shapes)
@@ -743,7 +797,7 @@ class Presentation:
         self.layout_mapping = {layout.name: layout for layout in self.prs.slide_layouts}
 
     @classmethod
-    def from_file(cls, file_path: str, images_dir: str):
+    def from_file(cls, file_path: str):
         prs = PPTXPre(file_path)
         slide_width = prs.slide_width
         slide_height = prs.slide_height

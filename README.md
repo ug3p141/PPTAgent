@@ -5,20 +5,15 @@
 
 文件: `presentation.py`
 
-## LayoutPlanner
-负责提供BoxModel的反馈，计算元素的真实大小，根据生成结果微调ppt元素。
-
-文件: `layout_planning.py`
-
-## ImageLabeler
+## Multimodal
 对ppt原有以及论文中的幻灯片进行caption，以及对picture元素进行bg判断。
 
 文件: `multimodal.py`
 
-## TemplateInduction
+## TemplateInduct
 根据解析出的内容，判断哪些文本元素属于content哪些属于bg，对于textframe给出对应的标签。
 
-文件: `template_inducter.py`
+文件: `template_induct.py`
 
 ## llms
 负责实例化各种用到的大模型，以及交互操作。

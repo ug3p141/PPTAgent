@@ -12,12 +12,11 @@ from utils import app_config, pbasename, pexists, pjoin, print
 
 
 class ImageLabler:
-    def __init__(self, presentation: Presentation, work_dir: str, image_dir: str):
+    def __init__(self, presentation: Presentation):
         self.presentation = presentation
         self.slide_area = presentation.slide_width.pt * presentation.slide_height.pt
         self.image_stats = {}
-        self.stats_file = pjoin(work_dir, "image_stats.json")
-        self.image_dir = image_dir
+        self.stats_file = pjoin(app_config.RUN_DIR, "image_stats.json")
         self.collect_images()
         if pexists(self.stats_file):
             self.image_stats = json.load(open(self.stats_file, "r"))
@@ -26,18 +25,15 @@ class ImageLabler:
             "label": "content",
             "caption": "\x1b[31m!!!placeholder\x1b[0m",
         }
-        os.makedirs(pjoin(image_dir, "background"), exist_ok=True)
-        os.makedirs(pjoin(image_dir, "content"), exist_ok=True)
+        os.makedirs(pjoin(app_config.IMAGE_DIR, "background"), exist_ok=True)
+        os.makedirs(pjoin(app_config.IMAGE_DIR, "content"), exist_ok=True)
 
-    def apply_stats(
-        self,
-    ):
-        json.dump(
-            self.image_stats, open(self.stats_file, "w"), indent=4, ensure_ascii=False
-        )
+    def apply_stats(self, image_stats: dict):
+        if image_stats is None:
+            image_stats = self.image_stats
         for slide in self.presentation.slides:
             for shape in slide.shape_filter(Picture):
-                stats = self.image_stats[shape.img_path]
+                stats = image_stats[shape.img_path]
                 if "caption" in stats:
                     shape.caption = stats["caption"]
                 # if "label" in stats:
@@ -46,7 +42,7 @@ class ImageLabler:
                 #         shape.img_path = stats["replace"]
                 #     if app_config.DEBUG:
                 #         new_path = pjoin(
-                #             image_dir,
+                #             app_config.IMAGE_DIR,
                 #             stats["label"],
                 #             pbasename(shape.data[0]),
                 #         )
@@ -60,6 +56,12 @@ class ImageLabler:
                 stats["caption"] = caption_model(caption_prompt, image)
                 if app_config.DEBUG:
                     print(image, ": ", stats["caption"])
+        json.dump(
+            self.image_stats,
+            open(self.stats_file, "w"),
+            indent=4,
+            ensure_ascii=False,
+        )
         self.apply_stats()
         return self.image_stats
 
@@ -131,8 +133,8 @@ class ImageLabler:
                         continue
                     image_labels[result["image"]][result["replace"]] += 1
         image_labels = {
-            pjoin(self.image_dir, k): pjoin(
-                self.image_dir,
+            pjoin(app_config.IMAGE_DIR, k): pjoin(
+                app_config.IMAGE_DIR,
                 max(v.items(), key=lambda x: x[1])[0],
             )
             for k, v in image_labels.items()

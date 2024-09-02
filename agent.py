@@ -11,7 +11,7 @@ import apis
 from apis import API_TYPES, model_api
 from llms import agent_model
 from presentation import Picture, Presentation, SlidePage
-from utils import app_config, pexists, pjoin, print
+from utils import app_config, pexists, pjoin, ppt_to_images, print
 
 
 class PPTAgent:
@@ -19,35 +19,28 @@ class PPTAgent:
         self,
         presentation: Presentation,
         template: dict,
-        text_content: str,
         images: list[dict[str, str]],
         num_slides: int,
+        doc_json: dict[str, str],
+        ppt_image_folder: str,
     ):
         self.presentation = presentation
+        self.intermediate_prs = deepcopy(presentation)
         self.gen_prs = deepcopy(presentation)
         self.gen_prs.slides = []
         self.slide_templates = template
-        self.text_content = text_content
+        self.doc_json = doc_json
         self.num_slides = num_slides
         self.images = images
         output_dir = pjoin(app_config.RUN_DIR, "agent")
         os.makedirs(output_dir, exist_ok=True)
-        self.refined_doc = pjoin(output_dir, "refined_doc.json")
         self.outline_file = pjoin(output_dir, "slide_outline.json")
         self.step_result_file = pjoin(output_dir, "step_result.json")
         self.gen_prs_file = pjoin(output_dir, "generated_presentation.pptx")
+        self.ppt_image_folder = ppt_image_folder
+        self.inter_image_folder = pjoin(app_config.RUN_DIR, "intermediate_prs_images")
 
     def work(self, functional_keys: dict):
-        if pexists(self.refined_doc):
-            self.doc_json = json.load(open(self.refined_doc, "r"))
-        else:
-            template = Template(open("prompts/agent/document_refine.txt").read())
-            prompt = template.render(markdown_document=self.text_content)
-            self.doc_json = json.loads(agent_model(prompt))
-            json.dump(
-                self.doc_json, open(self.refined_doc, "w"), ensure_ascii=False, indent=4
-            )
-
         if pexists(self.outline_file):
             self.outline = json.load(open(self.outline_file, "r"))
         else:
@@ -91,7 +84,7 @@ class PPTAgent:
             ]
             text_edit_prompt = text_edit_template.render(
                 api_documentation=model_api.get_apis_docs(
-                    [API_TYPES.LAYOUT_ADJUST, API_TYPES.IMAGE_EDITING]
+                    [API_TYPES.LAYOUT_ADJUST, API_TYPES.TEXT_EDITING]
                 ),
                 template_html_code="\n".join(
                     [
@@ -101,6 +94,26 @@ class PPTAgent:
                 ),
                 slide_outline=self.simple_outline,
                 slide_content=slide_content,
+            )
+            model_api.execute_apis(text_edit_prompt, apis=agent_model(text_edit_prompt))
+            self.intermediate_prs.slides = [apis.slide]
+            self.intermediate_prs.save(
+                pjoin(app_config.RUN_DIR, "intermediate_prs.pptx")
+            )
+            ppt_to_images(
+                pjoin(app_config.RUN_DIR, "intermediate_prs.pptx"),
+                self.inter_image_folder,
+            )
+            inter_image = pjoin(
+                self.inter_image_folder, os.listdir(self.inter_image_folder)[0]
+            )
+            # get image
+            vision_edit_prompt = vision_edit_template.render(
+                api_documentation=model_api.get_apis_docs(
+                    [API_TYPES.STYLE_ADJUST, API_TYPES.IMAGE_EDITING]
+                ),
+                slide_html_code=slide_template.to_html(),
+                slide_outline=self.simple_outline,
                 provided_images="\n".join(
                     [
                         f"Image {k} used {step_results['image_usage'][k]} times, caption: {v}"
@@ -108,32 +121,14 @@ class PPTAgent:
                     ]
                 ),
             )
-            model_api.execute_apis(text_edit_prompt, apis=agent_model(text_edit_prompt))
-            # layout_prompt = layout_template.render(
-            #     api_documentation=model_api.get_apis_docs([API_TYPES.LAYOUT_ADJUST]),
-            #     template_html_code="\n".join(
-            #         [
-            #             f"Template {idx}\n----\n" + i.to_html()
-            #             for idx, i in enumerate(apis.template_slides)
-            #         ]
-            #     ),
-            #     slide_outline=self.simple_outline,
-            #     slide_content=slide_content,
-            # )
-            # model_api.execute_apis(layout_prompt, agent_model(layout_prompt))
-            # slide_template = apis.slide
-
-            # # content replacement
-            # shape_idxs = self.get_replace_ids(slide_template)
-            # content_prompt = content_template.render(
-            #     api_documentation=model_api.get_apis_docs([API_TYPES.SET_CONTENT]),
-            #     template_html_code=slide_template.to_html(),
-            #     slide_outline=self.stylized_outline,
-            #     slide_content=slide_content,
-            #     element_ids=shape_idxs,
-            #     image_usage=step_results["image_usage"],
-            # )
-            # model_api.execute_apis(content_prompt, agent_model(content_prompt))
+            model_api.execute_apis(
+                vision_edit_prompt,
+                agent_model(
+                    vision_edit_prompt,
+                    inter_image,
+                ),
+            )
+            slide_template: SlidePage = apis.slide
 
             # result saving
             step_results["generated_slides"].append(apis.slide)
