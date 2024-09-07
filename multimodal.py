@@ -25,15 +25,22 @@ class ImageLabler:
             "label": "content",
             "caption": "\x1b[31m!!!placeholder\x1b[0m",
         }
-        os.makedirs(pjoin(app_config.IMAGE_DIR, "background"), exist_ok=True)
-        os.makedirs(pjoin(app_config.IMAGE_DIR, "content"), exist_ok=True)
+        # os.makedirs(pjoin(app_config.IMAGE_DIR, "background"), exist_ok=True)
+        # os.makedirs(pjoin(app_config.IMAGE_DIR, "content"), exist_ok=True)
 
-    def apply_stats(self, image_stats: dict):
+    # TODO change later
+    def apply_stats(self, image_stats: dict = None):
         if image_stats is None:
             image_stats = self.image_stats
         for slide in self.presentation.slides:
             for shape in slide.shape_filter(Picture):
-                stats = image_stats[shape.img_path]
+                stats = image_stats.get(
+                    shape.img_path.replace(
+                        "68eaadd68e3d43ad5b45178eafda5dde",
+                        "4f8e1fae227581bb292f9e11bda11482",
+                    ),
+                    {},
+                )
                 if "caption" in stats:
                     shape.caption = stats["caption"]
                 # if "label" in stats:
@@ -161,17 +168,16 @@ class ImageLabler:
         for slide_index, slide in enumerate(self.presentation.slides):
             for shape in slide.shape_filter(Picture):
                 image_path = shape.data[0]
-                image_path = shape.data[0]
-                if image_path not in self.image_stats:
-                    self.image_stats[image_path] = {
-                        "appear_times": 0,
-                        "slide_numbers": [],
-                        "relative_area": shape.area / self.slide_area * 100,
-                        "size": PIL.Image.open(image_path).size,
-                    }
+                self.image_stats[image_path] = {
+                    "appear_times": 0,
+                    "slide_numbers": set(),
+                    "relative_area": shape.area / self.slide_area * 100,
+                    "size": PIL.Image.open(image_path).size,
+                }
                 self.image_stats[image_path]["appear_times"] += 1
-                self.image_stats[image_path]["slide_numbers"].append(slide_index + 1)
+                self.image_stats[image_path]["slide_numbers"].add(slide_index + 1)
         for image_path, stats in self.image_stats.items():
+            stats["slide_numbers"] = sorted(list(stats["slide_numbers"]))
             ranges = self._find_ranges(stats["slide_numbers"])
             top_ranges = sorted(ranges, key=lambda x: x[1] - x[0], reverse=True)[:3]
             top_ranges_str = ", ".join(

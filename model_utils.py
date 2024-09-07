@@ -19,31 +19,43 @@ image_embed_model = None
 extractor = None
 
 
-def text_embedding(text: str):
+def get_text_embedding(text: list[str], batchsize: int):
+    if isinstance(text, str):
+        text = [text]
     global text_embed_model
     if text_embed_model is None:
         text_embed_model = BGEM3FlagModel(
             "BAAI/bge-m3", use_fp16=True, device=DEVICE_MAP
         )
-    return text_embed_model.encode(text)["dense_vecs"]
+    result = []
+    for i in range(0, len(text), batchsize):
+        result.extend(
+            torch.tensor(
+                text_embed_model.encode(text[i : i + batchsize])["dense_vecs"]
+            ).to(DEVICE_MAP)
+        )
+    return result
 
 
-def prs_dedup(presentation: Presentation):
-    pre_embedding = text_embedding(presentation.slides[0].to_text())
+def prs_dedup(presentation: Presentation, ppt_image_folder: str, batchsize: int = 32):
+    text_embeddings = get_text_embedding(
+        [i.to_text() for i in presentation.slides], batchsize
+    )
+    image_embeddings = image_embedding(ppt_image_folder).values()
+    slide_embeddings = zip(text_embeddings, image_embeddings)
+    pre_embedding = next(slide_embeddings)
     slide_idx = 1
-    slides = []
+    duplicates = []
     while slide_idx < len(presentation.slides):
-        cur_embedding = text_embedding(presentation.slides[slide_idx].to_text())
+        cur_embedding = next(slide_embeddings)
         if (
-            np.dot(pre_embedding, cur_embedding)
-            / (np.linalg.norm(pre_embedding) * np.linalg.norm(cur_embedding))
-            > 0.8
+            torch.cosine_similarity(pre_embedding[0], cur_embedding[0], -1) > 0.8
+            or torch.cosine_similarity(pre_embedding[1], cur_embedding[1], -1) > 0.8
         ):
-            slides.append(presentation.slides.pop(slide_idx - 1))  # 去重
-        else:
-            slide_idx += 1
+            duplicates.append(presentation.slides.pop(slide_idx - 1))
+        slide_idx += 1
         pre_embedding = cur_embedding
-    return slides
+    return duplicates
 
 
 def image_embedding(image_dir: str, batchsize: int = 16):
@@ -78,20 +90,18 @@ def image_embedding(image_dir: str, batchsize: int = 16):
         inputs.append(transform(image))
         if len(inputs) % batchsize == 0 or file == images[-1]:
             batch = {"pixel_values": torch.stack(inputs).to(image_embed_model.device)}
-            embeddings.extend(
-                image_embed_model(**batch).last_hidden_state.detach().cpu()
-            )
+            embeddings.extend(image_embed_model(**batch).last_hidden_state.detach())
             inputs.clear()
-    return {image: embedding for image, embedding in zip(images, embeddings)}
+    return {image: embedding.flatten() for image, embedding in zip(images, embeddings)}
 
 
 def images_cosine_similarity(embeddings: list[torch.Tensor]):
-    embeddings = [embedding.to(image_embed_model.device) for embedding in embeddings]
+    embeddings = [embedding for embedding in embeddings]
     sim_matrix = torch.zeros((len(embeddings), len(embeddings)))
     for i in range(len(embeddings)):
         for j in range(i + 1, len(embeddings)):
-            sim_matrix[i, j] = sim_matrix[j, i] = torch.nn.functional.cosine_similarity(
-                embeddings[i].view(-1), embeddings[j].view(-1), dim=0
+            sim_matrix[i, j] = sim_matrix[j, i] = torch.cosine_similarity(
+                embeddings[i], embeddings[j], -1
             )
     return sim_matrix
 

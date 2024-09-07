@@ -3,11 +3,9 @@ import json
 import os
 from copy import deepcopy
 
-import numpy as np
-
 from agent import PPTAgent
 from llms import agent_model, caption_model
-from model_utils import text_embedding
+from model_utils import prs_dedup
 from multimodal import ImageLabler
 from presentation import Presentation
 from template_induct import TemplateInducter
@@ -23,9 +21,10 @@ from utils import (
 
 # TODO 生成一个模板ppt的背景信息
 # TODO 背景元素的识别
+# TODO 减少输入长度减少幻觉现象，或者进行induct操作
 
 
-def ppt_gen(text_content: str, ppt_file: str, images_dir: str, num_pages: int = 12):
+def ppt_gen(text_content: str, ppt_file: str, images_dir: str, num_pages: int = 8):
     session_id = hashlib.md5(
         (text_content + ppt_file + images_dir).encode()
     ).hexdigest()
@@ -46,50 +45,33 @@ def ppt_gen(text_content: str, ppt_file: str, images_dir: str, num_pages: int = 
     labler = ImageLabler(presentation)
     ppt_image_folder = pjoin(app_config.RUN_DIR, "slide_images")
     ppt_to_images(presentation.source_file, ppt_image_folder)
-    del_idxs = eval(
-        "[17, 17, 18, 18, 21, 28, 29, 30, 30, 31, 31, 31, 31, 31, 31, 31, 40, 43, 56]"
-    )
-    # del_idxs = []
-    # pre_embedding = text_embedding(presentation.slides[0].to_text())
-    # slide_idx = 1
-    # while slide_idx < len(presentation.slides):
-    #     cur_embedding = text_embedding(presentation.slides[slide_idx].to_text())
-    #     if np.dot(pre_embedding, cur_embedding) / (np.linalg.norm(pre_embedding) * np.linalg.norm(cur_embedding)) > 0.8:
-    #         del_idxs.append(slide_idx-1)
-    #         presentation.slides.pop(slide_idx-1) # 去重
-    #     else:
-    #         slide_idx += 1
-    #     pre_embedding = cur_embedding
-    for slide_idx in del_idxs:
-        slide = presentation.slides.pop(slide_idx)
-        os.remove(pjoin(ppt_image_folder, f"slide_{slide.slide_idx:04d}.jpg"))
+    duplicates = prs_dedup(presentation, ppt_image_folder)
+    for slide in duplicates:
+        os.remove(pjoin(ppt_image_folder, f"slide_{slide.real_idx:04d}.jpg"))
     for err_idx, _ in presentation.error_history:
         os.remove(pjoin(ppt_image_folder, f"slide_{err_idx:04d}.jpg"))
     assert len(presentation.slides) == len(
         [i for i in os.listdir(ppt_image_folder) if i.endswith(".jpg")]
     )
-    for i, slide in enumerate(presentation.slides):
+    for i, slide in enumerate(presentation.slides, 1):
+        slide.slide_idx = i
         os.rename(
+            pjoin(ppt_image_folder, f"slide_{slide.real_idx:04d}.jpg"),
             pjoin(ppt_image_folder, f"slide_{slide.slide_idx:04d}.jpg"),
-            pjoin(ppt_image_folder, f"slide_{i+1:04d}.jpg"),
         )
-        slide.slide_idx = i + 1
     # caption_prompt = open("prompts/image_label/caption.txt").read()
     # images = {
     #     pjoin(images_dir, k): caption_model(caption_prompt, pjoin(images_dir, k))
     #     for k in os.listdir(images_dir) if k.split(".")[-1] in IMAGE_EXTENSIONS
     # }
     images = json.load(open("resource/image_caption.json"))
-    deepcopy(presentation).save(
-        pjoin(app_config.RUN_DIR, "template.pptx"), layout_only=True
-    )
-    prs_text = ""
-    for slide in presentation.slides:
-        prs_text += f"Slide {slide.slide_idx}\n" + slide.to_text() + "\n---\n"
-    ppt_to_images(
-        pjoin(app_config.RUN_DIR, "template.pptx"),
-        pjoin(app_config.RUN_DIR, "template_images"),
-    )
+    # deepcopy(presentation).normalize().save(
+    #     pjoin(app_config.RUN_DIR, "template.pptx"), layout_only=True
+    # )
+    # ppt_to_images(
+    #     pjoin(app_config.RUN_DIR, "template.pptx"),
+    #     pjoin(app_config.RUN_DIR, "template_images"),
+    # )
     functional_keys, slide_cluster = TemplateInducter(
         presentation, ppt_image_folder, pjoin(app_config.RUN_DIR, "template_images")
     ).work()
@@ -99,13 +81,11 @@ def ppt_gen(text_content: str, ppt_file: str, images_dir: str, num_pages: int = 
 
     # 3. 使用模板生成PPT
     # 重新安排shape idx方便后续调整
-    agent_model.clear_history()
+    # agent_model.clear_history()
     doc_json = json.load(open(pjoin(app_config.RUN_DIR, "refined_doc.json"), "r"))
 
     # 先文本，后图像
-    PPTAgent(
-        presentation, slide_cluster, images, num_pages, doc_json, ppt_image_folder
-    ).work(functional_keys)
+    PPTAgent(presentation, slide_cluster, images, num_pages, doc_json).work()
 
 
 if __name__ == "__main__":

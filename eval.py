@@ -20,7 +20,6 @@ from utils import (
     IMAGE_EXTENSIONS,
     app_config,
     filename_normalize,
-    parse_pdf,
     pexists,
     pjoin,
     ppt_to_images,

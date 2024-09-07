@@ -149,18 +149,6 @@ class OPENAI:
         self.history = []
 
 
-gemini = Gemini()
-intern = OPENAI(
-    model="OminiPreGen/models/InternVL2-8B", api_base="http://124.16.138.143:8000/v1"
-)
-gpt4o = OPENAI()
-gpt4omini = OPENAI(model="gpt-4o-mini")
-vllm_api = "http://124.16.138.143:8000/v1"
-qwen = OPENAI(model="qwen/Qwen2-72B-Chat-Int4", api_base=vllm_api)
-llama3 = OPENAI(model="meta-llama/Meta-Llama-3.1-70B-Instruct", api_base=vllm_api)
-caption_model = gpt4omini
-
-
 class Agent:
     def __init__(self, model: OPENAI):
         self.model = model
@@ -175,19 +163,30 @@ class Agent:
         self.model = model
 
 
+gpt4o = OPENAI()
+gpt4omini = OPENAI(model="gpt-4o-mini")
+
+gemini = Gemini()
+
+internvl = OPENAI(
+    model="InternVL2-Llama3-76B", api_base="http://124.16.138.150:8000/v1"
+)
+qwen = OPENAI(model="Qwen2-72B-Instruct", api_base="http://124.16.138.150:7999/v1")
+
+caption_model = internvl
+long_model = qwen
 agent_model = Agent(gpt4o)
 
 
 def get_refined_doc(text_content: str):
     template = Template(open("prompts/document_refine.txt").read())
     prompt = template.render(markdown_document=text_content)
-    return json.loads(gpt4omini(prompt))
+    return json.loads(long_model(prompt))
 
 
 if __name__ == "__main__":
-    # internvl = InternVL()
-    # internvl("who r u")
-    # print(qwen("你是谁"))
-    gemini = Gemini()
-    gemini.chat("小红是小明的爸爸")
-    print(gemini.chat("小红和小明的关系是什么"))
+    print(internvl("who r u"))
+    print(qwen("你是谁"))
+    # gemini = Gemini()
+    # gemini.chat("小红是小明的爸爸")
+    # print(gemini.chat("小红和小明的关系是什么"))

@@ -6,8 +6,10 @@ import traceback
 import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 
+import requests
 from lxml import etree
 from pdf2image import convert_from_path
+from pptx import Presentation as PPTXPre
 from pptx.dml.fill import _NoFill, _NoneFill
 from pptx.shapes.base import BaseShape
 from pptx.shapes.group import GroupShape
@@ -28,31 +30,49 @@ tenacity = retry(
 )
 
 
-def parse_pdf(file: str, output_dir: str):
-    pass
+def parse_pdf(file: str, output_dir: str, api: str):
+    os.makedirs(output_dir, exist_ok=True)
+    with tempfile.NamedTemporaryFile(suffix=".zip") as temp_zip:
+        with open(file, "rb") as f:
+            response = requests.post(api, files={"pdf": f})
+            response.raise_for_status()
+            temp_zip.write(response.content)
+            temp_zip.flush()
+
+        shutil.unpack_archive(temp_zip.name, output_dir)
+
+
+def clear_slides(prs: PPTXPre):
+    while len(prs.slides) != 0:
+        rId = prs.slides._sldIdLst[0].rId
+        prs.part.drop_rel(rId)
+        del prs.slides._sldIdLst[0]
 
 
 def ppt_to_images(file: str, output_dir: str):
-    if not file.endswith(".pptx"):
-        raise ValueError("file must be a pptx")
     os.makedirs(output_dir, exist_ok=True)
     with tempfile.TemporaryDirectory() as temp_dir:
-        temp_pptx = pjoin(temp_dir, pbasename(file))
-        temp_pdf = pjoin(temp_dir, pbasename(file).replace(".pptx", ".pdf"))
-        shutil.copyfile(file, temp_pptx)
         command_list = [
             "soffice",
             "--headless",
             "--convert-to",
             "pdf",
-            temp_pptx,
+            file,
             "--outdir",
             temp_dir,
         ]
-        subprocess.run(command_list, check=True)
-        images = convert_from_path(temp_pdf, dpi=72)
-        for i, img in enumerate(images):
-            img.save(pjoin(output_dir, f"slide_{i+1:04d}.jpg"))
+        subprocess.run(command_list, check=True, stdout=subprocess.DEVNULL)
+
+        for f in os.listdir(temp_dir):
+            if not f.endswith(".pdf"):
+                continue
+            temp_pdf = pjoin(temp_dir, f)
+            images = convert_from_path(temp_pdf, dpi=72)
+            for i, img in enumerate(images):
+                img.save(pjoin(output_dir, f"slide_{i+1:04d}.jpg"))
+            return
+
+        raise RuntimeError("No PDF file was created in the temporary directory")
 
 
 def filename_normalize(filename: str):
@@ -254,6 +274,12 @@ class Config:
 
     def set_debug(self, debug: bool):
         self.DEBUG = debug
+
+    def remove_rundir(self):
+        if pexists(self.RUN_DIR):
+            shutil.rmtree(self.RUN_DIR)
+        if pexists(self.IMAGE_DIR):
+            shutil.rmtree(self.IMAGE_DIR)
 
 
 pjoin = os.path.join

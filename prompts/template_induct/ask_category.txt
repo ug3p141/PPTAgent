@@ -9,7 +9,7 @@ Requirements:
 You cannot use the following layout names:
 {{ existed_layoutnames }}
 
-Sample Outputs:
+Example Outputs:
 Presentation of Technological Evolution Through a Timeline
 Comparative Analysis Displayed Using a Structured Table
 Sales Growth Overview Illustrated with Multiple Charts

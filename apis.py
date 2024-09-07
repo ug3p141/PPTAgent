@@ -1,11 +1,13 @@
 import inspect
 import traceback
+from collections import defaultdict
 from copy import deepcopy
 from enum import Enum
 
 from jinja2 import Template
 from pptx.dml.color import RGBColor
 from pptx.oxml import parse_xml
+from pptx.shapes.base import BaseShape
 from pptx.text.text import _Paragraph, _Run
 from pptx.util import Pt
 
@@ -13,6 +15,8 @@ from llms import agent_model
 from presentation import GroupShape, Picture, SlidePage
 
 slide: SlidePage = None
+image_stats: dict[str, str] = None
+image_usage: dict[str, int] = None
 template_slides: list[SlidePage] = []
 # 在重新绑定变量名与全局变量时需要写global声明，否则不需要
 
@@ -22,6 +26,9 @@ class HistoryMark(Enum):
     API_CALL_CORRECT = "api_call_correct"
     CODE_RUN_ERROR = "code_run_error"
     CODE_RUN_CORRECT = "code_run_correct"
+
+    def __repr__(self):
+        return f"{self.name}"
 
 
 class ModelAPI:
@@ -34,45 +41,49 @@ class ModelAPI:
         self.api_history = []
         self.code_history = []
 
-    def get_apis_docs(self, op_types: list[str]):
-        return "\n".join([self._api_doc(op_type) for op_type in op_types])
+    def get_apis_docs(self, op_types: list[str], need_doc: bool = False):
+        return "\n".join([self._api_doc(op_type, need_doc) for op_type in op_types])
 
-    def _api_doc(self, op_type: str):
+    # 使用example output作为 复杂函数的example
+    def _api_doc(self, op_type: str, need_doc: bool):
         op_funcs = self.registered_functions[op_type]
         api_doc = [op_type.name + " API Docs:"]
         for func in op_funcs:
             sig = inspect.signature(func)
             params = []
             for name, param in sig.parameters.items():
+                param_str = name
                 if param.annotation != inspect.Parameter.empty:
-                    params.append(f"{name}: {param.annotation.__name__}")
-                else:
-                    params.append(f"{name}")
+                    param_str += f": {param.annotation.__name__}"
+                if param.default != inspect.Parameter.empty:
+                    param_str += f" = {repr(param.default)}"
+                params.append(param_str)
             signature = f"def {func.__name__}({', '.join(params)})"
+            if not need_doc:
+                api_doc.append(signature)
+                continue
             doc = inspect.getdoc(func)
             api_doc.append(f"{signature}\n\t{doc}")
-        return "\n\n".join(api_doc)
+        return "\n".join(api_doc)
 
     def execute_apis(self, prompt: str, apis: str):
         global slide, template_slides
         lines = apis.strip().split("\n")
-        code_traces = []
         err_time = 0
         line_idx = 0
+        code_start = False
         backup_state = (deepcopy(slide), deepcopy(template_slides))
         self.api_history.append([HistoryMark.API_CALL_ERROR, prompt, apis])
-        code_start = False
         while line_idx < len(lines):
             line = lines[line_idx]
             line_idx += 1
             if line.startswith("<code>"):
                 code_start = True
                 continue
-            if line.startswith("</code>"):
+            elif line.startswith("</code>") or not code_start:
                 code_start = False
-            if not code_start:
                 continue
-            self.code_history.append([HistoryMark.CODE_RUN_ERROR, line])
+            self.code_history.append([HistoryMark.CODE_RUN_ERROR, line, None])
             try:
                 eval(line)
                 self.code_history[-1][0] = HistoryMark.CODE_RUN_CORRECT
@@ -80,8 +91,13 @@ class ModelAPI:
                 err_time += 1
                 if err_time > self.terminate_times:
                     break
-                error_message = str(e) + traceback.format_exc()
-                code_traces.append(error_message)
+                trace_msg = traceback.format_exc()
+                error_message = (
+                    str(e)
+                    + ":\n"
+                    + trace_msg[trace_msg.find("line 1, in <module>") + 20 :]
+                )
+                self.code_history[-1][-1] = error_message
                 api_lines = (
                     "\n".join(lines[:line_idx])
                     + f"\n--> Error Line: {line}\n"
@@ -102,7 +118,6 @@ class ModelAPI:
         else:
             self.api_history[-1][0] = HistoryMark.API_CALL_ERROR
             raise ValueError("The api call is not correct.")
-        return code_traces
 
 
 def runs_merge(paragraph: _Paragraph):
@@ -112,6 +127,8 @@ def runs_merge(paragraph: _Paragraph):
             _Run(r, paragraph)
             for r in parse_xml(paragraph._element.xml.replace("fld", "r")).r_lst
         ]
+    if len(runs) == 1:
+        return runs[0]
     run = max(runs, key=lambda x: len(x.text))
     run.text = paragraph.text
     # remove other run
@@ -122,33 +139,55 @@ def runs_merge(paragraph: _Paragraph):
 
 
 def get_textframe(textframe_id: str):
-    assert "_" in textframe_id, "The element_id of a text element should contain a `_` "
+    if "_" not in textframe_id:
+        raise ValueError("The element_id of a text element should contain a `_`")
     element_id, text_id = textframe_id.split("_")
-    shape = slide[element_id]
-    assert (
-        shape.text_frame.is_textframe and len(shape.text_frame.data) > text_id
-    ), f"Incorrect element id: {element_id}."
+    element_id, text_id = int(element_id), int(text_id)
+    shape = slide.shapes[element_id]
+    if not (shape.text_frame.is_textframe and len(shape.text_frame.data) > text_id):
+        raise ValueError(f"Incorrect element ID: {element_id}.")
     return shape, text_id
 
 
-def delete_text(textframe_id: str):
-    """Delete the text of the element with the given element_id."""
+def del_textframe(textframe_id: str):
+    """Delete the textframe with the given id."""
     shape, text_id = get_textframe(textframe_id)
 
-    def del_para(shape):
-        para = shape.paragraphs[text_id]._p
-        para.getparent().remove(para)
+    def del_para(text_shape: BaseShape):
+        find = False
+        if not text_shape.has_text_frame:
+            raise ValueError(f"The element is not a text frame: {textframe_id}.")
+        for para in text_shape.text_frame.paragraphs:
+            if para.text == shape.text_frame.data[text_id]["text"]:
+                para._element.getparent().remove(para._element)
+                find = True
+                break
+        if len(text_shape.text_frame.paragraphs) == 0:
+            text_shape.element.getparent().remove(text_shape.element)
+        if not find:
+            raise ValueError(f"Incorrect element ID: {textframe_id}.")
+        shape.text_frame.data[text_id]["text"] = ""
 
     shape.closures.append(del_para)
 
 
 def replace_text(textframe_id: str, text: str):
-    """Replaces the text of the element with the given element_id."""
+    """Replace the text of the textframe with the given id."""
     shape, text_id = get_textframe(textframe_id)
 
-    def replace_para(shape):
-        run = runs_merge(shape.paragraphs[text_id])
-        run.text = text
+    def replace_para(text_shape: BaseShape):
+        find = False
+        if not text_shape.has_text_frame:
+            raise ValueError(f"The element is not a text frame: {textframe_id}.")
+        for para in text_shape.text_frame.paragraphs:
+            if para.text == shape.text_frame.data[text_id]["text"]:
+                run = runs_merge(para)
+                run.text = text
+                find = True
+                break
+        if not find:
+            raise ValueError(f"不正确的元素ID: {textframe_id}。")
+        shape.text_frame.data[text_id]["text"] = text
 
     shape.closures.append(replace_para)
 
@@ -162,23 +201,23 @@ def set_font_style(
     font_color: str = None,
 ):
     """
-    Set the font style of a text frame.
-
-    Parameters:
-    textframe_id (str, required): The ID of the text frame.
-    bold (bool, optional): Whether the text should be bold. Defaults to None.
-    italic (bool, optional): Whether the text should be italic. Defaults to None.
-    underline (bool, optional): Whether the text should be underlined. Defaults to None.
-    font_size (int, optional): The font size. Defaults to None.
-    font_color (str, optional): The font color in RGB format (e.g., 'FF0000' for red). Defaults to None.
-
+    Set the font style of a text frame, set the font color in Hexadecimal Color Notation.
     Example:
     >>> set_font_style("1_1", bold=True, font_size=24, font_color="FF0000")
     """
     shape, text_id = get_textframe(textframe_id)
 
-    def set_font(shape):
-        run = runs_merge(shape.paragraphs[text_id])
+    def set_font(text_shape: BaseShape):
+        find = False
+        if not text_shape.has_text_frame:
+            raise ValueError(f"The element is not a text frame: {textframe_id}.")
+        for para in shape.text_frame.paragraphs:
+            if para.text == shape.text_frame.data[text_id]["text"]:
+                find = True
+                break
+        if not find:
+            raise ValueError(f"Incorrect element id: {textframe_id}.")
+        run = runs_merge(para)
         if bold is not None:
             run.font.bold = bold
         if italic is not None:
@@ -209,9 +248,13 @@ def adjust_element_geometry(
     Example:
     >>> set_shape_position("1", 100, 150, 200, 300)
     """
-    shape = slide[element_id]
+    shape = slide.shapes[int(element_id)]
+    shape.left = Pt(left)
+    shape.top = Pt(top)
+    shape.width = Pt(width)
+    shape.height = Pt(height)
 
-    def set_geometry(shape):
+    def set_geometry(shape: BaseShape):
         shape.left = left
         shape.top = top
         shape.width = width
@@ -222,29 +265,30 @@ def adjust_element_geometry(
 
 def replace_image(figure_id: str, image_path: str):
     """Replace the image of the element with the given id."""
-    shape = slide[figure_id]
+    if image_path not in image_stats:
+        raise ValueError(f"The image path is not in the image stats: {image_path}.")
+    shape = slide.shapes[int(figure_id)]
     if not isinstance(shape, Picture):
         raise ValueError("The element is not a Picture.")
     shape.img_path = image_path
+    shape.caption = image_stats[image_path]
+    image_usage[image_path] += 1
 
 
 def select_template(template_idx: int):
     """Select the template slide with the specified index."""
     global slide
-    slide = deepcopy(template_slides[template_idx])
+    slide = deepcopy(template_slides[template_idx - 1])
 
 
 def del_element_byid(element_id: str):
     """Delete the element with the given id"""
-    for shape in slide.shapes:
-        if shape.element_idx == element_id:
-            slide.shapes.remove(shape)
-            return
-        if isinstance(shape, GroupShape):
-            for sub_shape in shape.shapes:
-                if sub_shape.element_idx == element_id:
-                    shape.shapes.remove(sub_shape)
-                    return
+    shape = slide.shapes[int(element_id)]
+
+    def del_shape(shape: BaseShape):
+        shape.element.getparent().remove(shape.element)
+
+    shape.closures.append(del_shape)
 
 
 class API_TYPES(Enum):
@@ -256,7 +300,7 @@ class API_TYPES(Enum):
 
 model_api = ModelAPI(
     {
-        API_TYPES.LAYOUT_ADJUST: [select_template, del_element_byid],
+        API_TYPES.LAYOUT_ADJUST: [select_template, del_textframe],
         API_TYPES.STYLE_ADJUST: [
             set_font_style,
             adjust_element_geometry,

@@ -108,6 +108,7 @@ class TemplateInducter:
                                     if slide.slide_title
                                     else ""
                                 )
+                                + f"Layout: {slide.slide_layout_name}\n"
                                 + slide.to_text()
                             )
                             for slide in self.prs.slides

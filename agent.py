@@ -6,12 +6,13 @@ from copy import deepcopy
 from datetime import datetime
 
 from jinja2 import Template
+from pptx import Presentation as PPTXPre
 
 import apis
 from apis import API_TYPES, model_api
 from llms import agent_model
-from presentation import Picture, Presentation, SlidePage
-from utils import app_config, pexists, pjoin, ppt_to_images, print
+from presentation import Presentation, SlidePage
+from utils import app_config, clear_slides, pexists, pjoin, ppt_to_images, print
 
 
 class PPTAgent:
@@ -19,28 +20,30 @@ class PPTAgent:
         self,
         presentation: Presentation,
         template: dict,
-        images: list[dict[str, str]],
+        images: dict[str, str],
         num_slides: int,
         doc_json: dict[str, str],
-        ppt_image_folder: str,
     ):
         self.presentation = presentation
-        self.intermediate_prs = deepcopy(presentation)
-        self.gen_prs = deepcopy(presentation)
-        self.gen_prs.slides = []
         self.slide_templates = template
         self.doc_json = doc_json
         self.num_slides = num_slides
         self.images = images
+
+        apis.image_stats = images
+        apis.image_usage = defaultdict(int)
+
+        self.gen_prs = deepcopy(presentation)
+        self.gen_prs.slides = []
+        self.inter_pr = PPTXPre(presentation.source_file)
+
         output_dir = pjoin(app_config.RUN_DIR, "agent")
         os.makedirs(output_dir, exist_ok=True)
         self.outline_file = pjoin(output_dir, "slide_outline.json")
-        self.step_result_file = pjoin(output_dir, "step_result.json")
+        self.step_result_file = pjoin(output_dir, "step_result.pkl")
         self.gen_prs_file = pjoin(output_dir, "generated_presentation.pptx")
-        self.ppt_image_folder = ppt_image_folder
-        self.inter_image_folder = pjoin(app_config.RUN_DIR, "intermediate_prs_images")
 
-    def work(self, functional_keys: dict):
+    def work(self):
         if pexists(self.outline_file):
             self.outline = json.load(open(self.outline_file, "r"))
         else:
@@ -58,22 +61,13 @@ class PPTAgent:
             )
             + f"\nMetadata: {self.doc_json['metadata']}\nCurrent Time: {datetime.now().strftime('%Y-%m-%d')}\n"
         )
-        self.generate_slides(functional_keys)
+        self.generate_slides()
 
-    def generate_slides(self, functional_keys: dict, use_cache=True):
+    def generate_slides(self):
         text_edit_template = Template(open("prompts/agent/text_edit.txt").read())
         vision_edit_template = Template(open("prompts/agent/vision_edit.txt").read())
-        step_results = {
-            "generated_slides": [],
-            "image_usage": defaultdict(int),
-        }
-        if use_cache and pexists(self.step_result_file):
-            step_results, model_api.api_history = pickle.load(
-                open(self.step_result_file, "rb")
-            )
+        generated_slides = []
         for slide_idx, (slide_title, slide) in enumerate(self.outline.items()):
-            if slide_idx != len(step_results["generated_slides"]):
-                continue
             slide_content = self.get_slide_content(slide_idx, slide_title, slide)
             # layout adjustment
             if slide["layout"] not in self.slide_templates:
@@ -88,35 +82,40 @@ class PPTAgent:
                 ),
                 template_html_code="\n".join(
                     [
-                        f"Template {idx}\n----\n" + i.to_html()
+                        f"Template index :{idx+1}" + i.to_html(True) + "----"
                         for idx, i in enumerate(apis.template_slides)
                     ]
                 ),
                 slide_outline=self.simple_outline,
                 slide_content=slide_content,
             )
-            model_api.execute_apis(text_edit_prompt, apis=agent_model(text_edit_prompt))
-            self.intermediate_prs.slides = [apis.slide]
-            self.intermediate_prs.save(
-                pjoin(app_config.RUN_DIR, "intermediate_prs.pptx")
+            # TODO 还是提供图片或者style可能会更好，不然的话，text的位置乱填
+            model_api.execute_apis(
+                text_edit_prompt,
+                apis=agent_model(
+                    text_edit_prompt,
+                ),
             )
+            clear_slides(self.inter_pr)
+            apis.slide.build(
+                self.inter_pr,
+                self.gen_prs.layout_mapping[apis.slide.slide_layout_name],
+            )
+            self.inter_pr.save(pjoin(app_config.RUN_DIR, "inter_prs.pptx"))
             ppt_to_images(
-                pjoin(app_config.RUN_DIR, "intermediate_prs.pptx"),
-                self.inter_image_folder,
-            )
-            inter_image = pjoin(
-                self.inter_image_folder, os.listdir(self.inter_image_folder)[0]
+                pjoin(app_config.RUN_DIR, "inter_prs.pptx"),
+                pjoin(app_config.RUN_DIR),
             )
             # get image
             vision_edit_prompt = vision_edit_template.render(
                 api_documentation=model_api.get_apis_docs(
                     [API_TYPES.STYLE_ADJUST, API_TYPES.IMAGE_EDITING]
                 ),
-                slide_html_code=slide_template.to_html(),
+                slide_html_code=apis.slide.to_html(True),
                 slide_outline=self.simple_outline,
                 provided_images="\n".join(
                     [
-                        f"Image {k} used {step_results['image_usage'][k]} times, caption: {v}"
+                        f"Image {k} used {apis.image_usage} times, caption: {v}"
                         for k, v in self.images.items()
                     ]
                 ),
@@ -125,19 +124,12 @@ class PPTAgent:
                 vision_edit_prompt,
                 agent_model(
                     vision_edit_prompt,
-                    inter_image,
+                    pjoin(app_config.RUN_DIR, "slide_0001.jpg"),
                 ),
             )
-            slide_template: SlidePage = apis.slide
-
-            # result saving
-            step_results["generated_slides"].append(apis.slide)
-            pickle.dump(
-                (step_results, model_api.api_history), open(self.step_result_file, "wb")
-            )
-            # TODO 只在vision feedback时使用style
-            self.gen_prs.slides = step_results["generated_slides"]
-            self.gen_prs.save(self.gen_prs_file)
+            generated_slides.append(apis.slide)
+        self.gen_prs.slides = generated_slides
+        self.gen_prs.save(self.gen_prs_file)
 
     def generate_outline(self):
         template = Template(open("prompts/agent/slide_outline.txt").read())
