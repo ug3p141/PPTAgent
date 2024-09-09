@@ -44,7 +44,6 @@ class ModelAPI:
     def get_apis_docs(self, op_types: list[str], need_doc: bool = False):
         return "\n".join([self._api_doc(op_type, need_doc) for op_type in op_types])
 
-    # 使用example output作为 复杂函数的example
     def _api_doc(self, op_type: str, need_doc: bool):
         op_funcs = self.registered_functions[op_type]
         api_doc = [op_type.name + " API Docs:"]
@@ -72,6 +71,7 @@ class ModelAPI:
         err_time = 0
         line_idx = 0
         code_start = False
+        found_code = False
         backup_state = (deepcopy(slide), deepcopy(template_slides))
         self.api_history.append([HistoryMark.API_CALL_ERROR, prompt, apis])
         while line_idx < len(lines):
@@ -79,6 +79,7 @@ class ModelAPI:
             line_idx += 1
             if line.startswith("<code>"):
                 code_start = True
+                found_code = True
                 continue
             elif line.startswith("</code>") or not code_start:
                 code_start = False
@@ -112,7 +113,8 @@ class ModelAPI:
                 lines = agent_model(prompt).strip().split("\n")
                 line_idx = 0
                 self.api_history.append([HistoryMark.API_CALL_ERROR, prompt, apis])
-
+        if not found_code:
+            raise ValueError("No code block found in the api call.")
         if err_time < self.terminate_times:
             self.api_history[-1][0] = HistoryMark.API_CALL_CORRECT
         else:

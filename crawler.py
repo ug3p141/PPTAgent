@@ -3,12 +3,11 @@ import glob
 import json
 import os
 import shutil
-import traceback
 from collections import defaultdict
-from copy import deepcopy
 from itertools import product
 
 import aiohttp
+import func_argparse
 import jsonlines
 import PyPDF2
 from googlesearch import search
@@ -236,8 +235,8 @@ def prepare_pdf_folder(pdf_folder: str):
                 if similarity_matrix[i][j] > 0.85:
                     if pexists(images[i]):
                         os.remove(images[i])
-                        images.pop(images[i])
                     break
+        images = [image for image in images if pexists(image)]
         image_stats = {}
         caption_prompt = open("prompts/image_label/caption.txt").read()
         for image in images:
@@ -313,14 +312,16 @@ def prepare_ppt(filename: str, output_dir: str):
     # os.remove(filename)
 
 
-if __name__ == "__main__":
-    app_config.DEBUG = True
+def download_data():
     subtopics = [item for sublist in topics.values() for item in sublist]
-    # get_file_links("data/crawl_links.jsonl", subtopics, 200)
-    # asyncio.run(download_files("data/crawl_links.jsonl"))
+    get_file_links("data/crawl_links.jsonl", subtopics, 200)
+    asyncio.run(download_files("data/crawl_links.jsonl"))
     print("PDF and PPTX files download finished")
-    num_files = sum(len(files) for _, _, files in os.walk("data/subtopics")) - 2
-    progress_bar = tqdm(total=num_files, desc="Preprocessing pptx and pdf")
+
+
+def preprocess_ppt():
+    num_ppts = len(glob.glob("data/subtopics/*/*/pptx"))
+    progress_bar = tqdm(total=num_ppts, desc="Preprocessing pptx")
     for topic, subtopics in topics.items():
         for subtopic in subtopics:
             for root, dirs, files in os.walk(
@@ -328,34 +329,49 @@ if __name__ == "__main__":
             ):
                 for file in files:
                     progress_bar.update(1)
-                    try:
-                        # if "pdf" in root.split("/"):
-                        # prepare_pdf(
-                        #     pjoin(root, file),
-                        #     pjoin("data/topic", filename_normalize(topic), "pdf"),
-                        # )
-                        if "pptx" in root.split("/"):
-                            prepare_ppt(
-                                pjoin(root, file),
-                                pjoin(
-                                    "data/topic",
-                                    filename_normalize(topic),
-                                    "ppt",
-                                    filename_normalize(file.rsplit(".", 1)[0]),
-                                ),
-                            )
-                    except Exception as e:
-                        print(f"File {file} encountered error: {e}")
-                        print(traceback.format_exc())
+                    if "pptx" in root.split("/"):
+                        prepare_ppt(
+                            pjoin(root, file),
+                            pjoin(
+                                "data/topic",
+                                filename_normalize(topic),
+                                "ppt",
+                                filename_normalize(file.rsplit(".", 1)[0]),
+                            ),
+                        )
 
-    # pdf_folders = [
-    #     pjoin(topic, pdf)
-    #     for topic in glob.glob("data/topic/*/pdf")
-    #     for pdf in os.listdir(topic)
-    # ]
-    # progress_bar = tqdm(total=len(pdf_folders), desc="Postprocessing pdfs")
-    # for pdf_folder in pdf_folders:
-    #     if pexists(pjoin(pdf_folder, "image_caption.json")):
-    #         continue
-    #     prepare_pdf_folder(pdf_folder)
-    #     progress_bar.update(1)
+
+def preprocess_pdf():
+    num_pdfs = len(glob.glob("data/topic/*/pdf/*"))
+    progress_bar = tqdm(total=num_pdfs, desc="Preprocessing pdfs")
+    for topic, subtopics in topics.items():
+        for subtopic in subtopics:
+            for root, dirs, files in os.walk(
+                pjoin("data/subtopics", filename_normalize(subtopic))
+            ):
+                for file in files:
+                    progress_bar.update(1)
+                    if "pdf" in root.split("/"):
+                        prepare_pdf(
+                            pjoin(root, file),
+                            pjoin("data/topic", filename_normalize(topic), "pdf"),
+                        )
+
+
+def pdf_postprocess():
+    pdf_folders = [
+        pjoin(topic, pdf)
+        for topic in glob.glob("data/topic/*/pdf")
+        for pdf in os.listdir(topic)
+    ]
+    progress_bar = tqdm(total=len(pdf_folders), desc="Postprocessing pdfs")
+    for pdf_folder in pdf_folders:
+        if pexists(pjoin(pdf_folder, "image_caption.json")):
+            continue
+        prepare_pdf_folder(pdf_folder)
+        progress_bar.update(1)
+
+
+if __name__ == "__main__":
+    app_config.DEBUG = True
+    func_argparse.main([download_data, preprocess_ppt, preprocess_pdf, pdf_postprocess])
