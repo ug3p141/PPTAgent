@@ -1,5 +1,5 @@
 from pptx import Presentation as PPTXPre
-from pptx.chart.chart import Chart
+from pptx.chart.chart import Chart as PPTXChart
 from pptx.dml.color import RGBColor
 from pptx.dml.fill import _NoFill, _NoneFill
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -7,12 +7,11 @@ from pptx.oxml import parse_xml
 from pptx.shapes.autoshape import Shape as PPTXAutoShape
 from pptx.shapes.base import BaseShape
 from pptx.shapes.connector import Connector as PPTXConnector
-from pptx.shapes.graphfrm import GraphicFrame
 from pptx.shapes.group import GroupShape as PPTXGroupShape
 from pptx.shapes.picture import Picture as PPTXPicture
 from pptx.shapes.placeholder import PlaceholderPicture, SlidePlaceholder
 from pptx.slide import Slide as PPTXSlide
-from pptx.table import Table
+from pptx.table import Table as PPTXTable
 from pptx.text.text import _Run
 from rich import print
 
@@ -57,13 +56,6 @@ class TextFrame:
         style = object_to_dict(shape, exclude=["text"])
         data = []
         idx = 0
-        #     def delete_paragraph(paragraph):
-        # p = paragraph._p
-        # parent_element = p.getparent()
-        # parent_element.remove(p)
-        # def delete_run(run):
-        # r = run._r
-        # r.getparent().remove(r)
         for paragraph in shape.paragraphs:
             runs = paragraph.runs
             if len(runs) == 0:
@@ -72,6 +64,8 @@ class TextFrame:
                     for r in parse_xml(paragraph._element.xml.replace("fld", "r")).r_lst
                 ]
             content = object_to_dict(paragraph, exclude=["runs"])
+            content["idx"] = idx
+            idx += 1
             if len(runs) == 0:
                 data.append(content)
                 continue
@@ -84,8 +78,6 @@ class TextFrame:
             content["font"] = object_to_dict(max(runs_fonts, key=runs_fonts.get))
             if content["font"]["name"] == "+mj-ea":
                 content["font"]["name"] = "宋体"
-            content["idx"] = idx
-            idx += 1
             data.append(content)
         return cls(True, style, data, father_idx, shape.text)
 
@@ -216,8 +208,6 @@ class ShapeElement:
     def build(self, slide, shape):
         self.text_frame.build(shape)
         apply_fill(shape, self.style["fill"])
-        # if
-        # replace_xml_node(shape.shadow._element, self.style['shadow'])
         if self.style["line"] is not None:
             apply_fill(shape.line, self.style["line"]["fill"])
             dict_to_object(self.style["line"], shape.line, exclude=["fill"])
@@ -275,9 +265,10 @@ class ShapeElement:
 
     @property
     def inline_style(self):
-        if not self.stylish:
-            return ""
-        return f"id='{self.shape_idx}' data-relative-area='{self.area//SLIDE_AREA}%' style='left: {self.left}pt; top: {self.top}pt; width: {self.width}pt; height: {self.height}pt;'"
+        style = f"id='{self.shape_idx}' data-relative-area='{self.area*100/SLIDE_AREA:.2f}%'"
+        if self.stylish:
+            style += f" style='left: {self.left}pt; top: {self.top}pt; width: {self.width}pt; height: {self.height}pt;'"
+        return style
 
     @property
     def pptc_text_info(self):
@@ -453,7 +444,7 @@ class Picture(ShapeElement):
         if self.is_background:
             return ""
         return (
-            f"<figure {self.inline_style} alt='{self.data[1]}'>"
+            f"<figure {self.inline_style}>"
             + (f"\n<figcaption>{self.caption}</figcaption>" if self.caption else "")
             + "\n</figure>"
         )
@@ -484,10 +475,10 @@ class Placeholder(ShapeElement):
             data = Picture.from_shape(slide_idx, shape_idx, shape, style, text_frame)
         elif shape.has_text_frame:
             data = TextBox.from_shape(slide_idx, shape_idx, shape, style, text_frame)
-        elif shape.has_chart:
-            data = Chart.from_shape(slide_idx, shape_idx, shape, style, text_frame)
-        elif shape.has_table:
-            data = Table.from_shape(slide_idx, shape_idx, shape, style, text_frame)
+        elif shape.has_chart or shape.has_table:
+            data = GraphicalShape.from_shape(
+                slide_idx, shape_idx, shape, style, text_frame
+            )
         return data
         # ph = cls(slide_idx, shape_idx, style, data, text_frame)
         # ph.ph_index = shape.placeholder_format.type.value
@@ -517,8 +508,6 @@ class GroupShape(ShapeElement):
             ShapeElement.from_shape(slide_idx, (shape_idx + 1) * 100 + i, sub_shape)
             for i, sub_shape in enumerate(shape.shapes)
         ]
-        if slide_idx == 7:
-            pass
         for idx, shape_bounds in enumerate(parse_groupshape(shape)):
             data[idx].style["shape_bounds"] = shape_bounds
         return cls(slide_idx, shape_idx, style, data, text_frame)
@@ -575,7 +564,7 @@ class GraphicalShape(ShapeElement):
         cls,
         slide_idx: int,
         shape_idx: int,
-        shape: Chart | Table | GraphicFrame,
+        shape: PPTXChart | PPTXTable,
         style: dict,
         text_frame: TextFrame,
     ):
@@ -586,7 +575,25 @@ class GraphicalShape(ShapeElement):
 
     @property
     def orig_shape(self):
-        return self.style["shape_type"]
+        return self.style["shape_type"].strip()
+
+    def normalize(self):
+        shape = Picture(
+            self.slide_idx,
+            self.shape_idx,
+            {"img_style": {}} | self.style,
+            [
+                "resource/pic_placeholder.png",
+                "graphicalshape",
+                self.orig_shape,
+            ],
+            self.text_frame,
+        )
+        shape.style["fill"] = None
+        shape.style["line"] = None
+        shape.is_background = False
+        shape.text_frame.is_textframe = False
+        return shape
 
 
 class Connector(ShapeElement):
@@ -605,7 +612,6 @@ class Connector(ShapeElement):
         pass
 
 
-# function_args = json.loads(response_message.tool_calls[0].function.arguments)
 class SlidePage:
     def __init__(
         self,
@@ -702,8 +708,12 @@ class SlidePage:
         for shape in shapes:
             if isinstance(shape, GraphicalShape):
                 content_types.add(shape.orig_shape)
-            elif isinstance(shape, GroupShape):
-                content_types.add("picture")
+            elif isinstance(shape, Picture):
+                if not shape.img_path == "resource/pic_placeholder.png":
+                    content_types.add("picture")
+                else:
+                    # converted from GraphicalShape
+                    content_types.add(shape.caption)
             elif isinstance(shape, GroupShape):
                 content_types.union(self.get_content_types(shape.data))
         return sorted(list(content_types))
@@ -744,21 +754,7 @@ class SlidePage:
             shapes = self.shapes
         for shape_idx, shape in enumerate(shapes):
             if isinstance(shape, GraphicalShape):
-                shapes[shape_idx] = Picture(
-                    shape.slide_idx,
-                    shape.shape_idx,
-                    {"img_style": {}} | shape.style,
-                    [
-                        "resource/pic_placeholder.png",
-                        f"{shape.orig_shape}_{shape.shape_idx}",
-                        shape.orig_shape,
-                    ],
-                    shape.text_frame,
-                )
-                shapes[shape_idx].style["fill"] = None
-                shapes[shape_idx].style["line"] = None
-                shapes[shape_idx].is_background = False
-                shapes[shape_idx].text_frame.is_textframe = False
+                shapes[shape_idx] = shape.normalize()
             elif isinstance(shape, GroupShape):
                 self.normalize(shape.data)
 
@@ -837,7 +833,7 @@ class Presentation:
             except Exception as e:
                 error_history.append((slide_idx, str(e)))
                 if app_config.DEBUG:
-                    print(f"Error in slide {slide_idx}: {e}")
+                    print(f"Warning in slide {slide_idx}: {e}")
 
         num_pages = len(slides)
         return cls(
@@ -865,15 +861,8 @@ class Presentation:
                 self.clear_images(shape.data)
             elif isinstance(shape, Picture) and not shape.is_background:
                 shape.img_path = "resource/pic_placeholder.png"
-            elif isinstance(shape, (Chart, Table)):
-                shapes[idx] = Picture(
-                    shape.slide_idx,
-                    shape.shape_idx,
-                    {"img_style": {}} | shape.style,
-                    ["resource/pic_placeholder.png", f"chart_{shape.shape_idx}", ""],
-                    shape.text_frame,
-                )
-                shapes[idx].is_background = False
+            elif isinstance(shape, GraphicalShape):
+                shapes[idx] = shape.normalize()
 
     def clear_text(self, shapes: list[BaseShape]):
         for shape in shapes:
@@ -923,7 +912,6 @@ SHAPECAST: dict[int, ShapeElement] = {
     MSO_SHAPE_TYPE.LINE: Connector,
     MSO_SHAPE_TYPE.CHART: GraphicalShape,
     MSO_SHAPE_TYPE.TABLE: GraphicalShape,
-    MSO_SHAPE_TYPE.FREEFORM: GraphicalShape,
     MSO_SHAPE_TYPE.DIAGRAM: GraphicalShape,
 }
 

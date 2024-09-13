@@ -66,5 +66,5 @@ Input:
 - Provided Images:
 {{ provided_images }}
 
-Now, let's think step by step, and give your final output in JSON format without markdown code blocks.
+Now, let's think step by step, and give your final output in JSON format.
 Output:

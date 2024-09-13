@@ -8,6 +8,3 @@ Chart: Bar graph showing quarterly revenue growth over five years. Color-coded b
 Input:
 <image>
 Output:
-Input:
-<image>
-Output:

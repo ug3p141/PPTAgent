@@ -6,6 +6,7 @@ tenacity
 transformers
 FlagEmbedding
 peft
+json_repair
 timm
 einops
 vllm

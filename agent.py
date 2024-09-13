@@ -1,18 +1,21 @@
 import json
 import os
-import pickle
 from collections import defaultdict
 from copy import deepcopy
 from datetime import datetime
 
+import json_repair
+import torch
 from jinja2 import Template
 from pptx import Presentation as PPTXPre
+from torch import cosine_similarity
 
 import apis
-from apis import API_TYPES, model_api
+from apis import API_TYPES, code_executor
 from llms import agent_model
-from presentation import Presentation, SlidePage
-from utils import app_config, clear_slides, pexists, pjoin, ppt_to_images, print
+from model_utils import get_text_embedding
+from presentation import Presentation
+from utils import app_config, clear_slides, pexists, pjoin, print
 
 
 class PPTAgent:
@@ -23,120 +26,127 @@ class PPTAgent:
         images: dict[str, str],
         num_slides: int,
         doc_json: dict[str, str],
+        functional_keys: list[str],
     ):
         self.presentation = presentation
         self.slide_templates = template
         self.doc_json = doc_json
         self.num_slides = num_slides
-        self.images = images
+        self.image_information = "\n".join(
+            [
+                f"Image path: {k}, size: {v[1][0]}*{v[1][1]} px\n caption: {v[0]}"
+                for k, v in images.items()
+            ]
+        )
+        self.functional_keys = functional_keys
 
         apis.image_stats = images
         apis.image_usage = defaultdict(int)
 
         self.gen_prs = deepcopy(presentation)
         self.gen_prs.slides = []
-        self.inter_pr = PPTXPre(presentation.source_file)
 
         output_dir = pjoin(app_config.RUN_DIR, "agent")
         os.makedirs(output_dir, exist_ok=True)
         self.outline_file = pjoin(output_dir, "slide_outline.json")
-        self.step_result_file = pjoin(output_dir, "step_result.pkl")
-        self.gen_prs_file = pjoin(output_dir, "generated_presentation.pptx")
+        self.cache_file = pjoin(output_dir, "generating_steps.json")
 
+    # TODO vision edit的结果单独保存
     def work(self):
         if pexists(self.outline_file):
             self.outline = json.load(open(self.outline_file, "r"))
         else:
-            self.outline = json.loads(self.generate_outline())
+            self.outline = json_repair.loads(self.generate_outline())
             json.dump(
                 self.outline, open(self.outline_file, "w"), ensure_ascii=False, indent=4
             )
-
-        self.simple_outline = (
-            "\n".join(
-                [
-                    f"Slide {slide_idx+1}: {slide_title}"
-                    for slide_idx, slide_title in enumerate(self.outline)
-                ]
-            )
-            + f"\nMetadata: {self.doc_json['metadata']}\nCurrent Time: {datetime.now().strftime('%Y-%m-%d')}\n"
+        meta_data = "\n".join(
+            [f"{k}: {v}" for k, v in self.doc_json["metadata"].items()]
+        )
+        self.metadata = f"\nMetadatao of Presentation: \n{meta_data}\nCurrent Time: {datetime.now().strftime('%Y-%m-%d')}\n"
+        self.simple_outline = "Outline of Presentation: \n" + "\n".join(
+            [
+                f"Slide {slide_idx+1}: {slide_title}"
+                for slide_idx, slide_title in enumerate(self.outline)
+            ]
         )
         self.generate_slides()
 
-    def generate_slides(self):
-        text_edit_template = Template(open("prompts/agent/text_edit.txt").read())
-        vision_edit_template = Template(open("prompts/agent/vision_edit.txt").read())
-        generated_slides = []
+    def generate_slides(self, use_cache=True):
+        edit_template = Template(open("prompts/agent/edit.txt").read())
+
+        self.gen_prs.slides = []
+        steps = []
+        layout_names = list(self.slide_templates.keys())
+        layout_embeddings = torch.stack(get_text_embedding(layout_names, 32))
+
+        if use_cache and pexists(self.cache_file):
+            steps, code_executor.api_history, code_executor.code_history = json.load(
+                open(self.cache_file, "r")
+            )
+            for step in steps:
+                apis.slide = deepcopy(self.presentation.slides[step[0]])
+                code_executor.execute_apis(step[2], step[3])
+                self.gen_prs.slides.append(apis.slide)
         for slide_idx, (slide_title, slide) in enumerate(self.outline.items()):
+            if use_cache and len(steps) != slide_idx:
+                continue
+            images = "No Images"
+            if any(
+                [
+                    i in slide["layout"]
+                    for i in ["picture", "chart", "table", "diagram", "freeform"]
+                ]
+            ):
+                images = self.image_information
             slide_content = self.get_slide_content(slide_idx, slide_title, slide)
-            # layout adjustment
             if slide["layout"] not in self.slide_templates:
-                raise ValueError(f"{slide['layout']} not in slide_templates")
-            template_ids = self.slide_templates[slide["layout"]]
-            apis.template_slides = [
-                self.presentation.slides[int(i - 1)] for i in template_ids
-            ]
-            text_edit_prompt = text_edit_template.render(
-                api_documentation=model_api.get_apis_docs(
-                    [API_TYPES.LAYOUT_ADJUST, API_TYPES.TEXT_EDITING]
-                ),
-                template_html_code="\n".join(
-                    [
-                        f"Template index :{idx+1}" + i.to_html(True) + "----"
-                        for idx, i in enumerate(apis.template_slides)
-                    ]
-                ),
-                slide_outline=self.simple_outline,
-                slide_content=slide_content,
+                layout_sim = torch.cosine_similarity(
+                    get_text_embedding(slide["layout"], 1)[0], layout_embeddings
+                )
+                slide["layout"] = layout_names[layout_sim.argmax().item()]
+            template_id = (
+                max(
+                    self.slide_templates[slide["layout"]],
+                    key=lambda x: len(self.presentation.slides[x - 1].shapes),
+                )
+                - 1
             )
-            # TODO 还是提供图片或者style可能会更好，不然的话，text的位置乱填
-            model_api.execute_apis(
-                text_edit_prompt,
+            apis.slide = deepcopy(self.presentation.slides[template_id])
+            edit_prompt = edit_template.render(
+                api_documentation=code_executor.get_apis_docs(
+                    [API_TYPES.TEXT_EDITING, API_TYPES.IMAGE_EDITING]
+                ),
+                edit_target=apis.slide.to_html(),
+                content=self.simple_outline + self.metadata + slide_content,
+                images=images,
+            )
+            code_executor.execute_apis(
+                edit_prompt,
                 apis=agent_model(
-                    text_edit_prompt,
+                    edit_prompt,
                 ),
+                # 是否在这步提供图片
             )
-            clear_slides(self.inter_pr)
-            apis.slide.build(
-                self.inter_pr,
-                self.gen_prs.layout_mapping[apis.slide.slide_layout_name],
-            )
-            self.inter_pr.save(pjoin(app_config.RUN_DIR, "inter_prs.pptx"))
-            ppt_to_images(
-                pjoin(app_config.RUN_DIR, "inter_prs.pptx"),
-                pjoin(app_config.RUN_DIR),
-            )
-            # get image
-            vision_edit_prompt = vision_edit_template.render(
-                api_documentation=model_api.get_apis_docs(
-                    [API_TYPES.STYLE_ADJUST, API_TYPES.IMAGE_EDITING]
-                ),
-                slide_html_code=apis.slide.to_html(True),
-                slide_outline=self.simple_outline,
-                provided_images="\n".join(
-                    [
-                        f"Image {k} used {apis.image_usage} times, caption: {v}"
-                        for k, v in self.images.items()
-                    ]
-                ),
-            )
-            model_api.execute_apis(
-                vision_edit_prompt,
-                agent_model(
-                    vision_edit_prompt,
-                    pjoin(app_config.RUN_DIR, "slide_0001.jpg"),
-                ),
-            )
-            generated_slides.append(apis.slide)
-        self.gen_prs.slides = generated_slides
-        self.gen_prs.save(self.gen_prs_file)
+            steps.append((template_id, *code_executor.api_history[-1]))
+            self.gen_prs.slides.append(apis.slide)
+            if use_cache:
+                json.dump(
+                    (steps, code_executor.api_history, code_executor.code_history),
+                    open(self.cache_file, "w"),
+                )
+        self.gen_prs.save(pjoin(app_config.RUN_DIR, "agent", "final.pptx"))
 
     def generate_outline(self):
-        template = Template(open("prompts/agent/slide_outline.txt").read())
+        template = Template(open("prompts/agent/outline.txt").read())
         prompt = template.render(
             num_slides=self.num_slides,
-            layouts=list(self.slide_templates.keys()),
+            layouts="\n".join(
+                set(self.slide_templates.keys()).difference(self.functional_keys)
+            ),
+            functional_keys="\n".join(self.functional_keys),
             json_content=self.doc_json,
+            images=self.image_information,
         )
         return agent_model(prompt)
 
@@ -150,7 +160,3 @@ class PPTAgent:
                         if key in subsection:
                             slide_content += f"SubSection {key}: {subsection[key]}\n"
         return slide_content
-
-
-if __name__ == "__main__":
-    prs = Presentation(app_config.TEST_PPT)

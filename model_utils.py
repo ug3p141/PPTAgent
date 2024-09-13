@@ -19,7 +19,7 @@ image_embed_model = None
 extractor = None
 
 
-def get_text_embedding(text: list[str], batchsize: int):
+def get_text_embedding(text: list[str], batchsize: int = 1):
     if isinstance(text, str):
         text = [text]
     global text_embed_model
@@ -41,21 +41,16 @@ def prs_dedup(presentation: Presentation, ppt_image_folder: str, batchsize: int 
     text_embeddings = get_text_embedding(
         [i.to_text() for i in presentation.slides], batchsize
     )
-    image_embeddings = image_embedding(ppt_image_folder).values()
-    slide_embeddings = zip(text_embeddings, image_embeddings)
-    pre_embedding = next(slide_embeddings)
+    pre_embedding = text_embeddings[0]
     slide_idx = 1
     duplicates = []
     while slide_idx < len(presentation.slides):
-        cur_embedding = next(slide_embeddings)
-        if (
-            torch.cosine_similarity(pre_embedding[0], cur_embedding[0], -1) > 0.8
-            or torch.cosine_similarity(pre_embedding[1], cur_embedding[1], -1) > 0.8
-        ):
-            duplicates.append(presentation.slides.pop(slide_idx - 1))
+        cur_embedding = text_embeddings[slide_idx]
+        if torch.cosine_similarity(pre_embedding, cur_embedding, -1) > 0.8:
+            duplicates.append(slide_idx - 1)
         slide_idx += 1
         pre_embedding = cur_embedding
-    return duplicates
+    return [presentation.slides.pop(i) for i in reversed(duplicates)]
 
 
 def image_embedding(image_dir: str, batchsize: int = 16):

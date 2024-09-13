@@ -3,6 +3,9 @@ import json
 import os
 from copy import deepcopy
 
+import PIL
+
+import llms
 from agent import PPTAgent
 from llms import agent_model, caption_model
 from model_utils import prs_dedup
@@ -19,7 +22,6 @@ from utils import (
     set_proxy,
 )
 
-# TODO 生成一个模板ppt的背景信息
 # TODO 背景元素的识别
 # TODO 减少输入长度减少幻觉现象，或者进行induct操作
 
@@ -31,6 +33,9 @@ def ppt_gen(text_content: str, ppt_file: str, images_dir: str, num_pages: int = 
     print(f"Session ID: {session_id}")
     app_config.set_session(session_id)
 
+    # setting models
+    llms.long_model = llms.gpt4o
+    llms.caption_model = llms.gpt4o
     # 1. 解析ppt
     presentation = Presentation.from_file(ppt_file)
     if len(presentation.error_history) > len(presentation.slides) // 3:
@@ -43,6 +48,8 @@ def ppt_gen(text_content: str, ppt_file: str, images_dir: str, num_pages: int = 
     # 2. 模板生成
 
     labler = ImageLabler(presentation)
+    labler.caption_images()
+    labler.apply_stats()
     ppt_image_folder = pjoin(app_config.RUN_DIR, "slide_images")
     ppt_to_images(presentation.source_file, ppt_image_folder)
     duplicates = prs_dedup(presentation, ppt_image_folder)
@@ -61,17 +68,22 @@ def ppt_gen(text_content: str, ppt_file: str, images_dir: str, num_pages: int = 
         )
     # caption_prompt = open("prompts/image_label/caption.txt").read()
     # images = {
-    #     pjoin(images_dir, k): caption_model(caption_prompt, pjoin(images_dir, k))
-    #     for k in os.listdir(images_dir) if k.split(".")[-1] in IMAGE_EXTENSIONS
+    #     pjoin(images_dir, k): [
+    #         caption_model(caption_prompt, [pjoin(images_dir, k)]),
+    #         PIL.Image.open(pjoin(images_dir, k)).size,
+    #     ]
+    #     for k in os.listdir(images_dir)
+    #     if k.split(".")[-1] in IMAGE_EXTENSIONS
     # }
     images = json.load(open("resource/image_caption.json"))
-    # deepcopy(presentation).normalize().save(
-    #     pjoin(app_config.RUN_DIR, "template.pptx"), layout_only=True
-    # )
-    # ppt_to_images(
-    #     pjoin(app_config.RUN_DIR, "template.pptx"),
-    #     pjoin(app_config.RUN_DIR, "template_images"),
-    # )
+    deepcopy(presentation).normalize().save(
+        pjoin(app_config.RUN_DIR, "template.pptx"), layout_only=True
+    )
+    ppt_to_images(
+        pjoin(app_config.RUN_DIR, "template.pptx"),
+        pjoin(app_config.RUN_DIR, "template_images"),
+    )
+    # TODO 只包含最多元素的模板好了，不然我很难解释，delete is simpler than insert
     functional_keys, slide_cluster = TemplateInducter(
         presentation, ppt_image_folder, pjoin(app_config.RUN_DIR, "template_images")
     ).work()
@@ -85,14 +97,16 @@ def ppt_gen(text_content: str, ppt_file: str, images_dir: str, num_pages: int = 
     doc_json = json.load(open(pjoin(app_config.RUN_DIR, "refined_doc.json"), "r"))
 
     # 先文本，后图像
-    PPTAgent(presentation, slide_cluster, images, num_pages, doc_json).work()
+    PPTAgent(
+        presentation, slide_cluster, images, num_pages, doc_json, functional_keys
+    ).work()
 
 
 if __name__ == "__main__":
     # set_proxy("http://124.16.138.148:7890")
-    app_config.set_debug(True)
+    app_config.set_debug(False)
     ppt_gen(
         open("resource/DOC2PPT.md").read(),
-        app_config.TEST_PPT,
-        "resource/doc2slide_images",
+        "data/topic/Artificial_Intelligence_and_its_Impact/pptx/SquadTactics/original.pptx",
+        "resource/doc2ppt_images",
     )

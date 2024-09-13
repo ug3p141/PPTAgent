@@ -1,9 +1,9 @@
-Analyze the content layout and media types in the provided slides.
-Your objective is to create a concise, descriptive title for each group of slides that accurately captures the presentation style, layout, and relationships between content elements, while reflecting the presence of specific visual structures like timelines, tables, or charts.
+Analyze the content layout and media types in the provided slide images.
+Your objective is to create a concise, descriptive title for a group of slide images that accurately captures the presentation style, layout, and relationships between content elements.
 
 Requirements:
 - Emphasize the presentation style, layout, and the interaction between media and text.
-- Avoid referencing specific entities or using detailed technical jargon in the titles.
+- Avoid referencing any entities and avoid unnecessary details in the titles.
 - Ensure the titles convey the overall theme and structure of the slide, incorporating references to timelines, tables, charts, or other key elements when present.
 
 You cannot use the following layout names:

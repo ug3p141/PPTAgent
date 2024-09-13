@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -6,6 +7,7 @@ import traceback
 import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 
+import json_repair
 import requests
 from lxml import etree
 from pdf2image import convert_from_path
@@ -25,8 +27,18 @@ def tenacity_log(retry_state: RetryCallState):
     traceback.print_tb(retry_state.outcome.exception().__traceback__)
 
 
+def get_json_from_response(response: str):
+    l, r = response.rfind("```json"), response.rfind("```")
+    try:
+        if l == -1 or r == -1:
+            return json_repair.loads(response)
+        return json_repair.loads(response[l + 7 : r].strip())
+    except:
+        raise RuntimeError("Failed to parse JSON from response")
+
+
 tenacity = retry(
-    wait=wait_fixed(10), stop=stop_after_attempt(3), after=tenacity_log, reraise=True
+    wait=wait_fixed(3), stop=stop_after_attempt(3), after=tenacity_log, reraise=True
 )
 
 
@@ -90,7 +102,7 @@ def get_text_inlinestyle(para: dict, stylish: bool):
     font = SimpleNamespace(**para["font"])
     font_size = f"font-size: {Length(font.size).pt}pt;" if font.size else ""
     # font_family = f"font-family: {font.name};" if font.name else ""
-    font_color = f"color={font.color};" if font.color else ""
+    font_color = f"color='{font.color}';" if font.color else ""
     font_bold = "font-weight: bold;" if font.bold else ""
     return 'style="{}"'.format("".join([font_size, font_color, font_bold]))
 
@@ -269,8 +281,7 @@ class Config:
         self.RUN_DIR = rundir
         self.IMAGE_DIR = pjoin(self.RUN_DIR, "images")
         for the_dir in [self.RUN_DIR, self.IMAGE_DIR]:
-            if not pexists(the_dir):
-                os.makedirs(the_dir)
+            os.makedirs(the_dir, exist_ok=True)
 
     def set_debug(self, debug: bool):
         self.DEBUG = debug

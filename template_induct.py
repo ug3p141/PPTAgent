@@ -5,10 +5,10 @@ from collections import defaultdict
 
 from jinja2 import Template
 
-from llms import agent_model
+import llms
 from model_utils import get_cluster, image_embedding, images_cosine_similarity
 from presentation import Presentation
-from utils import app_config, pexists, pjoin
+from utils import app_config, get_json_from_response, pexists, pjoin
 
 
 class TemplateInducter:
@@ -27,9 +27,12 @@ class TemplateInducter:
         if pexists(self.slide_cluster_file):
             self.slide_cluster = json.load(open(self.slide_cluster_file))
             return set(self.slide_cluster.pop("functional_keys")), self.slide_cluster
-        category_cluster = self.category_split()
+        if pexists(self.slide_split_file):
+            category_cluster = json.load(open(self.slide_split_file))
+        else:
+            category_cluster = self.category_split()
         functional_cluster, content_slides_index = category_cluster["categories"], set(
-            category_cluster["uncategorized"]
+            category_cluster["Uncategorized"]
         )
         self.slide_cluster = defaultdict(list)
         for layout_name, cluster in functional_cluster.items():
@@ -51,8 +54,8 @@ class TemplateInducter:
             if i + 1 not in used_slides_index:
                 content_slides_index.add(i + 1)
         self.layout_split(content_slides_index)
-        for layout_name, cluster in self.slide_cluster.items():
-            if app_config.DEBUG:
+        if app_config.DEBUG:
+            for layout_name, cluster in self.slide_cluster.items():
                 os.makedirs(
                     pjoin(
                         self.output_dir,
@@ -74,15 +77,7 @@ class TemplateInducter:
                             f"slide_{slide_idx:04d}.jpg",
                         ),
                     )
-            if len(cluster) > 3:
-                cluster = sorted(
-                    cluster, key=lambda x: len(self.prs.slides[x].to_text())
-                )
-                self.slide_cluster[layout_name] = [
-                    cluster[0],
-                    cluster[len(cluster) // 2],
-                    cluster[-1],
-                ]
+            # TODO check if x-1
         self.slide_cluster["functional_keys"] = functional_keys
         json.dump(
             self.slide_cluster,
@@ -93,30 +88,36 @@ class TemplateInducter:
         return set(self.slide_cluster.pop("functional_keys")), self.slide_cluster
 
     def category_split(self):
-        topic_split_template = Template(
+        category_split_template = Template(
             open("prompts/template_induct/category_split.txt").read()
         )
-        return json.loads(
-            agent_model(
-                topic_split_template.render(
-                    slides="\n----\n".join(
-                        [
-                            (
-                                f"Slide {slide.slide_idx} of {len(self.prs.slides)}\n"
-                                + (
-                                    f"Title:{slide.slide_title}\n"
-                                    if slide.slide_title
-                                    else ""
-                                )
-                                + f"Layout: {slide.slide_layout_name}\n"
-                                + slide.to_text()
+        response = llms.long_model(
+            category_split_template.render(
+                slides="\n----\n".join(
+                    [
+                        (
+                            f"Slide {slide.slide_idx} of {len(self.prs.slides)}\n"
+                            + (
+                                f"Title:{slide.slide_title}\n"
+                                if slide.slide_title
+                                else ""
                             )
-                            for slide in self.prs.slides
-                        ]
-                    ),
-                )
+                            + f"Layout: {slide.slide_layout_name}\n"
+                            + slide.to_text()
+                        )
+                        for slide in self.prs.slides
+                    ]
+                ),
             )
         )
+        category_cluster = get_json_from_response(response)
+        json.dump(
+            category_cluster,
+            open(self.slide_split_file, "w"),
+            indent=4,
+            ensure_ascii=False,
+        )
+        return category_cluster
 
     def layout_split(
         self,
@@ -135,8 +136,6 @@ class TemplateInducter:
             content_split[(layout_name, content_type_name)].append(slide_idx)
 
         for (layout_name, content_type_name), slides in content_split.items():
-            if len(slides) < 3:
-                continue
             sub_embeddings = [
                 embeddings[f"slide_{slide_idx:04d}.jpg"] for slide_idx in slides
             ]
@@ -144,14 +143,13 @@ class TemplateInducter:
             for cluster in get_cluster(similarity):
                 cluster = [slides[i] for i in cluster]
                 cluster_name = (
-                    agent_model(
+                    llms.caption_model(
                         template.render(
                             existed_layoutnames=list(self.slide_cluster.keys()),
                         ),
                         [
-                            pjoin(
-                                self.template_image_folder, f"slide_{slide_idx:04d}.jpg"
-                            )
+                            pjoin(self.ppt_image_folder, f"slide_{slide_idx:04d}.jpg")
+                            # TODO
                             for slide_idx in cluster[:3]
                         ],
                     )

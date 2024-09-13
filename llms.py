@@ -1,15 +1,14 @@
 import base64
-import json
 import random
 from time import sleep, time
 
 import google.generativeai as genai
+import json_repair
 import PIL
-import torch
+import requests
 from jinja2 import Template
 from openai import OpenAI
 
-from model_utils import internvl_load_image
 from utils import print, tenacity
 
 
@@ -77,7 +76,7 @@ class Gemini:
             generation_config=self.generation_config,
         )
         if use_json:
-            return json.loads(response.text.strip())
+            return json_repair.loads(response.text.strip())
         else:
             return response.text.strip()
 
@@ -86,7 +85,7 @@ class Gemini:
         if image_file is not None:
             content = [content, PIL.Image.open(image_file)]
         response = self._chat.send_message(content)
-        return json.loads(response.text.strip())
+        return json_repair.loads(response.text.strip())
 
 
 class OPENAI:
@@ -149,18 +148,25 @@ class OPENAI:
         self.history = []
 
 
-class Agent:
-    def __init__(self, model: OPENAI):
-        self.model = model
+class APIModel:
+    def __init__(self, api_base: str):
+        self.api_base = api_base
 
-    def __call__(self, *args, **kwargs) -> str:
-        return self.model(*args, **kwargs)
+    def __call__(self, content: str, image_files: list[str] = None):
+        system_message = "You are a helpful assistant"
+        if content.startswith("You are"):
+            system_message, content = content.split("\n", 1)
+        data = {"prompt": content, "system": system_message, "image": []}
 
-    def clear_history(self):
-        self.model.clear_history()
+        if image_files:
+            for image_file in image_files:
+                with open(image_file, "rb") as image:
+                    base64_image = base64.b64encode(image.read()).decode("utf-8")
+                    data["image_urls"].append(f"data:image/jpeg;base64,{base64_image}")
 
-    def set_model(self, model):
-        self.model = model
+        response = requests.post(self.api_base, json=data)
+        response.raise_for_status()
+        return response.text
 
 
 gpt4o = OPENAI()
@@ -168,25 +174,27 @@ gpt4omini = OPENAI(model="gpt-4o-mini")
 
 gemini = Gemini()
 
+qwen = OPENAI(model="Qwen2-72B-Instruct", api_base="http://124.16.138.150:7999/v1")
+internvl_multi = APIModel("http://124.16.138.150:5000/v1")
 internvl = OPENAI(
     model="InternVL2-Llama3-76B", api_base="http://124.16.138.150:8000/v1"
 )
-qwen = OPENAI(model="Qwen2-72B-Instruct", api_base="http://124.16.138.150:7999/v1")
 
 caption_model = internvl
 long_model = qwen
-agent_model = Agent(gpt4o)
+agent_model = gpt4o
 
 
 def get_refined_doc(text_content: str):
     template = Template(open("prompts/document_refine.txt").read())
     prompt = template.render(markdown_document=text_content)
-    return json.loads(long_model(prompt))
+    return json_repair.loads(long_model(prompt))
 
 
 if __name__ == "__main__":
-    print(internvl("who r u"))
-    print(qwen("你是谁"))
-    # gemini = Gemini()
-    # gemini.chat("小红是小明的爸爸")
-    # print(gemini.chat("小红和小明的关系是什么"))
+    for llm in [qwen, internvl]:
+        print(llm.model)
+        try:
+            print(llm("who r u"))
+        except Exception as e:
+            print(e)

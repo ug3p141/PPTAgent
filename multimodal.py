@@ -23,38 +23,24 @@ class ImageLabler:
             self.apply_stats()
         self.image_stats["resource/pic_placeholder.png"] = {
             "label": "content",
-            "caption": "\x1b[31m!!!placeholder\x1b[0m",
+            "caption": "it's a placeholder",
         }
         # os.makedirs(pjoin(app_config.IMAGE_DIR, "background"), exist_ok=True)
         # os.makedirs(pjoin(app_config.IMAGE_DIR, "content"), exist_ok=True)
 
-    # TODO change later
     def apply_stats(self, image_stats: dict = None):
         if image_stats is None:
             image_stats = self.image_stats
         for slide in self.presentation.slides:
             for shape in slide.shape_filter(Picture):
-                stats = image_stats.get(
-                    shape.img_path.replace(
-                        "68eaadd68e3d43ad5b45178eafda5dde",
-                        "4f8e1fae227581bb292f9e11bda11482",
-                    ),
-                    {},
-                )
+                try:
+                    stats = image_stats[shape.img_path]
+                except KeyError:
+                    if app_config.DEBUG:
+                        print(f"Image {shape.img_path} not found in image stats")
+                    continue
                 if "caption" in stats:
                     shape.caption = stats["caption"]
-                # if "label" in stats:
-                #     shape.is_background = "background" == stats["label"]
-                #     if "replace" in stats and pbasename(stats["replace"]) != "no":
-                #         shape.img_path = stats["replace"]
-                #     if app_config.DEBUG:
-                #         new_path = pjoin(
-                #             app_config.IMAGE_DIR,
-                #             stats["label"],
-                #             pbasename(shape.data[0]),
-                #         )
-                #         if not pexists(new_path):
-                #             shutil.copy(shape.data[0], new_path)
 
     def caption_images(self):
         caption_prompt = open("prompts/image_label/caption.txt").read()
@@ -69,7 +55,6 @@ class ImageLabler:
             indent=4,
             ensure_ascii=False,
         )
-        self.apply_stats()
         return self.image_stats
 
     def label_images(
@@ -114,7 +99,7 @@ class ImageLabler:
                 slide_type = (
                     "Structural" if layout_name in functional_keys else "Non-Structural"
                 )
-                results = json.loads(
+                results = json_repair.loads(
                     agent_model(
                         template.render(
                             slide_type=slide_type,
