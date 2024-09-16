@@ -1,22 +1,25 @@
 import json
-import os
-import shutil
 from collections import defaultdict
 
+import json_repair
 import PIL
 from jinja2 import Template
 
-from llms import agent_model, caption_model
+import llms
+import utils
 from presentation import Picture, Presentation, SlidePage
-from utils import app_config, pbasename, pexists, pjoin, print
+from utils import Config, pbasename, pexists, pjoin, print
 
 
 class ImageLabler:
-    def __init__(self, presentation: Presentation):
+    def __init__(self, presentation: Presentation, app_config: Config = None):
         self.presentation = presentation
         self.slide_area = presentation.slide_width.pt * presentation.slide_height.pt
         self.image_stats = {}
         self.stats_file = pjoin(app_config.RUN_DIR, "image_stats.json")
+        if app_config is None:
+            app_config = utils.app_config
+        self.app_config = app_config
         self.collect_images()
         if pexists(self.stats_file):
             self.image_stats = json.load(open(self.stats_file, "r"))
@@ -33,21 +36,15 @@ class ImageLabler:
             image_stats = self.image_stats
         for slide in self.presentation.slides:
             for shape in slide.shape_filter(Picture):
-                try:
-                    stats = image_stats[shape.img_path]
-                except KeyError:
-                    if app_config.DEBUG:
-                        print(f"Image {shape.img_path} not found in image stats")
-                    continue
-                if "caption" in stats:
-                    shape.caption = stats["caption"]
+                stats = image_stats[shape.img_path]
+                shape.caption = stats["caption"]
 
     def caption_images(self):
         caption_prompt = open("prompts/image_label/caption.txt").read()
         for image, stats in self.image_stats.items():
             if "caption" not in stats:
-                stats["caption"] = caption_model(caption_prompt, image)
-                if app_config.DEBUG:
+                stats["caption"] = llms.caption_model(caption_prompt, image)
+                if self.app_config.DEBUG:
                     print(image, ": ", stats["caption"])
         json.dump(
             self.image_stats,
@@ -100,7 +97,7 @@ class ImageLabler:
                     "Structural" if layout_name in functional_keys else "Non-Structural"
                 )
                 results = json_repair.loads(
-                    agent_model(
+                    llms.caption_model(
                         template.render(
                             slide_type=slide_type,
                             slide_images=slide_images,
@@ -110,7 +107,7 @@ class ImageLabler:
                             + "----",
                         ),
                         pjoin(
-                            app_config.RUN_DIR,
+                            self.app_config.RUN_DIR,
                             "slide_images",
                             f"slide_{slide_idx:04d}.jpg",
                         ),
@@ -125,8 +122,8 @@ class ImageLabler:
                         continue
                     image_labels[result["image"]][result["replace"]] += 1
         image_labels = {
-            pjoin(app_config.IMAGE_DIR, k): pjoin(
-                app_config.IMAGE_DIR,
+            pjoin(self.app_config.IMAGE_DIR, k): pjoin(
+                self.app_config.IMAGE_DIR,
                 max(v.items(), key=lambda x: x[1])[0],
             )
             for k, v in image_labels.items()

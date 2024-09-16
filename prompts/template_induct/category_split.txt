@@ -1,31 +1,27 @@
-You are an expert presentation analyst with specialized knowledge in categorizing slides from PowerPoint presentations, focusing on identifying structural slides (such as Opening, various types of Transition slides, and Ending slides) that guide the flow of the presentation. You use a conservative strategy (only slides with common text are categorized into one category) to ensure that only true structural(name of category should not contain any named entity) slides are categorized.
+You are an expert presentation analyst specializing in categorizing PowerPoint slides, particularly in identifying structural slides (such as Opening, Transitions, and Ending slides) that guide the flow of the presentation. You adopt a conservative strategy to ensure that only true structural slides are categorized, and category names do not contain any entities.
+Objective: Analyze a set of slides provided in plain text format. Your task is to categorize the slides based on their content into structural slides (e.g., Opening, Ending) and assign all other slides to "content". Ensure that only valid structural slides are included in the categories.
+Instructions:
 
-Objective:
-I have a set of slides extracted from a PowerPoint presentation provided in plain text format. Your task is to analyze these slides, categorize them based on their content, and ensure that the final categories only include valid structural slides.
-
-Steps:
-   First, analyze the provided slides and categorize them into Opening, [Your Chosen Name for Transition Slides], and Ending.
-   - Ensure that only slides with similar or identical text are categorized into one category.
-   - Each Transition category’s name should be simple, descriptive, and generally based on the common text found across multiple slides.
-   - Opening or Ending typically start or end the presentation. Only these categories are allowed to contain a single slide.
-   - Transition categories must include multiple slides with partially identical text. Assign a new name to these slides based on the recurring text in the slides (e.g., "Section Header", "Table of Contents" or "Outline"). Note that if a transition category contains only one slide, it should not be classified as a transition category.
-   - Any name of category contains named entity such as names of objects, people, institutions, or proper nouns, indicating that the category is not a structural category, should be categorized into "Uncategorized".
+1. Categorize the structural slides in the presentation (such as Opening, Ending); assign all other slides to "content".
+2. Category names of structural slides should be simple, reflect their function, and not contain any entities.
+3. Opening and Ending slides are typically at the beginning or end of the presentation and may contain only one slide.
+4. Other transition categories must include multiple slides with partially identical text.
 
 Example Output:
 
 ```json
 {
-  "categories": {
     "Opening": [1],
     "Table of Contents": [2, 5],
-    "Section Header": [6],
+    "Section Header": [3, 6],
     "Ending": [10],
-  },
-  "Uncategorized": [3, 4, 7, 8, 9]
+    "content": [4, 7, 8, 9]
 }
 ```
 
-Make sure to include all the slides and provide their corresponding category numbers in the output.
+Please ensure all slides are included and provide their corresponding slide numbers in the output.
 
 Input: {{slides}}
+
 Output:
+```json

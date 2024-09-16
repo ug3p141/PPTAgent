@@ -8,7 +8,7 @@ from jinja2 import Template
 import llms
 from model_utils import get_cluster, image_embedding, images_cosine_similarity
 from presentation import Presentation
-from utils import app_config, get_json_from_response, pexists, pjoin
+from utils import app_config, get_json_from_response, pexists, pjoin, ppt_to_images
 
 
 class TemplateInducter:
@@ -31,9 +31,25 @@ class TemplateInducter:
             category_cluster = json.load(open(self.slide_split_file))
         else:
             category_cluster = self.category_split()
-        functional_cluster, content_slides_index = category_cluster["categories"], set(
-            category_cluster["Uncategorized"]
-        )
+        if "content" in category_cluster:
+            content_slides_index, functional_cluster = (
+                set(category_cluster.pop("content")),
+                category_cluster,
+            )
+        elif "Uncategorized" in category_cluster:
+            content_slides_index, functional_cluster = (
+                set(
+                    category_cluster.pop("Uncategorized"),
+                ),
+                category_cluster["categories"],
+            )
+        elif "Uncategorized" in category_cluster["categories"]:
+            content_slides_index, functional_cluster = (
+                set(category_cluster["categories"].pop("Uncategorized")),
+                category_cluster["categories"],
+            )
+        else:
+            raise Exception(f"Unknown category cluster: {category_cluster}")
         self.slide_cluster = defaultdict(list)
         for layout_name, cluster in functional_cluster.items():
             for slide_idx in cluster:
@@ -77,7 +93,6 @@ class TemplateInducter:
                             f"slide_{slide_idx:04d}.jpg",
                         ),
                     )
-            # TODO check if x-1
         self.slide_cluster["functional_keys"] = functional_keys
         json.dump(
             self.slide_cluster,
@@ -143,18 +158,18 @@ class TemplateInducter:
             for cluster in get_cluster(similarity):
                 cluster = [slides[i] for i in cluster]
                 cluster_name = (
-                    llms.caption_model(
+                    llms.agent_model(
                         template.render(
                             existed_layoutnames=list(self.slide_cluster.keys()),
                         ),
                         [
                             pjoin(self.ppt_image_folder, f"slide_{slide_idx:04d}.jpg")
-                            # TODO
                             for slide_idx in cluster[:3]
                         ],
                     )
                     + content_type_name
                 )
+                print(f"cluster_name: {cluster_name}")
                 self.slide_cluster[cluster_name] = [slide_idx for slide_idx in cluster]
 
 

@@ -10,9 +10,10 @@ You cannot use the following layout names:
 {{ existed_layoutnames }}
 
 Example Outputs:
-Presentation of Technological Evolution Through a Timeline
-Comparative Analysis Displayed Using a Structured Table
-Sales Growth Overview Illustrated with Multiple Charts
+Presentation of Evolution Through a Timeline
+Analysis Displayed Using a Structured Table
+Growth Overview Illustrated with Multiple Charts
+Picture and illustrative key points
 
 Layout
 Output: Provide a one-line descriptive title.

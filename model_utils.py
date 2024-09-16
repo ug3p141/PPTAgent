@@ -20,13 +20,13 @@ extractor = None
 
 
 def get_text_embedding(text: list[str], batchsize: int = 1):
-    if isinstance(text, str):
-        text = [text]
     global text_embed_model
     if text_embed_model is None:
         text_embed_model = BGEM3FlagModel(
             "BAAI/bge-m3", use_fp16=True, device=DEVICE_MAP
         )
+    if isinstance(text, str):
+        return torch.tensor(text_embed_model.encode(text)["dense_vecs"]).to(DEVICE_MAP)
     result = []
     for i in range(0, len(text), batchsize):
         result.extend(

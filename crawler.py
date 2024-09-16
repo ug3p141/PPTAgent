@@ -4,9 +4,10 @@ import json
 import os
 import re
 import shutil
+import traceback
 from collections import defaultdict
 from itertools import product
-from traceback import print_exc
+from tempfile import TemporaryDirectory
 
 import aiohttp
 import func_argparse
@@ -15,7 +16,7 @@ import PyPDF2
 from googlesearch import search
 from tqdm import tqdm
 
-from llms import caption_model, get_refined_doc
+import llms
 from model_utils import image_embedding, images_cosine_similarity, prs_dedup
 from presentation import Presentation
 from utils import (
@@ -239,7 +240,7 @@ def prepare_pdf_folder(pdf_folder: str):
         image_stats = {}
         caption_prompt = open("prompts/image_label/caption.txt").read()
         for image in images:
-            image_stats[image] = caption_model(caption_prompt, image)
+            image_stats[image] = llms.caption_model(caption_prompt, image)
         json.dump(
             image_stats,
             open(pjoin(pdf_folder, "image_caption.json"), "w"),
@@ -248,7 +249,7 @@ def prepare_pdf_folder(pdf_folder: str):
         )
     if not pexists(pjoin(pdf_folder, "refined_doc.json")):
         text_content = markdown_clean_pattern.sub("", text_content)
-        doc_json = get_refined_doc(text_content)
+        doc_json = llms.get_refined_doc(text_content)
         json.dump(
             doc_json,
             open(pjoin(pdf_folder, "refined_doc.json"), "w"),
@@ -283,6 +284,8 @@ def prepare_ppt(filename: str, output_dir: str):
 
     for slide in duplicates:
         os.remove(pjoin(ppt_image_folder, f"slide_{slide.real_idx:04d}.jpg"))
+    for err_idx, _ in presentation.error_history:
+        os.remove(pjoin(ppt_image_folder, f"slide_{err_idx:04d}.jpg"))
     assert len(presentation.slides) == len(
         [i for i in os.listdir(ppt_image_folder) if i.endswith(".jpg")]
     )
@@ -294,7 +297,7 @@ def prepare_ppt(filename: str, output_dir: str):
         )
 
     # ? 不应该save normed pre 为source
-    presentation.save(pjoin(app_config.RUN_DIR, "source.pptx"))
+    presentation.save(pjoin(app_config.RUN_DIR, "source_standard.pptx"))
     normed_prs = presentation.normalize()
     normed_prs.save(pjoin(app_config.RUN_DIR, "template.pptx"), layout_only=True)
     ppt_to_images(
@@ -353,13 +356,14 @@ def preprocess(file_type: str, limit: int = 20):
 
 def process_filetype(file_type: str, func: callable):
     folders = glob.glob(f"data/topic/*/{file_type}/*")
-    progress_bar = tqdm(total=len(folders), desc=f"Postprocessing {file_type}")
+    progress_bar = tqdm(total=len(folders), desc=f"processing {file_type}")
     for folder in folders:
         progress_bar.update(1)
         try:
             func(folder)
         except Exception as e:
             print(f"prepare {file_type} folder {folder} failed: {e}")
+            traceback.print_exc()
 
 
 def data_stat(check_integrity: bool = False):
@@ -379,8 +383,8 @@ def data_stat(check_integrity: bool = False):
                         print(f"{folder} has no refined_doc.json")
             if file_type == "pptx":
                 for folder in glob.glob(pjoin(topic, file_type, "*")):
-                    if not pexists(pjoin(folder, "source.pptx")):
-                        print(f"{folder} has no source.pptx")
+                    if not pexists(pjoin(folder, "source_standard.pptx")):
+                        print(f"{folder} has no source_standard.pptx")
 
 
 def postprocess_pdf():

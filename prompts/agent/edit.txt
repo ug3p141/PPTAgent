@@ -10,6 +10,7 @@ You are responsible for replacing text in <p> and <li> elements following these 
    - Character and Line Limits: 1. The new text must match the original in terms of the number of lines. 2. Ensure the character count does not exceed the original text.
    - Large Text Frames are first priority: For elements with a data-relative-area > 10%, avoid deletion. Replace the content with similar text wherever possible.
    - If the text is purely structural, it can remain unchanged.
+   - You can only edit OR delete the textframe once, not both.
 
 Image Editing Operation Rules:
 You will also handle image replacements in <figure> elements based on the following rules:
@@ -40,5 +41,4 @@ Input:
 - Images:
 {{ images }}
 
-Output: give your code directly wrapped by markdown code block
-```python
+Output: directly give your executable code sequence wrapped by markdown code block

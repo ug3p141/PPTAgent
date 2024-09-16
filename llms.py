@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import random
 from time import sleep, time
@@ -7,9 +8,12 @@ import json_repair
 import PIL
 import requests
 from jinja2 import Template
+from oaib import Auto
 from openai import OpenAI
 
 from utils import print, tenacity
+
+oai_batch = Auto(loglevel=0)
 
 
 class Gemini:
@@ -93,10 +97,12 @@ class OPENAI:
         self,
         model: str = "gpt-4o-2024-08-06",
         api_base: str = None,
+        use_batch: bool = False,
         history_limit: int = 8,
     ) -> None:
         self.client = OpenAI(base_url=api_base)
         self.model = model
+        self.use_batch = use_batch
         self.system_message = [
             {
                 "role": "system",
@@ -135,22 +141,40 @@ class OPENAI:
                             },
                         }
                     )
-        completion = self.client.chat.completions.create(
-            model=self.model, messages=self.system_message + messages
-        )
-        response = completion.choices[0].message.content
+        if not self.use_batch:
+            completion = self.client.chat.completions.create(
+                model=self.model, messages=self.system_message + messages
+            )
+            response = completion.choices[0].message.content
+        else:
+            print("what hell")
+            exit(-1)
+            job = asyncio.get_event_loop().run_until_complete(self._run_batch(messages))
+            response = job.to_dict()["result"][0]["choices"][0]["message"]["content"]
         messages.append({"role": "assistant", "content": response})
         if save_history:
             self.history = messages
         return response
 
+    async def _run_batch(self, message: list):
+        await oai_batch.add(
+            "chat.completions.create",
+            model=self.model,
+            messages=self.system_message + message,
+        )
+        return await oai_batch.run()
+
     def clear_history(self):
         self.history = []
 
+    def __repr__(self):
+        return f"OPENAI Server (model={self.model}, use_batch={self.use_batch})"
+
 
 class APIModel:
-    def __init__(self, api_base: str):
+    def __init__(self, model: str, api_base: str):
         self.api_base = api_base
+        self.model = model
 
     def __call__(self, content: str, image_files: list[str] = None):
         system_message = "You are a helpful assistant"
@@ -162,25 +186,25 @@ class APIModel:
             for image_file in image_files:
                 with open(image_file, "rb") as image:
                     base64_image = base64.b64encode(image.read()).decode("utf-8")
-                    data["image_urls"].append(f"data:image/jpeg;base64,{base64_image}")
+                    data["image"].append(f"data:image/jpeg;base64,{base64_image}")
 
         response = requests.post(self.api_base, json=data)
         response.raise_for_status()
         return response.text
 
 
-gpt4o = OPENAI()
-gpt4omini = OPENAI(model="gpt-4o-mini")
-
+gpt4o = OPENAI(use_batch=True)
+gpt4omini = OPENAI(model="gpt-4o-mini", use_batch=True)
 gemini = Gemini()
-
 qwen = OPENAI(model="Qwen2-72B-Instruct", api_base="http://124.16.138.150:7999/v1")
-internvl_multi = APIModel("http://124.16.138.150:5000/v1")
-internvl = OPENAI(
+internvl_multi = APIModel(
+    model="InternVL2-Llama3-76B",
+    api_base="http://124.16.138.150:5000/generate",
+)
+internvl_76 = OPENAI(
     model="InternVL2-Llama3-76B", api_base="http://124.16.138.150:8000/v1"
 )
-
-caption_model = internvl
+caption_model = internvl_76
 long_model = qwen
 agent_model = gpt4o
 
@@ -192,9 +216,5 @@ def get_refined_doc(text_content: str):
 
 
 if __name__ == "__main__":
-    for llm in [qwen, internvl]:
-        print(llm.model)
-        try:
-            print(llm("who r u"))
-        except Exception as e:
-            print(e)
+    for i in range(3):
+        print(gpt4o("hello"))

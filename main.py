@@ -7,7 +7,6 @@ import PIL
 
 import llms
 from agent import PPTAgent
-from llms import agent_model, caption_model
 from model_utils import prs_dedup
 from multimodal import ImageLabler
 from presentation import Presentation

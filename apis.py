@@ -1,7 +1,6 @@
 import inspect
 import string
 import traceback
-from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
@@ -14,14 +13,8 @@ from pptx.shapes.base import BaseShape
 from pptx.text.text import _Paragraph, _Run
 from pptx.util import Pt
 
-from llms import agent_model
-from presentation import GroupShape, Picture, SlidePage
-
-slide: SlidePage = None
-image_stats: dict[str, str] = None
-image_usage: dict[str, int] = None
-template_slides: list[SlidePage] = []
-# 在重新绑定变量名与全局变量时需要写global声明，否则不需要
+import llms
+from presentation import Picture, SlidePage
 
 
 @dataclass
@@ -35,12 +28,12 @@ class HistoryMark:
 class CodeExecutor:
 
     def __init__(self, local_vars: dict[str, list[callable]], terminate_times: int = 1):
-        self.registered_functions = local_vars
-        self.local_vars = {func.__name__: func for func in sum(local_vars.values(), [])}
-        self.correct_template = Template(open("prompts/agent/code_feedback.txt").read())
-        self.terminate_times = terminate_times
         self.api_history = []
         self.code_history = []
+        self.registered_functions = local_vars
+        self.correct_chance = terminate_times
+        self.local_vars = {func.__name__: func for func in sum(local_vars.values(), [])}
+        self.correct_template = Template(open("prompts/agent/code_feedback.txt").read())
 
     def get_apis_docs(self, op_types: list[str], need_doc: bool = False):
         return "\n".join(
@@ -56,6 +49,8 @@ class CodeExecutor:
             sig = inspect.signature(func)
             params = []
             for name, param in sig.parameters.items():
+                if name == "slide":
+                    continue
                 param_str = name
                 if param.annotation != inspect.Parameter.empty:
                     param_str += f": {param.annotation.__name__}"
@@ -70,14 +65,13 @@ class CodeExecutor:
             api_doc.append(f"{signature}\n\t{doc}")
         return "\n".join(api_doc)
 
-    def execute_apis(self, prompt: str, apis: str):
-        global slide, template_slides
+    def execute_apis(self, prompt: str, apis: str, edit_slide: SlidePage):
         lines = apis.strip().split("\n")
         err_time = 0
         line_idx = 0
         code_start = False
         found_code = False
-        backup_state = (deepcopy(slide), deepcopy(template_slides))
+        backup_state = deepcopy(edit_slide)
         self.api_history.append([HistoryMark.API_CALL_ERROR, prompt, apis])
         while line_idx < len(lines):
             line = lines[line_idx]
@@ -94,40 +88,49 @@ class CodeExecutor:
                 continue
             self.code_history.append([HistoryMark.CODE_RUN_ERROR, line, None])
             try:
-                eval(line)
+                func = line.split("(")[0]
+                if func.startswith("def"):
+                    raise ValueError("The function definition should not be called.")
+                if func not in self.local_vars:
+                    raise ValueError(f"The function {func} is not defined.")
+                partial_func = partial(self.local_vars[func], edit_slide)
+                eval(line, {}, {func: partial_func})
                 self.code_history[-1][0] = HistoryMark.CODE_RUN_CORRECT
-            except Exception as e:
+            except:
                 err_time += 1
-                if err_time > self.terminate_times:
+                if err_time > self.correct_chance:
                     break
                 trace_msg = traceback.format_exc()
-                error_message = (
-                    str(e)
-                    + ":\n"
-                    + trace_msg[trace_msg.find("line 1, in <module>") + 20 :]
-                )
+                error_message = trace_msg[
+                    trace_msg.find('File "/Users/forcelss/Code/OminiPreGen/apis.py"') :
+                ]
                 self.code_history[-1][-1] = error_message
                 api_lines = (
-                    "\n".join(lines[:line_idx])
+                    "\n".join(lines[: line_idx - 1])
                     + f"\n--> Error Line: {line}\n"
                     + "\n".join(lines[line_idx:])
                 )
-                slide, template_slides = deepcopy(backup_state)
+                edit_slide = deepcopy(backup_state)
                 prompt = self.correct_template.render(
                     previous_task_prompt=prompt,
                     error_message=error_message,
                     faulty_api_sequence=api_lines,
                 )
-                lines = agent_model(prompt).strip().split("\n")
+                lines = llms.agent_model(prompt).strip().split("\n")
                 line_idx = 0
                 self.api_history.append([HistoryMark.API_CALL_ERROR, prompt, apis])
         if not found_code:
-            raise ValueError("No code block found in the api call.")
-        if err_time < self.terminate_times:
-            self.api_history[-1][0] = HistoryMark.API_CALL_CORRECT
-        else:
             self.api_history[-1][0] = HistoryMark.API_CALL_ERROR
-            raise ValueError("The api call is not correct.")
+            raise ValueError("No code block found in the api call.")
+        if err_time > self.correct_chance:
+            self.api_history[-1][0] = HistoryMark.API_CALL_ERROR
+            raise ValueError("The api call failed too many times.")
+        else:
+            self.api_history[-1][0] = HistoryMark.API_CALL_CORRECT
+
+    def reset(self):
+        self.api_history = []
+        self.code_history = []
 
 
 # TODO 之后可以吧orig text的判断给remove掉，因为可能反复修改
@@ -149,7 +152,7 @@ def runs_merge(paragraph: _Paragraph):
     return run
 
 
-def get_textframe(textframe_id: str):
+def get_textframe(slide: SlidePage, textframe_id: str):
     if "_" not in textframe_id:
         raise ValueError("The element_id of a text element should contain a `_`")
     element_id, text_id = textframe_id.split("_")
@@ -170,7 +173,9 @@ def del_para(text: str, text_shape: BaseShape):
     raise ValueError(f"Incorrect shape: {text_shape}.")
 
 
-def replace_para(orig_text: str, new_text: str, text_shape: BaseShape):
+def replace_para(
+    slide: SlidePage, orig_text: str, new_text: str, text_shape: BaseShape
+):
     for para in text_shape.text_frame.paragraphs:
         if para.text == orig_text:
             run = runs_merge(para)
@@ -179,22 +184,33 @@ def replace_para(orig_text: str, new_text: str, text_shape: BaseShape):
     raise ValueError(f"Incorrect shape: {text_shape}.")
 
 
-def del_textframe(textframe_id: str):
+def del_textframe(slide: SlidePage, textframe_id: str):
     """Delete the textframe with the given id."""
-    shape, text_id = get_textframe(textframe_id)
-    shape.closures.append(partial(del_para, shape.text_frame.data[text_id]["text"]))
+    shape, text_id = get_textframe(slide, textframe_id)
+    if textframe_id in shape.closures:
+        raise ValueError(
+            f"The textframe {textframe_id} has been edited, your should not delete it."
+        )
+    shape.closures[textframe_id] = partial(
+        del_para, shape.text_frame.data[text_id]["text"]
+    )
 
 
-def replace_text(textframe_id: str, text: str):
+def replace_text(slide: SlidePage, textframe_id: str, text: str):
     """Replace the text of the textframe with the given id."""
-    shape, text_id = get_textframe(textframe_id)
+    shape, text_id = get_textframe(slide, textframe_id)
 
-    shape.closures.append(
-        partial(replace_para, shape.text_frame.data[text_id]["text"], text)
+    if textframe_id in shape.closures:
+        raise ValueError(
+            f"The textframe {textframe_id} has been edited, your should not edit it again."
+        )
+    shape.closures[textframe_id] = partial(
+        replace_para, shape.text_frame.data[text_id]["text"], text
     )
 
 
 def set_font_style(
+    slide: SlidePage,
     textframe_id: str,
     bold: bool = None,
     italic: bool = None,
@@ -207,7 +223,7 @@ def set_font_style(
     Example:
     >>> set_font_style("1_1", bold=True, font_size=24, font_color="FF0000")
     """
-    shape, text_id = get_textframe(textframe_id)
+    shape, text_id = get_textframe(slide, textframe_id)
 
     def set_font(text_shape: BaseShape):
         find = False
@@ -231,11 +247,11 @@ def set_font_style(
         if font_color is not None:
             run.font.color.rgb = RGBColor.from_string(font_color)
 
-    shape.closures.append(set_font)
+    shape.closures[textframe_id] = set_font
 
 
 def adjust_element_geometry(
-    element_id: str, left: int, top: int, width: int, height: int
+    slide: SlidePage, element_id: str, left: int, top: int, width: int, height: int
 ):
     """
     Set the position and size of a element.
@@ -262,29 +278,47 @@ def adjust_element_geometry(
         shape.width = width
         shape.height = height
 
-    shape.closures.append(set_geometry)
+    shape.closures[element_id] = set_geometry
 
 
-def replace_image(figure_id: str, image_path: str):
+def replace_image(slide: SlidePage, figure_id: str, image_path: str):
     """Replace the image of the element with the given id."""
     # if image_path not in image_stats:
     #     raise ValueError(f"The image path is not in the image stats: {image_path}.")
     shape = slide.shapes[int(figure_id)]
     if not isinstance(shape, Picture):
         raise ValueError("The element is not a Picture.")
+    if figure_id in shape.closures:
+        raise ValueError(
+            f"The element {figure_id} has been edited, your should not edit it again."
+        )
+    shape.closures[figure_id] = lambda x: None
     shape.img_path = image_path
-    shape.caption = image_stats[image_path]
-    image_usage[image_path] += 1
 
 
-def del_element_byid(element_id: str):
+def del_element_byid(slide: SlidePage, element_id: str):
     """Delete the element with the given id"""
+    if "_" in element_id:
+        raise ValueError(
+            "Only the element_id of a textframe can contain a `_`, not an element."
+        )
     shape = slide.shapes[int(element_id)]
 
     def del_shape(shape: BaseShape):
         shape.element.getparent().remove(shape.element)
 
-    shape.closures.append(del_shape)
+    if shape.text_frame.is_textframe:
+        for i in range(len(shape.text_frame.data)):
+            if f"{element_id}_{i}" in shape.closures:
+                raise ValueError(
+                    f"The element {element_id} has been edited, your should not delete it."
+                )
+            shape.closures[f"{element_id}_{i}"] = lambda x: None
+    if element_id in shape.closures:
+        raise ValueError(
+            f"The element {element_id} has been deleted, your should not delete it again."
+        )
+    shape.closures[element_id] = del_shape
 
 
 class API_TYPES(Enum):
@@ -316,4 +350,6 @@ code_executor = CodeExecutor(
 )
 
 if __name__ == "__main__":
-    print(code_executor.get_apis_docs([API_TYPES.TUNING]))
+    print(
+        code_executor.get_apis_docs([API_TYPES.TEXT_EDITING, API_TYPES.IMAGE_EDITING])
+    )

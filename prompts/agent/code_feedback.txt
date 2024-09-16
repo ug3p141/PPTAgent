@@ -9,10 +9,10 @@ set_image('2', "/path/to/new_image.jpg");
 Task Context:
    - Review the original prompt used to generate the initial API sequence:
      {{ previous_task_prompt }}
-   - Analyze the error message that occurred during the execution of the API sequence:
-     {{ error_message }}
    - Review the previously generated API sequence to identify potential issues:
      {{ faulty_api_sequence }}
+   - Analyze the error message that occurred during the execution of the API sequence:
+     {{ error_message }}
 
 Based on your analysis, generate a revised API sequence that addresses the identified errors.
 Output:
