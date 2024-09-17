@@ -13,8 +13,6 @@ from openai import OpenAI
 
 from utils import print, tenacity
 
-oai_batch = Auto(loglevel=0)
-
 
 class Gemini:
     def __init__(self, time_limit: int = 60) -> None:
@@ -91,7 +89,6 @@ class Gemini:
         response = self._chat.send_message(content)
         return json_repair.loads(response.text.strip())
 
-
 class OPENAI:
     def __init__(
         self,
@@ -101,8 +98,11 @@ class OPENAI:
         history_limit: int = 8,
     ) -> None:
         self.client = OpenAI(base_url=api_base)
+        if use_batch:
+            self.oai_batch = Auto(loglevel=0)
+        self._model = model
         self.model = model
-        self.use_batch = use_batch
+        self._use_batch = use_batch
         self.system_message = [
             {
                 "role": "system",
@@ -141,15 +141,18 @@ class OPENAI:
                             },
                         }
                     )
-        if not self.use_batch:
+        if not self._use_batch:
             completion = self.client.chat.completions.create(
-                model=self.model, messages=self.system_message + messages
+                model=self._model, messages=self.system_message + messages
             )
             response = completion.choices[0].message.content
         else:
-            print("what hell")
-            exit(-1)
-            job = asyncio.get_event_loop().run_until_complete(self._run_batch(messages))
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                job = loop.create_task(self._run_batch(messages))
+                asyncio.get_event_loop().run_until_complete(job)
+            else:
+                job = loop.run_until_complete(self._run_batch(messages))
             response = job.to_dict()["result"][0]["choices"][0]["message"]["content"]
         messages.append({"role": "assistant", "content": response})
         if save_history:
@@ -157,18 +160,18 @@ class OPENAI:
         return response
 
     async def _run_batch(self, message: list):
-        await oai_batch.add(
+        await self.oai_batch.add(
             "chat.completions.create",
-            model=self.model,
+            model=self._model,
             messages=self.system_message + message,
         )
-        return await oai_batch.run()
+        return await self.oai_batch.run()
 
     def clear_history(self):
         self.history = []
 
     def __repr__(self):
-        return f"OPENAI Server (model={self.model}, use_batch={self.use_batch})"
+        return f"OPENAI Server (model={self.model}, use_batch={self._use_batch})"
 
 
 class APIModel:
@@ -194,15 +197,15 @@ class APIModel:
 
 
 gpt4o = OPENAI(use_batch=True)
-gpt4omini = OPENAI(model="gpt-4o-mini", use_batch=True)
+gpt4omini = OPENAI(model="gpt-4o-mini")
 gemini = Gemini()
-qwen = OPENAI(model="Qwen2-72B-Instruct", api_base="http://124.16.138.150:7999/v1")
+qwen = OPENAI(model="Qwen2-72B-Instruct", api_base="http://localhost:7999/v1")
 internvl_multi = APIModel(
     model="InternVL2-Llama3-76B",
     api_base="http://124.16.138.150:5000/generate",
 )
 internvl_76 = OPENAI(
-    model="InternVL2-Llama3-76B", api_base="http://124.16.138.150:8000/v1"
+    model="InternVL2-Llama3-76B", api_base="http://127.0.0.1:8000/v1"
 )
 caption_model = internvl_76
 long_model = qwen
@@ -216,5 +219,4 @@ def get_refined_doc(text_content: str):
 
 
 if __name__ == "__main__":
-    for i in range(3):
-        print(gpt4o("hello"))
+    qwen("who r u")

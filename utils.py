@@ -108,8 +108,10 @@ def get_text_inlinestyle(para: dict, stylish: bool):
 
 
 def get_text_pptcstyle(para: dict):
+    if 'font' not in para:
+        return ""
     font = SimpleNamespace(**para["font"])
-    return f"Font Style: bold={font.bold}, italic={font.italic}, underline={font.underline}, size={font.size}pt, color={font.color}, font style={font.font_name}, line_space={font.line_spacing}, align={font.alignment}\n"
+    return f"Font Style: bold={font.bold}, italic={font.italic}, underline={font.underline}, size={font.size}pt, color={font.color}, font style={font.name}\n"
 
 
 def extract_fill(shape: BaseShape):

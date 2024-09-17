@@ -354,6 +354,7 @@ class AutoShape(ShapeElement):
     def pptc_text_info(self):
         return self.text_frame.to_pptc()
 
+    @property
     def pptc_description(self):
         return f"[{self.data['svg_tag']} id={self.shape_idx}]\n"
 

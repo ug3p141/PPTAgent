@@ -38,14 +38,14 @@ topics = {
         "Artificial Intelligence in Financial Services",  # 人工智能在金融服务中的应用
         "The Role of Artificial Intelligence in Marketing",  # 人工智能在营销中的作用
     ],
-    "Renewable Energy and Environmental Impact": [
-        "Renewable Energy Sources and Their Impact",  # 可再生能源及其影响
-        "Climate Change: Causes and Effects",  # 气候变化：原因与影响
-        "Renewable vs. Non-renewable Energy",  # 可再生能源与不可再生能源
-        "The Role of Renewable Energy in Combating Climate Change",  # 可再生能源在应对气候变化中的作用
-        "The Future of Renewable Energy",  # 可再生能源的未来
-        "The Impact of Climate Change on Agriculture",  # 气候变化对农业的影响
-    ],
+    # "Renewable Energy and Environmental Impact": [
+    #     "Renewable Energy Sources and Their Impact",  # 可再生能源及其影响
+    #     "Climate Change: Causes and Effects",  # 气候变化：原因与影响
+    #     "Renewable vs. Non-renewable Energy",  # 可再生能源与不可再生能源
+    #     "The Role of Renewable Energy in Combating Climate Change",  # 可再生能源在应对气候变化中的作用
+    #     "The Future of Renewable Energy",  # 可再生能源的未来
+    #     "The Impact of Climate Change on Agriculture",  # 气候变化对农业的影响
+    # ],
     "Mental Health and Society": [
         "Mental Health Awareness in the Workplace",  # 职场中的心理健康意识
         "The Impact of Social Media on Mental Health",  # 社交媒体对心理健康的影响
@@ -62,14 +62,14 @@ topics = {
     #     "Blockchain Technology and Its Uses",  # 区块链技术及其应用
     #     "The Role of Virtual Reality in Education",  # 虚拟现实在教育中的作用
     # ],
-    "Cybersecurity and Digital Transformation": [
-        "Cybersecurity Threats and Solutions",  # 网络安全威胁与解决方案
-        "The Importance of Cyber Hygiene",  # 网络卫生的重要性
-        "Digital Transformation in Healthcare",  # 医疗保健中的数字化转型
-        "The Importance of Cybersecurity in Business",  # 网络安全在商业中的重要性
-        "The Role of Cybersecurity in Society",  # 网络安全在社会中的作用
-        "The Impact of Cybersecurity on Business",  # 网络安全对商业的影响
-    ],
+    # "Cybersecurity and Digital Transformation": [
+    #     "Cybersecurity Threats and Solutions",  # 网络安全威胁与解决方案
+    #     "The Importance of Cyber Hygiene",  # 网络卫生的重要性
+    #     "Digital Transformation in Healthcare",  # 医疗保健中的数字化转型
+    #     "The Importance of Cybersecurity in Business",  # 网络安全在商业中的重要性
+    #     "The Role of Cybersecurity in Society",  # 网络安全在社会中的作用
+    #     "The Impact of Cybersecurity on Business",  # 网络安全对商业的影响
+    # ],
     # "Globalization and Economic Development": [
     #     "Globalization and Its Impact on Developing Countries",  # 全球化及其对发展中国家的影响
     #     "The Role of Government in Economic Development",  # 政府在经济发展中的作用

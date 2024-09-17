@@ -12,34 +12,36 @@ from transformers import AutoFeatureExtractor, AutoModel
 from presentation import Presentation
 from utils import IMAGE_EXTENSIONS, pjoin
 
-DEVICE_MAP = "mps"
+DEFAULT_DEVICE = "cuda:3"
 
 text_embed_model = None
 image_embed_model = None
 extractor = None
 
 
-def get_text_embedding(text: list[str], batchsize: int = 1):
+def get_text_embedding(text: list[str], batchsize: int = 32, model = None):
     global text_embed_model
-    if text_embed_model is None:
+    if model is None and text_embed_model is None:
         text_embed_model = BGEM3FlagModel(
-            "BAAI/bge-m3", use_fp16=True, device=DEVICE_MAP
+            "BAAI/bge-m3", use_fp16=True, device=DEFAULT_DEVICE
         )
+    if model is None:
+        model = text_embed_model
     if isinstance(text, str):
-        return torch.tensor(text_embed_model.encode(text)["dense_vecs"]).to(DEVICE_MAP)
+        return torch.tensor(model.encode(text)["dense_vecs"]).to(model.device)
     result = []
     for i in range(0, len(text), batchsize):
         result.extend(
             torch.tensor(
-                text_embed_model.encode(text[i : i + batchsize])["dense_vecs"]
-            ).to(DEVICE_MAP)
+                model.encode(text[i : i + batchsize])["dense_vecs"]
+            ).to(model.device)
         )
     return result
 
 
-def prs_dedup(presentation: Presentation, ppt_image_folder: str, batchsize: int = 32):
+def prs_dedup(presentation: Presentation, ppt_image_folder: str, batchsize: int = 32, model = None):
     text_embeddings = get_text_embedding(
-        [i.to_text() for i in presentation.slides], batchsize
+        [i.to_text() for i in presentation.slides], batchsize, model
     )
     pre_embedding = text_embeddings[0]
     slide_idx = 1
@@ -53,14 +55,16 @@ def prs_dedup(presentation: Presentation, ppt_image_folder: str, batchsize: int 
     return [presentation.slides.pop(i) for i in reversed(duplicates)]
 
 
-def image_embedding(image_dir: str, batchsize: int = 16):
+def image_embedding(image_dir: str, batchsize: int = 16, model = None):
     global extractor
     global image_embed_model
+    if model is None:
+        model = image_embed_model
     if image_embed_model is None:
         image_embed_model = AutoModel.from_pretrained(
             "google/vit-base-patch16-224-in21k",
             torch_dtype=torch.float16,
-            device_map=DEVICE_MAP,
+            device_map=DEFAULT_DEVICE,
         ).eval()
     if extractor is None:
         extractor = AutoFeatureExtractor.from_pretrained(
@@ -84,8 +88,8 @@ def image_embedding(image_dir: str, batchsize: int = 16):
         image = Image.open(pjoin(image_dir, file)).convert("RGB")
         inputs.append(transform(image))
         if len(inputs) % batchsize == 0 or file == images[-1]:
-            batch = {"pixel_values": torch.stack(inputs).to(image_embed_model.device)}
-            embeddings.extend(image_embed_model(**batch).last_hidden_state.detach())
+            batch = {"pixel_values": torch.stack(inputs).to(model.device)}
+            embeddings.extend(model(**batch).last_hidden_state.detach())
             inputs.clear()
     return {image: embedding.flatten() for image, embedding in zip(images, embeddings)}
 

@@ -174,7 +174,7 @@ def del_para(text: str, text_shape: BaseShape):
 
 
 def replace_para(
-    slide: SlidePage, orig_text: str, new_text: str, text_shape: BaseShape
+    orig_text: str, new_text: str, text_shape: BaseShape
 ):
     for para in text_shape.text_frame.paragraphs:
         if para.text == orig_text:
