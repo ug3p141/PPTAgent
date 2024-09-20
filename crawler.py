@@ -31,90 +31,50 @@ from utils import (
 
 topics = {
     "Artificial Intelligence and its Impact": [
-        "The Evolution of Artificial Intelligence",  # 人工智能的演变
-        "The Impact of Artificial Intelligence on Employment",  # 人工智能对就业的影响
-        "Artificial Intelligence in Healthcare",  # 人工智能在医疗保健中的应用
-        "The Ethics of Artificial Intelligence",  # 人工智能的伦理问题
-        "Artificial Intelligence in Financial Services",  # 人工智能在金融服务中的应用
-        "The Role of Artificial Intelligence in Marketing",  # 人工智能在营销中的作用
+        "The Evolution of Artificial Intelligence",
+        "The Impact of Artificial Intelligence on Employment",
+        "Artificial Intelligence in Healthcare",
+        "The Ethics of Artificial Intelligence",
+        "Artificial Intelligence in Financial Services",
+        "The Role of Artificial Intelligence in Marketing",
     ],
-    # "Renewable Energy and Environmental Impact": [
-    #     "Renewable Energy Sources and Their Impact",  # 可再生能源及其影响
-    #     "Climate Change: Causes and Effects",  # 气候变化：原因与影响
-    #     "Renewable vs. Non-renewable Energy",  # 可再生能源与不可再生能源
-    #     "The Role of Renewable Energy in Combating Climate Change",  # 可再生能源在应对气候变化中的作用
-    #     "The Future of Renewable Energy",  # 可再生能源的未来
-    #     "The Impact of Climate Change on Agriculture",  # 气候变化对农业的影响
-    # ],
     "Mental Health and Society": [
-        "Mental Health Awareness in the Workplace",  # 职场中的心理健康意识
-        "The Impact of Social Media on Mental Health",  # 社交媒体对心理健康的影响
-        "The Importance of Mental Health in Education",  # 教育中的心理健康重要性
-        "The Impact of Mental Health on Physical Health",  # 心理健康对身体健康的影响
-        "The Role of Mental Health in Society",  # 心理健康在社会中的作用
-        "The Impact of Mental Health on Academic Performance",  # 心理健康对学术表现的影响
+        "Mental Health Awareness in the Workplace",
+        "The Impact of Social Media on Mental Health",
+        "The Importance of Mental Health in Education",
+        "The Impact of Mental Health on Physical Health",
+        "The Role of Mental Health in Society",
+        "The Impact of Mental Health on Academic Performance",
     ],
-    # "Technological Advancements and Their Applications": [
-    #     "Advances in Biotechnology and Their Applications",  # 生物技术的进展及其应用
-    #     "The History of Quantum Computing",  # 量子计算的历史
-    #     "The History and Future of 5G Technology",  # 5G技术的历史与未来
-    #     "The Future of Space Exploration",  # 太空探索的未来
-    #     "Blockchain Technology and Its Uses",  # 区块链技术及其应用
-    #     "The Role of Virtual Reality in Education",  # 虚拟现实在教育中的作用
-    # ],
-    # "Cybersecurity and Digital Transformation": [
-    #     "Cybersecurity Threats and Solutions",  # 网络安全威胁与解决方案
-    #     "The Importance of Cyber Hygiene",  # 网络卫生的重要性
-    #     "Digital Transformation in Healthcare",  # 医疗保健中的数字化转型
-    #     "The Importance of Cybersecurity in Business",  # 网络安全在商业中的重要性
-    #     "The Role of Cybersecurity in Society",  # 网络安全在社会中的作用
-    #     "The Impact of Cybersecurity on Business",  # 网络安全对商业的影响
-    # ],
-    # "Globalization and Economic Development": [
-    #     "Globalization and Its Impact on Developing Countries",  # 全球化及其对发展中国家的影响
-    #     "The Role of Government in Economic Development",  # 政府在经济发展中的作用
-    #     "The Impact of Globalization on Culture",  # 全球化对文化的影响
-    #     "The Role of Innovation in Economic Growth",  # 创新在经济增长中的作用
-    #     "The Impact of Globalization on Trade",  # 全球化对贸易的影响
-    # ],
-    # "Sustainability and Urban Planning": [
-    #     "Modern Challenges in Urban Planning",  # 现代城市规划的挑战
-    #     "Smart Cities: Opportunities and Challenges",  # 智慧城市：机遇与挑战
-    #     "Green Architecture and Sustainable Building",  # 绿色建筑与可持续建筑
-    #     "Sustainable Agriculture Practices",  # 可持续农业实践
-    #     "Sustainable Tourism Practices",  # 可持续旅游实践
-    #     "Water Conservation Strategies",  # 水资源保护策略
-    #     "The Role of Urban Planning in Sustainable Development",  # 城市规划在可持续发展中的作用
-    # ],
     "E-commerce and Digital Economy": [
-        "The Rise of E-commerce",  # 电子商务的崛起
-        "The Rise of the Gig Economy",  # 零工经济的崛起
-        "The Future of Work in the Age of Automation",  # 自动化时代的工作未来
-        "The Future of Work: Remote and Hybrid Models",  # 工作的未来：远程与混合模式
-        "The Impact of E-commerce on Traditional Retail",  # 电子商务对传统零售的影响
-        "The Role of E-commerce in Global Trade",  # 电子商务在全球贸易中的作用
-        "The Impact of E-commerce on Consumer Behavior",  # 电子商务对消费者行为的影响
+        "The Rise of E-commerce",
+        "The Rise of the Gig Economy",
+        "The Future of Work in the Age of Automation",
+        "The Future of Work: Remote and Hybrid Models",
+        "The Impact of E-commerce on Traditional Retail",
+        "The Role of E-commerce in Global Trade",
+        "The Impact of E-commerce on Consumer Behavior",
     ],
     "Social Media and Cultural Influence": [
-        "The Role of Social Media in Modern Marketing",  # 社交媒体在现代营销中的角色
-        "The Influence of Pop Culture on Society",  # 流行文化对社会的影响
-        "The Impact of Social Media on Mental Health",  # 社交媒体对心理健康的影响
-        "The Role of Social Media in Social Change",  # 社交媒体在社会变革中的作用
-        "The Impact of Social Media on Privacy",  # 社交媒体对隐私的影响
-        "The Role of Social Media in Education",  # 社交媒体在教育中的作用
-        "The Impact of Social Media on Academic Performance",  # 社交媒体对学术表现的影响
-        "The Role of Social Media in Politics",  # 社交媒体在政治中的作用
-        "The Impact of Social Media on Business",  # 社交媒体对商业的影响
+        "The Role of Social Media in Modern Marketing",
+        "The Influence of Pop Culture on Society",
+        "The Impact of Social Media on Mental Health",
+        "The Role of Social Media in Social Change",
+        "The Impact of Social Media on Privacy",
+        "The Role of Social Media in Education",
+        "The Impact of Social Media on Academic Performance",
+        "The Role of Social Media in Politics",
+        "The Impact of Social Media on Business",
     ],
     "Ethics, Leadership, and Society": [
-        "Ethical Issues in Genetic Engineering",  # 基因工程中的伦理问题
-        "The Role of Women in Leadership",  # 女性在领导中的角色
-        "The Importance of Biodiversity",  # 生物多样性的重要性
-        "The Role of Ethics in Business",  # 伦理在商业中的作用
-        "The Impact of Ethics on Society",  # 伦理对社会的影响
-        "The Role of Ethics in Politics",  # 伦理在政治中的作用
-        "The Impact of Ethics on Academic Performance",  # 伦理对学术表现的影响
-        "The Role of Ethics in Education",  # 伦理在教育中的作用
+        "Ethical Issues in Genetic Engineering",
+        "The Role of Women in Leadership",
+        "The Importance of Biodiversity",
+        "The Role of Ethics in Business",
+        "The Impact of Ethics on Society",
+        "The Role of Ethics in Politics",
+        "The Impact of Ethics on Academic Performance",
+        "The Role of Ethics in Education",
     ],
 }
 
@@ -213,7 +173,6 @@ def prepare_pdf(filename: str, output_dir: str):
     os.remove(filename)
 
 
-# clean the image, table and deleted elements in the markdown file
 markdown_clean_pattern = re.compile(r"!\[.*?\]\((.*?)\)")
 
 
@@ -296,7 +255,6 @@ def prepare_ppt(filename: str, output_dir: str):
             pjoin(ppt_image_folder, f"slide_{slide.slide_idx:04d}.jpg"),
         )
 
-    # ? 不应该save normed pre 为source
     presentation.save(pjoin(app_config.RUN_DIR, "source_standard.pptx"))
     normed_prs = presentation.normalize()
     normed_prs.save(pjoin(app_config.RUN_DIR, "template.pptx"), layout_only=True)

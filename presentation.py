@@ -198,7 +198,6 @@ class ShapeElement:
             "rotation": shape.rotation,
             "fill": fill,
             "line": line,
-            # "shadow": shape.shadow._element.xml,
         }
         text_frame = TextFrame.from_shape(shape, shape_idx)
         obj = SHAPECAST.get(shape.shape_type, UnsupportedShape).from_shape(
@@ -337,9 +336,7 @@ class AutoShape(ShapeElement):
         if self.data["is_nofill"]:
             shape.fill.background()
             self.style["fill"] = None
-            # for para in self.text_frame.data:
-            #     if "font" in para and 'color' not in para['font']:
-            #         para["font"]["color"] = "000000"
+
         if self.data["is_line_nofill"]:
             shape.line.fill.background()
             self.style["line"] = None
@@ -450,7 +447,7 @@ class Picture(ShapeElement):
         self.stylish = stylish
         if self.is_background:
             return ""
-        # only figure elements should give a id
+
         return (
             f"<figure  id='{self.shape_idx}' {self.inline_style}>"
             + (f"\n<figcaption>{self.caption}</figcaption>" if self.caption else "")
@@ -493,18 +490,9 @@ class Placeholder(ShapeElement):
                 slide_idx, shape_idx, shape, style, text_frame, app_config
             )
         return data
-        # ph = cls(slide_idx, shape_idx, style, data, text_frame)
-        # ph.ph_index = shape.placeholder_format.type.value
-        # return ph
 
     def build(self, slide: PPTXSlide):
         pass
-        # if isinstance(self.data, TextBox):
-        #     super().build(slide, slide.shapes[-1])
-
-
-# 缩放高度，缩放宽度
-# placeholder的格式获取不到
 
 
 class GroupShape(ShapeElement):
@@ -546,7 +534,6 @@ class GroupShape(ShapeElement):
             else:
                 yield shape
 
-    # groupshape clone
     def __eq__(self, __value: object) -> bool:
         if not isinstance(__value, GroupShape) or len(self.data) != len(__value.data):
             return False
@@ -573,7 +560,6 @@ class GroupShape(ShapeElement):
         return s
 
 
-# these four shapes are only used to label
 class GraphicalShape(ShapeElement):
     @classmethod
     def from_shape(
@@ -695,9 +681,7 @@ class SlidePage:
         slide: PPTXSlide = prs.slides.add_slide(slide_layout)
         for ph in slide.placeholders:
             ph.element.getparent().remove(ph.element)
-        # placeholders = {
-        #     ph.placeholder_format.type.value: ph for ph in slide.placeholders
-        # }
+
         for shape in self.shapes:
             if isinstance(shape, (Picture, GroupShape)):
                 shape.build(slide)
@@ -731,7 +715,7 @@ class SlidePage:
                 if not shape.img_path == "resource/pic_placeholder.png":
                     content_types.add("picture")
                 else:
-                    # converted from GraphicalShape
+
                     content_types.add(shape.caption)
             elif isinstance(shape, GroupShape):
                 content_types.union(self.get_content_types(shape.data))
@@ -831,7 +815,7 @@ class Presentation:
         slide_idx = 0
         layouts = [layout.name for layout in prs.slide_layouts]
         for slide in prs.slides:
-            if slide._element.get("show") == "0":  # 被hide的slide不会被转成图像
+            if slide._element.get("show") == "0":
                 continue
 
             slide_idx += 1
@@ -860,7 +844,6 @@ class Presentation:
             slides, error_history, slide_width, slide_height, file_path, num_pages
         )
 
-    # 把 table 和 chart 转换成picture
     def save(self, file_path, layout_only=False):
         self.prs.core_properties.last_modified_by = "OminiPreGen"
         self.prs.core_properties.author += "OminiPreGen with: "

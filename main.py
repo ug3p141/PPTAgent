@@ -21,9 +21,6 @@ from utils import (
     set_proxy,
 )
 
-# TODO 背景元素的识别
-# TODO 减少输入长度减少幻觉现象，或者进行induct操作
-
 
 def ppt_gen(text_content: str, ppt_file: str, images_dir: str, num_pages: int = 8):
     session_id = hashlib.md5(
@@ -32,10 +29,9 @@ def ppt_gen(text_content: str, ppt_file: str, images_dir: str, num_pages: int = 
     print(f"Session ID: {session_id}")
     app_config.set_session(session_id)
 
-    # setting models
     llms.long_model = llms.gpt4o
     llms.caption_model = llms.gpt4o
-    # 1. 解析ppt
+
     presentation = Presentation.from_file(ppt_file)
     if len(presentation.error_history) > len(presentation.slides) // 3:
         raise ValueError(
@@ -43,8 +39,6 @@ def ppt_gen(text_content: str, ppt_file: str, images_dir: str, num_pages: int = 
         )
     if len(presentation.slides) < 6 or len(presentation.slides) > 100:
         raise ValueError("The number of effective slides should be between 6 and 100.")
-
-    # 2. 模板生成
 
     labler = ImageLabler(presentation)
     labler.caption_images()
@@ -82,27 +76,21 @@ def ppt_gen(text_content: str, ppt_file: str, images_dir: str, num_pages: int = 
         pjoin(app_config.RUN_DIR, "template.pptx"),
         pjoin(app_config.RUN_DIR, "template_images"),
     )
-    # TODO 只包含最多元素的模板好了，不然我很难解释，delete is simpler than insert
+
     functional_keys, slide_cluster = TemplateInducter(
         presentation, ppt_image_folder, pjoin(app_config.RUN_DIR, "template_images")
     ).work()
     presentation = presentation.normalize()
-    # TODO 效果还需要很大改进
-    # labler.label_images(functional_keys, slide_cluster, images)
 
-    # 3. 使用模板生成PPT
-    # 重新安排shape idx方便后续调整
-    # agent_model.clear_history()
     doc_json = json.load(open(pjoin(app_config.RUN_DIR, "refined_doc.json"), "r"))
 
-    # 先文本，后图像
     PPTAgent(
         presentation, slide_cluster, images, num_pages, doc_json, functional_keys
     ).work()
 
 
 if __name__ == "__main__":
-    # set_proxy("http://124.16.138.148:7890")
+
     app_config.set_debug(False)
     ppt_gen(
         open("resource/DOC2PPT.md").read(),

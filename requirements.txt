@@ -1,6 +1,9 @@
 git+https://github.com/Force1ess/python-pptx
 jinja2
 openai
+aiohttp
+func_argparse
+jsonlines
 google-generativeai
 tenacity
 transformers

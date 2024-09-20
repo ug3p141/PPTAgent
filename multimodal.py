@@ -28,8 +28,6 @@ class ImageLabler:
             "label": "content",
             "caption": "it's a placeholder",
         }
-        # os.makedirs(pjoin(app_config.IMAGE_DIR, "background"), exist_ok=True)
-        # os.makedirs(pjoin(app_config.IMAGE_DIR, "content"), exist_ok=True)
 
     def apply_stats(self, image_stats: dict = None):
         if image_stats is None:
@@ -61,7 +59,7 @@ class ImageLabler:
         images: dict[str, str],
     ):
         template = Template(open("prompts/image_label/vision_cls.txt").read())
-        # use majority vote
+
         image_labels = defaultdict(lambda: defaultdict(int))
         for layout_name, cluster in slide_cluster.items():
             for slide_idx in cluster:

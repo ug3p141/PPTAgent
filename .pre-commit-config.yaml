@@ -12,4 +12,4 @@ repos:
     rev: 5.12.0
     hooks:
       - id: isort
-        args: ["--profile", "black"] # fix conflict of black and isort
+        args: ["--profile", "black"] 

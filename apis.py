@@ -84,7 +84,7 @@ class CodeExecutor:
             elif line == "```" or not code_start:
                 code_start = False
                 continue
-            elif not line or line[0] not in string.ascii_lowercase:  # not a code line
+            elif not line or line[0] not in string.ascii_lowercase:
                 continue
             self.code_history.append([HistoryMark.CODE_RUN_ERROR, line, None])
             try:
@@ -133,7 +133,6 @@ class CodeExecutor:
         self.code_history = []
 
 
-# TODO 之后可以吧orig text的判断给remove掉，因为可能反复修改
 def runs_merge(paragraph: _Paragraph):
     runs = paragraph.runs
     if len(runs) == 0:
@@ -145,7 +144,7 @@ def runs_merge(paragraph: _Paragraph):
         return runs[0]
     run = max(runs, key=lambda x: len(x.text))
     run.text = paragraph.text
-    # remove other run
+
     for run in runs:
         if run != run:
             run._element.getparent().remove(run._element)
@@ -173,9 +172,7 @@ def del_para(text: str, text_shape: BaseShape):
     raise ValueError(f"Incorrect shape: {text_shape}.")
 
 
-def replace_para(
-    orig_text: str, new_text: str, text_shape: BaseShape
-):
+def replace_para(orig_text: str, new_text: str, text_shape: BaseShape):
     for para in text_shape.text_frame.paragraphs:
         if para.text == orig_text:
             run = runs_merge(para)
@@ -283,8 +280,7 @@ def adjust_element_geometry(
 
 def replace_image(slide: SlidePage, figure_id: str, image_path: str):
     """Replace the image of the element with the given id."""
-    # if image_path not in image_stats:
-    #     raise ValueError(f"The image path is not in the image stats: {image_path}.")
+
     shape = slide.shapes[int(figure_id)]
     if not isinstance(shape, Picture):
         raise ValueError("The element is not a Picture.")
