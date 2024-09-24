@@ -49,15 +49,15 @@ export default {
     return {
       pptxFile: null,
       pdfFile: null,
-      selectedModel: 'Qwen2-72B-Instruct',
-      models: ['Qwen2-72B-Instruct'],
+      selectedModel: 'Qwen2.5-72B-Instruct',
+      models: ['Qwen2.5-72B-Instruct'],
       selectedPages: 8,
       pagesOptions: Array.from({ length: 24 }, (_, i) => i + 3),
     }
   },
   methods: {
     handleFileUpload(event, fileType) {
-      console.log("file uploaded for:", fileType)
+      console.log("file uploaded :", fileType)
       const file = event.target.files[0]
       if (fileType === 'pptx') {
         this.pptxFile = file  // {{ edit: Assign single pptxFile }}
@@ -72,7 +72,7 @@ export default {
         })
         .catch(error => {
           console.error(error);
-          alert('Backend is not running, your input will not be processed');
+          alert('Backend is not running or too busy, your task will not be processed');
           return;
         });
       if (!this.pptxFile || !this.pdfFile) {

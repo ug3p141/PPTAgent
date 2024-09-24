@@ -72,7 +72,7 @@ class CodeExecutor:
         code_start = False
         found_code = False
         backup_state = deepcopy(edit_slide)
-        self.api_history.append([HistoryMark.API_CALL_ERROR, prompt, apis])
+        self.api_history.append([HistoryMark.API_CALL_ERROR,edit_slide.slide_idx, prompt, apis])
         while line_idx < len(lines):
             line = lines[line_idx]
             line_idx += 1
@@ -101,9 +101,11 @@ class CodeExecutor:
                 if err_time > self.correct_chance:
                     break
                 trace_msg = traceback.format_exc()
-                error_message = trace_msg[
-                    trace_msg.find('File "/Users/forcelss/Code/OminiPreGen/apis.py"') :
-                ]
+                trace_spliter = trace_msg.find('in <module>\n ')
+                if trace_spliter==-1:
+                    print("No trace spliter found in the error message.")
+                    exit(-1)
+                error_message = trace_msg[trace_spliter+len('in <module>\n '):]
                 self.code_history[-1][-1] = error_message
                 api_lines = (
                     "\n".join(lines[: line_idx - 1])

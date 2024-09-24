@@ -204,9 +204,7 @@ internvl_multi = APIModel(
     model="InternVL2-Llama3-76B",
     api_base="http://124.16.138.150:5000/generate",
 )
-internvl_76 = OPENAI(
-    model="InternVL2-Llama3-76B", api_base="http://127.0.0.1:8000/v1"
-)
+internvl_76 = OPENAI(model="InternVL2-Llama3-76B", api_base="http://127.0.0.1:8000/v1")
 caption_model = internvl_76
 long_model = qwen
 agent_model = gpt4o

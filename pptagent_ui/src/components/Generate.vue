@@ -32,17 +32,14 @@ export default {
         const data = JSON.parse(event.data)
         this.progress = data.progress
         this.statusMessage = data.status
-
         if (data.progress >= 100) {
-          this.statusMessage = 'Generation complete!'
           socket.close()
           this.fetchDownloadLink()
         }
       }
-
       socket.onerror = (error) => {
         console.error("WebSocket error:", error)
-        this.statusMessage = 'An error occurred.'
+        this.statusMessage = 'WebSocket connection failed.'
       }
     },
     async fetchDownloadLink() { // {{ edit: New method to fetch download link }}
@@ -51,7 +48,7 @@ export default {
         this.downloadLink = URL.createObjectURL(downloadResponse.data)
       } catch (error) {
         console.error("Download error:", error)
-        this.statusMessage = 'Failed to download the file.'
+        this.statusMessage += '\nFailed to continue the task.'
       }
     }
   }

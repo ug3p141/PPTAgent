@@ -30,7 +30,6 @@ from utils import (
 )
 
 HASH_IMAGE = dict()
-SLIDE_AREA: int = 0
 
 
 class TextFrame:
@@ -164,6 +163,7 @@ class ShapeElement:
         style: dict,
         data: dict,
         text_frame: TextFrame,
+        slide_area: float,
     ):
         self.slide_idx = slide_idx
         self.shape_idx = shape_idx
@@ -172,10 +172,11 @@ class ShapeElement:
         self.text_frame = text_frame
         self.stylish = False
         self.closures = {}
+        self.slide_area = slide_area
 
     @classmethod
     def from_shape(
-        cls, slide_idx: int, shape_idx: int, shape: BaseShape, app_config: Config
+        cls, slide_idx: int, shape_idx: int, shape: BaseShape, config: Config, slide_area: float
     ):
         if shape_idx > 100 and isinstance(shape, PPTXGroupShape):
             raise ValueError(f"nested group shapes are not allowed")
@@ -201,7 +202,7 @@ class ShapeElement:
         }
         text_frame = TextFrame.from_shape(shape, shape_idx)
         obj = SHAPECAST.get(shape.shape_type, UnsupportedShape).from_shape(
-            slide_idx, shape_idx, shape, style, text_frame, app_config
+            slide_idx, shape_idx, shape, style, text_frame, config, slide_area
         )
         obj.xml = shape._element.xml
         return obj
@@ -266,7 +267,7 @@ class ShapeElement:
 
     @property
     def inline_style(self):
-        style = f" data-relative-area='{self.area*100/SLIDE_AREA:.2f}%'"
+        style = f" data-relative-area='{self.area*100/self.slide_area:.2f}%'"
         if self.stylish:
             style += f" style='left: {self.left}pt; top: {self.top}pt; width: {self.width}pt; height: {self.height}pt;'"
         return style
@@ -303,9 +304,8 @@ class UnsupportedShape(ShapeElement):
         slide_idx: int,
         shape_idx: int,
         shape: BaseShape,
-        style: dict,
-        text_frame: TextFrame,
-        app_config: Config,
+        *args,
+        **kwargs,
     ):
         raise ValueError(f"unsupported shape {shape.shape_type}")
 
@@ -320,6 +320,7 @@ class AutoShape(ShapeElement):
         style: dict,
         text_frame: TextFrame,
         app_config: Config,
+        slide_area: float,
     ):
         data = {
             "auto_shape_type": shape.auto_shape_type.real,
@@ -327,7 +328,7 @@ class AutoShape(ShapeElement):
             "is_nofill": isinstance(shape.fill._fill, (_NoneFill, _NoFill)),
             "is_line_nofill": isinstance(shape.line.fill._fill, (_NoneFill, _NoFill)),
         }
-        return cls(slide_idx, shape_idx, style, data, text_frame)
+        return cls(slide_idx, shape_idx, style, data, text_frame, slide_area)
 
     def build(self, slide: PPTXSlide):
         shape = slide.shapes.add_shape(
@@ -366,8 +367,9 @@ class TextBox(ShapeElement):
         style: dict,
         text_frame: TextFrame,
         app_config: Config,
+        slide_area: float,
     ):
-        return cls(slide_idx, shape_idx, style, None, text_frame)
+        return cls(slide_idx, shape_idx, style, None, text_frame, slide_area)
 
     def build(self, slide: PPTXSlide):
         shape = slide.shapes.add_textbox(**self.style["shape_bounds"])
@@ -388,6 +390,7 @@ class Picture(ShapeElement):
         style: dict,
         text_frame: TextFrame,
         app_config: Config,
+        slide_area: float,
     ):
         if shape.image.ext not in IMAGE_EXTENSIONS:
             raise ValueError(f"unsupported image type {shape.image.ext}")
@@ -414,6 +417,7 @@ class Picture(ShapeElement):
             style,
             [img_path, shape.name, ""],
             text_frame,
+            slide_area,
         )
         picture.is_background = False
         return picture
@@ -465,6 +469,7 @@ class Placeholder(ShapeElement):
         style: dict,
         text_frame: TextFrame,
         app_config: Config,
+        slide_area: float,
     ):
         assert (
             sum(
@@ -479,15 +484,15 @@ class Placeholder(ShapeElement):
         ), "placeholder should have only one type"
         if isinstance(shape, PlaceholderPicture):
             data = Picture.from_shape(
-                slide_idx, shape_idx, shape, style, text_frame, app_config
+                slide_idx, shape_idx, shape, style, text_frame, app_config, slide_area
             )
         elif shape.has_text_frame:
             data = TextBox.from_shape(
-                slide_idx, shape_idx, shape, style, text_frame, app_config
+                slide_idx, shape_idx, shape, style, text_frame, app_config, slide_area
             )
         elif shape.has_chart or shape.has_table:
             data = GraphicalShape.from_shape(
-                slide_idx, shape_idx, shape, style, text_frame, app_config
+                    slide_idx, shape_idx, shape, style, text_frame, app_config, slide_area  
             )
         return data
 
@@ -505,16 +510,17 @@ class GroupShape(ShapeElement):
         style: dict,
         text_frame: TextFrame,
         app_config: Config,
+        slide_area: float,
     ):
         data = [
             ShapeElement.from_shape(
-                slide_idx, (shape_idx + 1) * 100 + i, sub_shape, app_config
+                slide_idx, (shape_idx + 1) * 100 + i, sub_shape, app_config, slide_area
             )
             for i, sub_shape in enumerate(shape.shapes)
         ]
         for idx, shape_bounds in enumerate(parse_groupshape(shape)):
             data[idx].style["shape_bounds"] = shape_bounds
-        return cls(slide_idx, shape_idx, style, data, text_frame)
+        return cls(slide_idx, shape_idx, style, data, text_frame, slide_area)
 
     def build(self, slide: PPTXSlide):
         for sub_shape in self.data:
@@ -570,8 +576,9 @@ class GraphicalShape(ShapeElement):
         style: dict,
         text_frame: TextFrame,
         app_config: Config,
+        slide_area: float,
     ):
-        return cls(slide_idx, shape_idx, style, None, text_frame)
+        return cls(slide_idx, shape_idx, style, None, text_frame, slide_area)
 
     def build(self, slide: PPTXSlide):
         pass
@@ -599,21 +606,22 @@ class GraphicalShape(ShapeElement):
         return shape
 
 
-class Connector(ShapeElement):
-    @classmethod
-    def from_shape(
-        cls,
-        slide_idx: int,
-        shape_idx: int,
-        shape: PPTXConnector,
-        style: dict,
-        text_frame: TextFrame,
-        app_config: Config,
-    ):
-        return cls(slide_idx, shape_idx, style, None, text_frame)
+# class Connector(ShapeElement):
+#     @classmethod
+#     def from_shape(
+#         cls,
+#         slide_idx: int,
+#         shape_idx: int,
+#         shape: PPTXConnector,
+#         style: dict,
+#         text_frame: TextFrame,
+#         app_config: Config,
+#         slide_area: float,
+#     ):
+#         return cls(slide_idx, shape_idx, style, None, text_frame, slide_area)
 
-    def build(self, slide: PPTXSlide):
-        pass
+#     def build(self, slide: PPTXSlide):
+#         pass
 
 
 class SlidePage:
@@ -805,11 +813,9 @@ class Presentation:
 
     @classmethod
     def from_file(cls, file_path: str, app_config: Config):
-        global SLIDE_AREA
         prs = PPTXPre(file_path)
         slide_width = prs.slide_width
         slide_height = prs.slide_height
-        SLIDE_AREA = slide_width.pt * slide_height.pt
         slides = []
         error_history = []
         slide_idx = 0
@@ -912,8 +918,8 @@ SHAPECAST: dict[int, ShapeElement] = {
     MSO_SHAPE_TYPE.PICTURE: Picture,
     MSO_SHAPE_TYPE.GROUP: GroupShape,
     MSO_SHAPE_TYPE.TEXT_BOX: TextBox,
-    MSO_SHAPE_TYPE.LINE: Connector,
     MSO_SHAPE_TYPE.CHART: GraphicalShape,
     MSO_SHAPE_TYPE.TABLE: GraphicalShape,
     MSO_SHAPE_TYPE.DIAGRAM: GraphicalShape,
+    # MSO_SHAPE_TYPE.LINE: Connector,
 }

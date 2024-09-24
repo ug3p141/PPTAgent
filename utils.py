@@ -108,7 +108,7 @@ def get_text_inlinestyle(para: dict, stylish: bool):
 
 
 def get_text_pptcstyle(para: dict):
-    if 'font' not in para:
+    if "font" not in para:
         return ""
     font = SimpleNamespace(**para["font"])
     return f"Font Style: bold={font.bold}, italic={font.italic}, underline={font.underline}, size={font.size}pt, color={font.color}, font style={font.name}\n"
@@ -143,7 +143,6 @@ def parse_groupshape(groupshape: GroupShape):
     group_top_left_y = groupshape.top
     group_width = groupshape.width
     group_height = groupshape.height
-    # false size and xy
     shape_top_left_x = min([sp.left for sp in groupshape.shapes])
     shape_top_left_y = min([sp.top for sp in groupshape.shapes])
     shape_width = (
@@ -152,7 +151,6 @@ def parse_groupshape(groupshape: GroupShape):
     shape_height = (
         max([sp.top + sp.height for sp in groupshape.shapes]) - shape_top_left_y
     )
-    # scale xy
     group_shape_xy = []
     for sp in groupshape.shapes:
         group_shape_left = (
@@ -274,10 +272,9 @@ class Config:
         self.session_id = session_id
         self.RUN_DIR = f"./runs/{session_id}"
         self.IMAGE_DIR = pjoin(self.RUN_DIR, "images")
-        self.TEST_PPT = "./resource/陆垚杰_博士论文答辩PPT_0530.pptx"
         for the_dir in [self.RUN_DIR, self.IMAGE_DIR]:
             if not pexists(the_dir):
-                os.makedirs(the_dir)
+                os.makedirs(the_dir, exist_ok=True)
 
     def set_rundir(self, rundir: str):
         self.RUN_DIR = rundir

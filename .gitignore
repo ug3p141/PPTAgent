@@ -11,3 +11,4 @@ models
 *egg-info
 runs
 resource
+node_modules

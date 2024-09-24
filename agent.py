@@ -1,19 +1,19 @@
 import json
-from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from datetime import datetime
+import traceback
 
 import json_repair
 import PIL
+import jsonlines
 import torch
 from jinja2 import Template
 
 import apis
 import llms
-from apis import API_TYPES, code_executor
+from apis import API_TYPES, CodeExecutor, code_executor
 from model_utils import get_text_embedding
-from presentation import Presentation
+from presentation import Presentation, SlidePage
 from utils import Config, clear_slides, pexists, pjoin, print
 
 
@@ -21,10 +21,11 @@ class PPTAgent:
     def __init__(
         self,
         presentation: Presentation,
-        app_config: Config,
+        config: Config,
         template: dict,
         images: dict[str, str],
         num_slides: int,
+        text_model,
         doc_json: dict[str, str],
         functional_keys: set[str],
         layout_embeddings: torch.Tensor,
@@ -34,7 +35,7 @@ class PPTAgent:
         self.doc_json = doc_json
         self.num_slides = num_slides
         self.image_information = ""
-        self.app_config = app_config
+        self.config = config
         for k, v in images.items():
             if not pexists(k):
                 raise FileNotFoundError(f"Image {k} not found")
@@ -48,15 +49,17 @@ class PPTAgent:
         self.gen_prs = deepcopy(presentation)
         self.layout_names = list(self.slide_templates.keys())
         self.gen_prs.slides = []
+        self.text_model = text_model
 
-        self.outline_file = pjoin(app_config.RUN_DIR, "presentation_outline.json")
-        self.agent_steps = pjoin(app_config.RUN_DIR, "agent_steps.json")
+        self.outline_file = pjoin(config.RUN_DIR, "presentation_outline.json")
 
     def work(self):
         if pexists(self.outline_file):
             self.outline = json.load(open(self.outline_file, "r"))
         else:
             self.outline = json_repair.loads(self.generate_outline())
+            if "slides" in self.outline:
+                self.outline = self.outline["slides"]
             json.dump(
                 self.outline, open(self.outline_file, "w"), ensure_ascii=False, indent=4
             )
@@ -73,33 +76,39 @@ class PPTAgent:
         self.generate_slides()
 
     def generate_slides(self):
-        steps = []
-        exit_flag = False
-        code_executor.reset()
+        succ_flag = True
+        code_executor = deepcopy(code_executor)
         self.gen_prs.slides = []
-        # 由于GIL的存在，code executor的api_history和code_history在多线程中不会冲突
         for slide_data in enumerate(self.outline.items()):
-            step, slide = self._generate_slide(slide_data)
-            steps.append(step)
-            if slide is not None:
-                self.gen_prs.slides.append(slide)
-            else:
-                exit_flag = True
-        json.dump(
-            (steps, code_executor.api_history, code_executor.code_history),
-            open(self.agent_steps, "w"),
-        )
-        if exit_flag:
-            return
-        # self.gen_prs.slides.sort(key=lambda x: x.slide_idx)
-        self.gen_prs.save(pjoin(self.app_config.RUN_DIR, "final.pptx"))
+            try:
+                self.gen_prs.slides.append(
+                    self._generate_slide(slide_data, code_executor)
+                )
+            except Exception as e:
+                succ_flag = False
+                if self.config.DEBUG:
+                    traceback.print_exc()
+                break
+        with jsonlines.Writer(
+            open(pjoin(self.config.RUN_DIR, "agent_steps.jsonl"), "w")
+        ) as writer:
+            writer.write_all(code_executor.api_history)
+        with jsonlines.open(
+            pjoin(self.config.RUN_DIR, "code_steps.jsonl"), "w"
+        ) as writer:
+            writer.write_all(code_executor.code_history)
+        if succ_flag:
+            self.gen_prs.save(pjoin(self.config.RUN_DIR, "final.pptx"))
+        else:
+            raise Exception("Failed to generate slide")
 
-    def _generate_slide(self, slide_data):
+    def _generate_slide(self, slide_data, code_executor: CodeExecutor) -> SlidePage:
         slide_idx, (slide_title, slide) = slide_data
         images = "No Images"
         if slide["layout"] not in self.layout_names:
             layout_sim = torch.cosine_similarity(
-                get_text_embedding(slide["layout"]), self.layout_embeddings
+                get_text_embedding(slide["layout"], model=self.text_model),
+                self.layout_embeddings,
             )
             slide["layout"] = self.layout_names[layout_sim.argmax().item()]
         if any(
@@ -129,17 +138,14 @@ class PPTAgent:
             content=self.simple_outline + self.metadata + slide_content,
             images=images,
         )
-        try:
-            code_executor.execute_apis(
+        code_executor.execute_apis(
+            edit_prompt,
+            apis=llms.agent_model(
                 edit_prompt,
-                apis=llms.agent_model(
-                    edit_prompt,
-                ),
-                edit_slide=edit_slide,
-            )
-            return (template_id, *code_executor.api_history[-1]), edit_slide
-        except:
-            return (template_id, *code_executor.api_history[-1]), None
+            ),
+            edit_slide=edit_slide,
+        )
+        return edit_slide
 
     def generate_outline(self):
         template = Template(open("prompts/agent/outline.txt").read())
@@ -156,12 +162,13 @@ class PPTAgent:
 
 
 def get_slide_content(doc_json: dict, slide_title: str, slide: dict):
-    slide_content = f"Title: {slide_title}\nSlide Description: {slide['description']}\n"
-    if len(slide["subsection_keys"]) != 0:
+    slide_desc = slide.get("description", "")
+    slide_content = f"Title: {slide_title}\nSlide Description: {slide_desc}\n"
+    if len(slide.get("subsection_keys", [])) != 0:
         slide_content += "Slide Reference Text: "
         for key in slide["subsection_keys"]:
             for section in doc_json["sections"]:
-                for subsection in section["subsections"]:
+                for subsection in section.get("subsections", []):
                     if key in subsection:
                         slide_content += f"SubSection {key}: {subsection[key]}\n"
     return slide_content

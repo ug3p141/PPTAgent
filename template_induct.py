@@ -8,22 +8,23 @@ from jinja2 import Template
 import llms
 from model_utils import get_cluster, image_embedding, images_cosine_similarity
 from presentation import Presentation
-from utils import app_config, get_json_from_response, pexists, pjoin, ppt_to_images
+from utils import Config, get_json_from_response, pexists, pjoin, ppt_to_images
 
 
 class TemplateInducter:
     def __init__(
-        self, prs: Presentation, ppt_image_folder: str, template_image_folder: str
+        self, prs: Presentation, ppt_image_folder: str, template_image_folder: str, config:Config
     ):
         self.prs = prs
         self.ppt_image_folder = ppt_image_folder
         self.template_image_folder = template_image_folder
-        self.output_dir = pjoin(app_config.RUN_DIR, "template_induct")
+        self.config = config
+        self.output_dir = pjoin(config.RUN_DIR, "template_induct")
         self.slide_split_file = pjoin(self.output_dir, "slides_split.json")
         self.slide_cluster_file = pjoin(self.output_dir, "slides_cluster.json")
         os.makedirs(self.output_dir, exist_ok=True)
 
-    def work(self):
+    def work(self, most_image = 3):
         if pexists(self.slide_cluster_file):
             self.slide_cluster = json.load(open(self.slide_cluster_file))
             return set(self.slide_cluster.pop("functional_keys")), self.slide_cluster
@@ -69,8 +70,8 @@ class TemplateInducter:
         for i in range(len(self.prs.slides)):
             if i + 1 not in used_slides_index:
                 content_slides_index.add(i + 1)
-        self.layout_split(content_slides_index)
-        if app_config.DEBUG:
+        self.layout_split(content_slides_index, most_image)
+        if self.config.DEBUG:
             for layout_name, cluster in self.slide_cluster.items():
                 os.makedirs(
                     pjoin(
@@ -137,6 +138,7 @@ class TemplateInducter:
     def layout_split(
         self,
         content_slides_index: set[int],
+        most_image:int
     ):
         embeddings = image_embedding(self.template_image_folder)
         template = Template(open("prompts/template_induct/ask_category.txt").read())
@@ -158,21 +160,16 @@ class TemplateInducter:
             for cluster in get_cluster(similarity):
                 cluster = [slides[i] for i in cluster]
                 cluster_name = (
-                    llms.agent_model(
+                    llms.caption_model(
                         template.render(
                             existed_layoutnames=list(self.slide_cluster.keys()),
                         ),
                         [
                             pjoin(self.ppt_image_folder, f"slide_{slide_idx:04d}.jpg")
-                            for slide_idx in cluster[:3]
+                            for slide_idx in cluster[:most_image]
                         ],
                     )
                     + content_type_name
                 )
                 print(f"cluster_name: {cluster_name}")
                 self.slide_cluster[cluster_name] = [slide_idx for slide_idx in cluster]
-
-
-if __name__ == "__main__":
-    prs = Presentation.from_file(app_config.TEST_PPT)
-    mg = TemplateInducter(prs)

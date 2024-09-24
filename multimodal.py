@@ -12,14 +12,12 @@ from utils import Config, pbasename, pexists, pjoin, print
 
 
 class ImageLabler:
-    def __init__(self, presentation: Presentation, app_config: Config = None):
+    def __init__(self, presentation: Presentation, config: Config):
         self.presentation = presentation
         self.slide_area = presentation.slide_width.pt * presentation.slide_height.pt
         self.image_stats = {}
-        self.stats_file = pjoin(app_config.RUN_DIR, "image_stats.json")
-        if app_config is None:
-            app_config = utils.app_config
-        self.app_config = app_config
+        self.stats_file = pjoin(config.RUN_DIR, "image_stats.json")
+        self.config = config
         self.collect_images()
         if pexists(self.stats_file):
             self.image_stats = json.load(open(self.stats_file, "r"))
@@ -42,7 +40,7 @@ class ImageLabler:
         for image, stats in self.image_stats.items():
             if "caption" not in stats:
                 stats["caption"] = llms.caption_model(caption_prompt, image)
-                if self.app_config.DEBUG:
+                if self.config.DEBUG:
                     print(image, ": ", stats["caption"])
         json.dump(
             self.image_stats,
@@ -105,7 +103,7 @@ class ImageLabler:
                             + "----",
                         ),
                         pjoin(
-                            self.app_config.RUN_DIR,
+                            self.config.RUN_DIR,
                             "slide_images",
                             f"slide_{slide_idx:04d}.jpg",
                         ),
@@ -120,8 +118,8 @@ class ImageLabler:
                         continue
                     image_labels[result["image"]][result["replace"]] += 1
         image_labels = {
-            pjoin(self.app_config.IMAGE_DIR, k): pjoin(
-                self.app_config.IMAGE_DIR,
+            pjoin(self.config.IMAGE_DIR, k): pjoin(
+                self.config.IMAGE_DIR,
                 max(v.items(), key=lambda x: x[1])[0],
             )
             for k, v in image_labels.items()
