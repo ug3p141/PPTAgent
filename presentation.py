@@ -176,7 +176,12 @@ class ShapeElement:
 
     @classmethod
     def from_shape(
-        cls, slide_idx: int, shape_idx: int, shape: BaseShape, config: Config, slide_area: float
+        cls,
+        slide_idx: int,
+        shape_idx: int,
+        shape: BaseShape,
+        config: Config,
+        slide_area: float,
     ):
         if shape_idx > 100 and isinstance(shape, PPTXGroupShape):
             raise ValueError(f"nested group shapes are not allowed")
@@ -492,7 +497,7 @@ class Placeholder(ShapeElement):
             )
         elif shape.has_chart or shape.has_table:
             data = GraphicalShape.from_shape(
-                    slide_idx, shape_idx, shape, style, text_frame, app_config, slide_area  
+                slide_idx, shape_idx, shape, style, text_frame, app_config, slide_area
             )
         return data
 
@@ -598,6 +603,7 @@ class GraphicalShape(ShapeElement):
                 self.orig_shape,
             ],
             self.text_frame,
+            self.slide_area,
         )
         shape.style["fill"] = None
         shape.style["line"] = None
@@ -664,7 +670,9 @@ class SlidePage:
         app_config: Config,
     ):
         shapes = [
-            ShapeElement.from_shape(slide_idx, i, shape, app_config)
+            ShapeElement.from_shape(
+                slide_idx, i, shape, app_config, slide_width * slide_height
+            )
             for i, shape in enumerate(slide.shapes)
         ]
         slide_layout_name = slide.slide_layout.name if slide.slide_layout else None

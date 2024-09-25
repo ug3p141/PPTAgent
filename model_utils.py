@@ -19,7 +19,7 @@ image_embed_model = None
 extractor = None
 
 
-def get_text_embedding(text: list[str], batchsize: int = 32, model = None):
+def get_text_embedding(text: list[str], batchsize: int = 32, model=None):
     global text_embed_model
     if model is None and text_embed_model is None:
         text_embed_model = BGEM3FlagModel(
@@ -32,21 +32,24 @@ def get_text_embedding(text: list[str], batchsize: int = 32, model = None):
     result = []
     for i in range(0, len(text), batchsize):
         result.extend(
-            torch.tensor(
-                model.encode(text[i : i + batchsize])["dense_vecs"]
-            ).to(model.device)
+            torch.tensor(model.encode(text[i : i + batchsize])["dense_vecs"]).to(
+                model.device
+            )
         )
     return result
 
 
-def prs_dedup(presentation: Presentation, ppt_image_folder: str, batchsize: int = 32, model = None):
+def prs_dedup(
+    presentation: Presentation, ppt_image_folder: str, batchsize: int = 32, model=None
+    
+):
     text_embeddings = get_text_embedding(
         [i.to_text() for i in presentation.slides], batchsize, model
     )
     pre_embedding = text_embeddings[0]
     slide_idx = 1
     duplicates = []
-    while slide_idx < len(presentation.slides):
+    while slide_idx < len(presentation):
         cur_embedding = text_embeddings[slide_idx]
         if torch.cosine_similarity(pre_embedding, cur_embedding, -1) > 0.8:
             duplicates.append(slide_idx - 1)
@@ -55,7 +58,7 @@ def prs_dedup(presentation: Presentation, ppt_image_folder: str, batchsize: int 
     return [presentation.slides.pop(i) for i in reversed(duplicates)]
 
 
-def image_embedding(image_dir: str, batchsize: int = 16, model = None):
+def image_embedding(image_dir: str, batchsize: int = 16, model=None):
     global extractor
     global image_embed_model
     if model is None and image_embed_model is None:

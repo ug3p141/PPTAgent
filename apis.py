@@ -1,4 +1,5 @@
 import inspect
+import os
 import string
 import traceback
 from copy import deepcopy
@@ -27,11 +28,11 @@ class HistoryMark:
 
 class CodeExecutor:
 
-    def __init__(self, local_vars: dict[str, list[callable]], terminate_times: int = 1):
+    def __init__(self, local_vars: dict[str, list[callable]], retry_times: int = 1):
         self.api_history = []
         self.code_history = []
         self.registered_functions = local_vars
-        self.correct_chance = terminate_times
+        self.retry_times = retry_times
         self.local_vars = {func.__name__: func for func in sum(local_vars.values(), [])}
         self.correct_template = Template(open("prompts/agent/code_feedback.txt").read())
 
@@ -72,7 +73,9 @@ class CodeExecutor:
         code_start = False
         found_code = False
         backup_state = deepcopy(edit_slide)
-        self.api_history.append([HistoryMark.API_CALL_ERROR,edit_slide.slide_idx, prompt, apis])
+        self.api_history.append(
+            [HistoryMark.API_CALL_ERROR, edit_slide.slide_idx, prompt, apis]
+        )
         while line_idx < len(lines):
             line = lines[line_idx]
             line_idx += 1
@@ -98,14 +101,14 @@ class CodeExecutor:
                 self.code_history[-1][0] = HistoryMark.CODE_RUN_CORRECT
             except:
                 err_time += 1
-                if err_time > self.correct_chance:
+                if err_time > self.retry_times:
                     break
                 trace_msg = traceback.format_exc()
-                trace_spliter = trace_msg.find('in <module>\n ')
-                if trace_spliter==-1:
+                trace_spliter = trace_msg.find("in <module>\n ")
+                if trace_spliter == -1:
                     print("No trace spliter found in the error message.")
                     exit(-1)
-                error_message = trace_msg[trace_spliter+len('in <module>\n '):]
+                error_message = trace_msg[trace_spliter + len("in <module>\n ") :]
                 self.code_history[-1][-1] = error_message
                 api_lines = (
                     "\n".join(lines[: line_idx - 1])
@@ -124,7 +127,7 @@ class CodeExecutor:
         if not found_code:
             self.api_history[-1][0] = HistoryMark.API_CALL_ERROR
             raise ValueError("No code block found in the api call.")
-        if err_time > self.correct_chance:
+        if err_time > self.retry_times:
             self.api_history[-1][0] = HistoryMark.API_CALL_ERROR
             raise ValueError("The api call failed too many times.")
         else:
@@ -282,7 +285,8 @@ def adjust_element_geometry(
 
 def replace_image(slide: SlidePage, figure_id: str, image_path: str):
     """Replace the image of the element with the given id."""
-
+    if not os.path.exists(image_path):
+        raise ValueError(f"The image {image_path} does not exist.")
     shape = slide.shapes[int(figure_id)]
     if not isinstance(shape, Picture):
         raise ValueError("The element is not a Picture.")
@@ -329,25 +333,17 @@ class API_TYPES(Enum):
         return [i for i in API_TYPES]
 
 
-code_executor = CodeExecutor(
-    {
-        API_TYPES.TUNING: [
-            set_font_style,
-            adjust_element_geometry,
-            del_element_byid,
-        ],
-        API_TYPES.TEXT_EDITING: [
-            replace_text,
-            del_textframe,
-        ],
-        API_TYPES.IMAGE_EDITING: [
-            replace_image,
-            del_element_byid,
-        ],
-    },
-)
-
-if __name__ == "__main__":
-    print(
-        code_executor.get_apis_docs([API_TYPES.TEXT_EDITING, API_TYPES.IMAGE_EDITING])
+def get_code_executor(retry_times: int = 1):
+    return CodeExecutor(
+        {
+            API_TYPES.TEXT_EDITING: [
+                replace_text,
+                del_textframe,
+            ],
+            API_TYPES.IMAGE_EDITING: [
+                replace_image,
+                del_element_byid,
+            ],
+        },
+        retry_times=retry_times,
     )

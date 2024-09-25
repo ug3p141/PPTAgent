@@ -263,8 +263,8 @@ def dict_to_object(dict: dict, obj: object, exclude=None):
 
 
 class Config:
-    def __init__(self, session_id=None):
-        self.DEBUG = False
+    def __init__(self, session_id=None, debug=True):
+        self.DEBUG = debug
         if session_id is not None:
             self.set_session(session_id)
 

@@ -4,7 +4,7 @@ These sequences are initially generated based on a provided prompt.
 Provide the corrected API sequence plainly without comment
 Example Output:
 set_text('1_1', "Title");
-set_image('2', "/path/to/new_image.jpg");
+set_image('2', "new_image.jpg");
 
 Task Context:
    - Review the original prompt used to generate the initial API sequence:

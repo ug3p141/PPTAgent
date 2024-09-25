@@ -7,7 +7,11 @@
       <router-view />
     </main>
     <footer class="app-footer">
-      您所上传的所有数据将被分析并被保存，请注意您的数据安全
+      目前PDF处理较慢，每页需要1-2分钟，超过10页的将被拒绝处理
+      <br>
+      使用已经上传过的PDF和PPTX可以复用缓存，节省时间
+      <br>
+      您所上传的所有数据将被分析并保存，请注意您的数据安全
     </footer>
   </div>
 </template>
@@ -48,7 +52,7 @@ export default {
 .app-footer {
   text-align: center;
   font-family: "Times New Roman", Times, serif;
-  height: 40px;
+  height: 10vh;
   display: flex;
   align-items: center;
   justify-content: center;

@@ -19,20 +19,19 @@ class ImageLabler:
         self.stats_file = pjoin(config.RUN_DIR, "image_stats.json")
         self.config = config
         self.collect_images()
-        if pexists(self.stats_file):
-            self.image_stats = json.load(open(self.stats_file, "r"))
-            self.apply_stats()
         self.image_stats["resource/pic_placeholder.png"] = {
             "label": "content",
             "caption": "it's a placeholder",
         }
+        if pexists(self.stats_file):
+            image_stats = json.load(open(self.stats_file, "r"))
+            if self.image_stats.keys() == image_stats.keys():
+                self.image_stats = image_stats
 
-    def apply_stats(self, image_stats: dict = None):
-        if image_stats is None:
-            image_stats = self.image_stats
+    def apply_stats(self):
         for slide in self.presentation.slides:
             for shape in slide.shape_filter(Picture):
-                stats = image_stats[shape.img_path]
+                stats = self.image_stats[shape.img_path]
                 shape.caption = stats["caption"]
 
     def caption_images(self):

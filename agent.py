@@ -9,9 +9,8 @@ import jsonlines
 import torch
 from jinja2 import Template
 
-import apis
 import llms
-from apis import API_TYPES, CodeExecutor, code_executor
+from apis import CodeExecutor, get_code_executor, API_TYPES
 from model_utils import get_text_embedding
 from presentation import Presentation, SlidePage
 from utils import Config, clear_slides, pexists, pjoin, print
@@ -53,7 +52,7 @@ class PPTAgent:
 
         self.outline_file = pjoin(config.RUN_DIR, "presentation_outline.json")
 
-    def work(self):
+    def work(self, retry_times: int = 1):
         if pexists(self.outline_file):
             self.outline = json.load(open(self.outline_file, "r"))
         else:
@@ -73,11 +72,11 @@ class PPTAgent:
                 for slide_idx, slide_title in enumerate(self.outline)
             ]
         )
-        self.generate_slides()
+        self.generate_slides(retry_times)
 
-    def generate_slides(self):
+    def generate_slides(self, retry_times: int):
         succ_flag = True
-        code_executor = deepcopy(code_executor)
+        code_executor = get_code_executor(retry_times)
         self.gen_prs.slides = []
         for slide_data in enumerate(self.outline.items()):
             try:

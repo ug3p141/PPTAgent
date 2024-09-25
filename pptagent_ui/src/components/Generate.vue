@@ -1,5 +1,6 @@
 <template>
   <div class="generate-container">
+    <p class="task-id">Task ID: {{ taskId }}</p>
     <progress :value="progress" max="100" class="progress-bar"></progress>
     <p class="status-message">{{ statusMessage }}</p>
     <a v-if="downloadLink" :href="downloadLink" download="pptagent.pptx"
@@ -42,7 +43,7 @@ export default {
         this.statusMessage = 'WebSocket connection failed.'
       }
     },
-    async fetchDownloadLink() { // {{ edit: New method to fetch download link }}
+    async fetchDownloadLink() {
       try {
         const downloadResponse = await this.$axios.get('/api/download', { params: { task_id: this.taskId }, responseType: 'blob' })
         this.downloadLink = URL.createObjectURL(downloadResponse.data)
@@ -69,6 +70,11 @@ export default {
   margin-bottom: 10px;
   appearance: none;
   background-color: #f3f3f3;
+}
+.task-id {
+  font-size: 1.2em;
+  margin-bottom: 10px;
+  color: #df8638;
 }
 
 .progress-bar::-webkit-progress-bar {

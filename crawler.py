@@ -145,7 +145,7 @@ async def download_files(jsonl_file: str):
 
 
 def ppt_validate(presentation: Presentation):
-    if len(presentation.slides) < 8 or len(presentation.slides) > 64:
+    if len(presentation) < 8 or len(presentation) > 64:
         return False
     if len(presentation.error_history) > 5:
         return False
@@ -236,7 +236,7 @@ def prepare_ppt(filename: str, output_dir: str):
     ppt_to_images(presentation.source_file, ppt_image_folder)
 
     duplicates = prs_dedup(presentation, ppt_image_folder)
-    if len(duplicates) > len(presentation.slides) * 0.3:
+    if len(duplicates) > len(presentation) * 0.3:
         os.remove(filename)
         app_config.remove_rundir()
         return
@@ -245,7 +245,7 @@ def prepare_ppt(filename: str, output_dir: str):
         os.remove(pjoin(ppt_image_folder, f"slide_{slide.real_idx:04d}.jpg"))
     for err_idx, _ in presentation.error_history:
         os.remove(pjoin(ppt_image_folder, f"slide_{err_idx:04d}.jpg"))
-    assert len(presentation.slides) == len(
+    assert len(presentation) == len(
         [i for i in os.listdir(ppt_image_folder) if i.endswith(".jpg")]
     )
     for i, slide in enumerate(presentation.slides, 1):
