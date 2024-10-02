@@ -27,7 +27,7 @@ Example Output:
 ```python
 del_textframe("2_3")
 replace_text("1_0", "New Title")
-replace_image("1", "path/to/image.jpg")
+replace_image("1", "image.jpg")
 del_element_byid("2")
 ```
 

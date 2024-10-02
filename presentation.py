@@ -64,10 +64,11 @@ class TextFrame:
                 ]
             content = object_to_dict(paragraph, exclude=["runs"])
             content["idx"] = idx
-            idx += 1
             if len(runs) == 0:
+                content["idx"] = -1
                 data.append(content)
                 continue
+            idx += 1
             runs_fonts = {run.font: 0 for run in runs}
             for run in runs:
                 try:
@@ -612,22 +613,22 @@ class GraphicalShape(ShapeElement):
         return shape
 
 
-# class Connector(ShapeElement):
-#     @classmethod
-#     def from_shape(
-#         cls,
-#         slide_idx: int,
-#         shape_idx: int,
-#         shape: PPTXConnector,
-#         style: dict,
-#         text_frame: TextFrame,
-#         app_config: Config,
-#         slide_area: float,
-#     ):
-#         return cls(slide_idx, shape_idx, style, None, text_frame, slide_area)
+class Connector(ShapeElement):
+    @classmethod
+    def from_shape(
+        cls,
+        slide_idx: int,
+        shape_idx: int,
+        shape: PPTXConnector,
+        style: dict,
+        text_frame: TextFrame,
+        app_config: Config,
+        slide_area: float,
+    ):
+        return cls(slide_idx, shape_idx, style, None, text_frame, slide_area)
 
-#     def build(self, slide: PPTXSlide):
-#         pass
+    def build(self, slide: PPTXSlide):
+        pass
 
 
 class SlidePage:
@@ -817,6 +818,7 @@ class Presentation:
         self.num_pages = num_pages
         self.source_file = file_path
         self.prs = PPTXPre(self.source_file)
+        clear_slides(self.prs)
         self.layout_mapping = {layout.name: layout for layout in self.prs.slide_layouts}
 
     @classmethod
@@ -859,9 +861,8 @@ class Presentation:
         )
 
     def save(self, file_path, layout_only=False):
-        self.prs.core_properties.last_modified_by = "OminiPreGen"
-        self.prs.core_properties.author += "OminiPreGen with: "
-        clear_slides(self.prs)
+        self.prs.core_properties.last_modified_by = "PPTAgent"
+        self.prs.core_properties.author += "PPTAgent with "
         for slide in self.slides:
             if layout_only:
                 self.clear_images(slide.shapes)
@@ -871,6 +872,9 @@ class Presentation:
             if layout_only:
                 self.clear_text(pptx_slide.shapes)
         self.prs.save(file_path)
+
+    def build_slide(self, slide: SlidePage) -> PPTXSlide:
+        return slide.build(self.prs, self.layout_mapping[slide.slide_layout_name])
 
     def clear_images(self, shapes: list[ShapeElement]):
         for idx, shape in enumerate(shapes):
@@ -920,6 +924,7 @@ class Presentation:
         )
 
 
+# 注意这里修改了之后，就slide_cluster的index就会发生变化
 SHAPECAST: dict[int, ShapeElement] = {
     MSO_SHAPE_TYPE.AUTO_SHAPE: AutoShape,
     MSO_SHAPE_TYPE.PLACEHOLDER: Placeholder,
@@ -929,5 +934,5 @@ SHAPECAST: dict[int, ShapeElement] = {
     MSO_SHAPE_TYPE.CHART: GraphicalShape,
     MSO_SHAPE_TYPE.TABLE: GraphicalShape,
     MSO_SHAPE_TYPE.DIAGRAM: GraphicalShape,
-    # MSO_SHAPE_TYPE.LINE: Connector,
+    MSO_SHAPE_TYPE.LINE: Connector,
 }

@@ -2,7 +2,7 @@ import json
 from collections import defaultdict
 
 import json_repair
-import PIL
+import PIL.Image
 from jinja2 import Template
 
 import llms

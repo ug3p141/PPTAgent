@@ -5,7 +5,7 @@ from time import sleep, time
 
 import google.generativeai as genai
 import json_repair
-import PIL
+import PIL.Image
 import requests
 from jinja2 import Template
 from oaib import Auto
@@ -88,6 +88,7 @@ class Gemini:
             content = [content, PIL.Image.open(image_file)]
         response = self._chat.send_message(content)
         return json_repair.loads(response.text.strip())
+
 
 class OPENAI:
     def __init__(

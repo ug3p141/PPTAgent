@@ -66,18 +66,18 @@ class CodeExecutor:
             api_doc.append(f"{signature}\n\t{doc}")
         return "\n".join(api_doc)
 
-    def execute_apis(self, prompt: str, apis: str, edit_slide: SlidePage):
-        lines = apis.strip().split("\n")
+    def execute_actions(self, prompt: str, actions: str, edit_slide: SlidePage):
+        api_calls = actions.strip().split("\n")
         err_time = 0
         line_idx = 0
         code_start = False
         found_code = False
         backup_state = deepcopy(edit_slide)
         self.api_history.append(
-            [HistoryMark.API_CALL_ERROR, edit_slide.slide_idx, prompt, apis]
+            [HistoryMark.API_CALL_ERROR, edit_slide.slide_idx, prompt, actions]
         )
-        while line_idx < len(lines):
-            line = lines[line_idx]
+        while line_idx < len(api_calls):
+            line = api_calls[line_idx]
             line_idx += 1
 
             if line == "```python":
@@ -93,7 +93,7 @@ class CodeExecutor:
             try:
                 func = line.split("(")[0]
                 if func.startswith("def"):
-                    raise ValueError("The function definition should not be called.")
+                    raise ValueError("The function definition should not be output.")
                 if func not in self.local_vars:
                     raise ValueError(f"The function {func} is not defined.")
                 partial_func = partial(self.local_vars[func], edit_slide)
@@ -101,29 +101,27 @@ class CodeExecutor:
                 self.code_history[-1][0] = HistoryMark.CODE_RUN_CORRECT
             except:
                 err_time += 1
+                trace_msg = traceback.format_exc()
+                self.code_history[-1][-1] = trace_msg
                 if err_time > self.retry_times:
                     break
-                trace_msg = traceback.format_exc()
-                trace_spliter = trace_msg.find("in <module>\n ")
-                if trace_spliter == -1:
-                    print("No trace spliter found in the error message.")
-                    exit(-1)
-                error_message = trace_msg[trace_spliter + len("in <module>\n ") :]
-                self.code_history[-1][-1] = error_message
                 api_lines = (
-                    "\n".join(lines[: line_idx - 1])
+                    "\n".join(api_calls[: line_idx - 1])
                     + f"\n--> Error Line: {line}\n"
-                    + "\n".join(lines[line_idx:])
+                    + "\n".join(api_calls[line_idx:])
                 )
                 edit_slide = deepcopy(backup_state)
                 prompt = self.correct_template.render(
                     previous_task_prompt=prompt,
-                    error_message=error_message,
+                    error_message=trace_msg,
                     faulty_api_sequence=api_lines,
                 )
-                lines = llms.agent_model(prompt).strip().split("\n")
+                actions = llms.agent_model(prompt)
+                api_calls = actions.strip().split("\n")
                 line_idx = 0
-                self.api_history.append([HistoryMark.API_CALL_ERROR, prompt, apis])
+                self.api_history.append(
+                    [HistoryMark.API_CALL_ERROR, edit_slide.slide_idx, prompt, actions]
+                )
         if not found_code:
             self.api_history[-1][0] = HistoryMark.API_CALL_ERROR
             raise ValueError("No code block found in the api call.")
@@ -132,10 +130,6 @@ class CodeExecutor:
             raise ValueError("The api call failed too many times.")
         else:
             self.api_history[-1][0] = HistoryMark.API_CALL_CORRECT
-
-    def reset(self):
-        self.api_history = []
-        self.code_history = []
 
 
 def runs_merge(paragraph: _Paragraph):
@@ -158,13 +152,14 @@ def runs_merge(paragraph: _Paragraph):
 
 def get_textframe(slide: SlidePage, textframe_id: str):
     if "_" not in textframe_id:
-        raise ValueError("The element_id of a text element should contain a `_`")
+        raise ValueError("The textframe ID should contain a `_`")
     element_id, text_id = textframe_id.split("_")
     element_id, text_id = int(element_id), int(text_id)
     shape = slide.shapes[element_id]
-    if not shape.text_frame.is_textframe or text_id >= len(shape.text_frame.data):
-        raise ValueError(f"Incorrect textframe ID: {textframe_id}.")
-    return shape, text_id
+    for para in shape.text_frame.data:
+        if para["idx"] == text_id:
+            return shape, para
+    raise ValueError(f"Incorrect textframe ID: {textframe_id}.")
 
 
 def del_para(text: str, text_shape: BaseShape):
@@ -177,6 +172,7 @@ def del_para(text: str, text_shape: BaseShape):
     raise ValueError(f"Incorrect shape: {text_shape}.")
 
 
+# 这里有问题，因为可能遇到重复的文本，以后需要用id来区分(reverse一下)
 def replace_para(orig_text: str, new_text: str, text_shape: BaseShape):
     for para in text_shape.text_frame.paragraphs:
         if para.text == orig_text:
@@ -188,27 +184,22 @@ def replace_para(orig_text: str, new_text: str, text_shape: BaseShape):
 
 def del_textframe(slide: SlidePage, textframe_id: str):
     """Delete the textframe with the given id."""
-    shape, text_id = get_textframe(slide, textframe_id)
+    shape, para = get_textframe(slide, textframe_id)
     if textframe_id in shape.closures:
         raise ValueError(
             f"The textframe {textframe_id} has been edited, your should not delete it."
         )
-    shape.closures[textframe_id] = partial(
-        del_para, shape.text_frame.data[text_id]["text"]
-    )
+    shape.closures[textframe_id] = partial(del_para, para["text"])
 
 
 def replace_text(slide: SlidePage, textframe_id: str, text: str):
     """Replace the text of the textframe with the given id."""
-    shape, text_id = get_textframe(slide, textframe_id)
-
+    shape, para = get_textframe(slide, textframe_id)
     if textframe_id in shape.closures:
         raise ValueError(
             f"The textframe {textframe_id} has been edited, your should not edit it again."
         )
-    shape.closures[textframe_id] = partial(
-        replace_para, shape.text_frame.data[text_id]["text"], text
-    )
+    shape.closures[textframe_id] = partial(replace_para, para["text"], text)
 
 
 def set_font_style(
@@ -225,14 +216,15 @@ def set_font_style(
     Example:
     >>> set_font_style("1_1", bold=True, font_size=24, font_color="FF0000")
     """
-    shape, text_id = get_textframe(slide, textframe_id)
+    shape, para = get_textframe(slide, textframe_id)
+    paratext = para["text"]
 
     def set_font(text_shape: BaseShape):
         find = False
         if not text_shape.has_text_frame:
             raise ValueError(f"The element is not a text frame: {textframe_id}.")
         for para in shape.text_frame.paragraphs:
-            if para.text == shape.text_frame.data[text_id]["text"]:
+            if para.text == paratext:
                 find = True
                 break
         if not find:
@@ -315,7 +307,6 @@ def del_element_byid(slide: SlidePage, element_id: str):
                 raise ValueError(
                     f"The element {element_id} has been edited, your should not delete it."
                 )
-            shape.closures[f"{element_id}_{i}"] = lambda x: None
     if element_id in shape.closures:
         raise ValueError(
             f"The element {element_id} has been deleted, your should not delete it again."
@@ -324,9 +315,8 @@ def del_element_byid(slide: SlidePage, element_id: str):
 
 
 class API_TYPES(Enum):
-    TUNING = "style adjust"
-    TEXT_EDITING = "text editing"
-    IMAGE_EDITING = "image editing"
+    PPTAgent = "pptagent"
+    PPTCrew = "pptcrew"
 
     @classmethod
     def all_types(cls):
@@ -336,11 +326,15 @@ class API_TYPES(Enum):
 def get_code_executor(retry_times: int = 1):
     return CodeExecutor(
         {
-            API_TYPES.TEXT_EDITING: [
+            API_TYPES.PPTAgent: [
                 replace_text,
                 del_textframe,
+                replace_image,
+                del_element_byid,
             ],
-            API_TYPES.IMAGE_EDITING: [
+            API_TYPES.PPTCrew: [
+                replace_text,
+                del_textframe,
                 replace_image,
                 del_element_byid,
             ],

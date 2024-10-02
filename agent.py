@@ -4,7 +4,7 @@ from datetime import datetime
 import traceback
 
 import json_repair
-import PIL
+import PIL.Image
 import jsonlines
 import torch
 from jinja2 import Template
@@ -52,13 +52,11 @@ class PPTAgent:
 
         self.outline_file = pjoin(config.RUN_DIR, "presentation_outline.json")
 
-    def work(self, retry_times: int = 1):
+    def work(self, retry_times: int = 1, force_pages: bool = True):
         if pexists(self.outline_file):
             self.outline = json.load(open(self.outline_file, "r"))
         else:
             self.outline = json_repair.loads(self.generate_outline())
-            if "slides" in self.outline:
-                self.outline = self.outline["slides"]
             json.dump(
                 self.outline, open(self.outline_file, "w"), ensure_ascii=False, indent=4
             )
@@ -72,13 +70,15 @@ class PPTAgent:
                 for slide_idx, slide_title in enumerate(self.outline)
             ]
         )
-        self.generate_slides(retry_times)
+        self.generate_slides(retry_times, force_pages)
 
-    def generate_slides(self, retry_times: int):
+    def generate_slides(self, retry_times: int, force_pages: bool):
         succ_flag = True
         code_executor = get_code_executor(retry_times)
         self.gen_prs.slides = []
         for slide_data in enumerate(self.outline.items()):
+            if force_pages and slide_data[0] == self.num_slides:
+                break
             try:
                 self.gen_prs.slides.append(
                     self._generate_slide(slide_data, code_executor)
@@ -101,7 +101,7 @@ class PPTAgent:
         else:
             raise Exception("Failed to generate slide")
 
-    def _generate_slide(self, slide_data, code_executor: CodeExecutor) -> SlidePage:
+    def _generate_slide(self, slide_data, code_executor: CodeExecutor):
         slide_idx, (slide_title, slide) = slide_data
         images = "No Images"
         if slide["layout"] not in self.layout_names:
@@ -127,23 +127,21 @@ class PPTAgent:
             )
             - 1
         )
-        edit_slide = deepcopy(self.presentation.slides[template_id])
-        edit_slide.slide_idx = slide_idx
+        edit_slide: SlidePage = deepcopy(self.presentation.slides[template_id])
         edit_prompt = self.edit_template.render(
-            api_documentation=code_executor.get_apis_docs(
-                [API_TYPES.TEXT_EDITING, API_TYPES.IMAGE_EDITING]
-            ),
+            api_documentation=code_executor.get_apis_docs([API_TYPES.PPTAgent]),
             edit_target=edit_slide.to_html(),
             content=self.simple_outline + self.metadata + slide_content,
             images=images,
         )
-        code_executor.execute_apis(
+        code_executor.execute_actions(
             edit_prompt,
-            apis=llms.agent_model(
+            actions=llms.agent_model(
                 edit_prompt,
             ),
             edit_slide=edit_slide,
         )
+        edit_slide.slide_idx = slide_idx
         return edit_slide
 
     def generate_outline(self):

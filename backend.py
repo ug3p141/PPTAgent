@@ -1,5 +1,5 @@
+# TODO 改成多页同时生成，生成成功的页面都发回去，不成功的就不要了
 import asyncio
-from datetime import datetime
 import hashlib
 import io
 import json
@@ -7,26 +7,20 @@ import os
 import time
 import traceback
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from datetime import datetime
 from glob import glob
 from typing import Dict, List
-from concurrent.futures import ThreadPoolExecutor
 
-import PIL
+import PIL.Image
 import PyPDF2
 import torch
-from fastapi import (
-    FastAPI,
-    File,
-    Form,
-    HTTPException,
-    UploadFile,
-    WebSocket,
-    WebSocketDisconnect,
-)
+from fastapi import (FastAPI, File, Form, HTTPException, UploadFile, WebSocket,
+                     WebSocketDisconnect)
 from fastapi.logger import logger
-from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from FlagEmbedding import BGEM3FlagModel
 
 import llms
@@ -35,7 +29,8 @@ from model_utils import get_text_embedding, prs_dedup
 from multimodal import ImageLabler
 from presentation import Presentation
 from template_induct import TemplateInducter
-from utils import IMAGE_EXTENSIONS, Config, parse_pdf, pjoin, ppt_to_images, print
+from utils import (IMAGE_EXTENSIONS, Config, parse_pdf, pjoin, ppt_to_images,
+                   print)
 
 RUNS_DIR = "runs"
 STAGES = [
@@ -233,28 +228,32 @@ def ppt_gen(task_id: str):
             pjoin(generation_config.RUN_DIR, "source.pptx"),
             pptx_config,
         )
-        if len(presentation) < 6:
+        if len(presentation) < 5:
             asyncio.run(
                 send_progress(
                     active_connections[task_id],
-                    "PPT Parsing Error: too short, you should upload a normal presentation",
+                    "PPT Parsing Error: too short, you should upload a normal presentation(>5)",
                     100,
                 )
             )
         if len(glob(parsedpdf_dir + "/source/*.md")) == 0:
-            if len(PyPDF2.PdfReader(io.BytesIO(pdf_content)).pages)>20:
-                raise Exception("PDF Parsing Error: too long, you should upload a short PDF")
+            if len(PyPDF2.PdfReader(io.BytesIO(pdf_content)).pages) > 20:
+                raise Exception(
+                    "PDF Parsing Error: too long, you should upload a short PDF"
+                )
             progress.run_stage(
                 parse_pdf,
                 pjoin(generation_config.RUN_DIR, "source.pdf"),
                 parsedpdf_dir,
-                "http://192.168.14.11:11223/convert",
+                "http://192.168.14.17:11223/convert",
             )
         else:
             progress.report_progress()
         text_content = open(glob(parsedpdf_dir + "/source/*.md")[0]).read()
         if len(text_content) > 10_000:
-            raise Exception("PDF Parsing Error: too long, you should upload a short PDF")
+            raise Exception(
+                "PDF Parsing Error: too long, you should upload a short PDF"
+            )
         doc_json = progress.run_stage(llms.get_refined_doc, text_content)
         json.dump(
             doc_json, open(pjoin(generation_config.RUN_DIR, "refined_doc.json"), "w")
@@ -343,4 +342,5 @@ def ppt_gen(task_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="124.16.138.150", port=9297)
+
+    uvicorn.run(app, host="192.168.14.17", port=9297)
