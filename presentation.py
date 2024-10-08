@@ -1,3 +1,4 @@
+import hashlib
 from pptx import Presentation as PPTXPre
 from pptx.chart.chart import Chart as PPTXChart
 from pptx.dml.color import RGBColor
@@ -19,7 +20,6 @@ from utils import (
     IMAGE_EXTENSIONS,
     Config,
     apply_fill,
-    clear_slides,
     dict_to_object,
     extract_fill,
     get_text_inlinestyle,
@@ -27,6 +27,7 @@ from utils import (
     object_to_dict,
     parse_groupshape,
     pjoin,
+    pexists,
 )
 
 HASH_IMAGE = dict()
@@ -409,8 +410,14 @@ class Picture(ShapeElement):
                 f"{slide_idx}_{shape.name}.{shape.image.ext}",
             )
             HASH_IMAGE[img_hash] = img_path
-            with open(img_path, "wb") as f:
-                f.write(shape.image.blob)
+            if pexists(img_path):
+                with open(img_path,'rb') as f:
+                    assert (
+                        hashlib.sha1(f.read()).hexdigest() == img_hash
+                    ), f"Image {img_path} hash mismatch with existed file"
+            else:
+                with open(img_path, "wb") as f:
+                    f.write(shape.image.blob)
         style["img_style"] = {
             "crop_bottom": shape.crop_bottom,
             "crop_top": shape.crop_top,
@@ -694,8 +701,7 @@ class SlidePage:
             slide_height,
         )
 
-    def build(self, prs: PPTXPre, slide_layout):
-        slide: PPTXSlide = prs.slides.add_slide(slide_layout)
+    def build(self, slide: PPTXSlide):
         for ph in slide.placeholders:
             ph.element.getparent().remove(ph.element)
 
@@ -703,11 +709,9 @@ class SlidePage:
             if isinstance(shape, (Picture, GroupShape)):
                 shape.build(slide)
             else:
-                shape_count = len(slide.shapes)
                 slide.shapes._spTree.insert_element_before(
                     parse_xml(shape.xml), "p:extLst"
                 )
-                assert len(slide.shapes) == shape_count + 1
             for closure in shape.closures.values():
                 closure(slide.shapes[-1])
         return slide
@@ -818,8 +822,8 @@ class Presentation:
         self.num_pages = num_pages
         self.source_file = file_path
         self.prs = PPTXPre(self.source_file)
-        clear_slides(self.prs)
         self.layout_mapping = {layout.name: layout for layout in self.prs.slide_layouts}
+        self.prs.core_properties.last_modified_by = "PPTAgent"
 
     @classmethod
     def from_file(cls, file_path: str, app_config: Config):
@@ -861,20 +865,25 @@ class Presentation:
         )
 
     def save(self, file_path, layout_only=False):
-        self.prs.core_properties.last_modified_by = "PPTAgent"
-        self.prs.core_properties.author += "PPTAgent with "
+        self.clear_slides()
         for slide in self.slides:
             if layout_only:
                 self.clear_images(slide.shapes)
-            pptx_slide = slide.build(
-                self.prs, self.layout_mapping[slide.slide_layout_name]
-            )
+            pptx_slide = self.build_slide(slide)
             if layout_only:
                 self.clear_text(pptx_slide.shapes)
         self.prs.save(file_path)
 
     def build_slide(self, slide: SlidePage) -> PPTXSlide:
-        return slide.build(self.prs, self.layout_mapping[slide.slide_layout_name])
+        return slide.build(
+            self.prs.slides.add_slide(self.layout_mapping[slide.slide_layout_name])
+        )
+
+    def clear_slides(self):
+        while len(self.prs.slides) != 0:
+            rId = self.prs.slides._sldIdLst[0].rId
+            self.prs.part.drop_rel(rId)
+            del self.prs.slides._sldIdLst[0]
 
     def clear_images(self, shapes: list[ShapeElement]):
         for idx, shape in enumerate(shapes):

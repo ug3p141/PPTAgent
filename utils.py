@@ -54,12 +54,6 @@ def parse_pdf(file: str, output_dir: str, api: str):
         shutil.unpack_archive(temp_zip.name, output_dir)
 
 
-def clear_slides(prs: PPTXPre):
-    while len(prs.slides) != 0:
-        rId = prs.slides._sldIdLst[0].rId
-        prs.part.drop_rel(rId)
-        del prs.slides._sldIdLst[0]
-
 
 def ppt_to_images(file: str, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)

@@ -169,7 +169,7 @@ def prepare_pdf(filename: str, output_dir: str):
     if num_pages < 3 or num_pages > 30:
         os.remove(filename)
         return
-    parse_pdf(filename, output_dir, "http://192.168.14.11:11223/convert")
+    parse_pdf(filename, output_dir, "http://192.168.14.17:11223/convert")
     os.remove(filename)
 
 

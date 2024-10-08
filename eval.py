@@ -37,9 +37,9 @@ eval_models = [
 ]
 
 
-def get_setting(model_id: int, ablation_id="x"):
+def get_setting(model_id: int, ablation_id=None):
     ablations = ["code", "layout", "feedback"]
-    if isinstance(ablation_id, int):
+    if isinstance(ablation_id, int) and ablation_id != -1:
         if model_id != 0:
             raise Exception("model_id must be 0 when ablation_id is int")
         return ablations[ablation_id]
@@ -174,7 +174,7 @@ def do_generate(
 # qwen w/o code_render
 # qwen w/o html
 # qwen w/o layout
-def generate_pres(model_id: int, thread_num: int, ablation_id: int = None):
+def generate_pres(model_id: int, thread_num: int = 16, ablation_id: int = None):
 
     retry_times = 1
     ablation_agents = [PPTAgentPPTC, PPTAgentRandom, PPTAgent]
@@ -217,6 +217,7 @@ def generate_pres(model_id: int, thread_num: int, ablation_id: int = None):
             )
         progressbar.close()
 
+
 # 这里的fid计算有问题，应该只把作为layout的拿出来计算，不然不公平
 def get_fid(model_id: int, ablation_id: int = "x"):
     setting = get_setting(model_id, ablation_id)
@@ -249,14 +250,14 @@ def get_gscore(slide_content, slide_ref):
 
 
 # 成功率也做个分析吧
-def eval_experiment(model_id: int, ablation_id: int = "x"):
+def eval_experiment(model_id: int, ablation_id: int = None):
     setting = get_setting(model_id, ablation_id)
     stat = json.load(open("data/stat.json"))
     # ppt_stat = stat["ppt"]
     pdf_stat = stat["pdf"]
     pdf_stat = {k.split("/")[-1].rsplit(".", 1)[0]: v for k, v in pdf_stat.items()}
     # stat_succ_by_len = list()
-    gscore = []
+    # gscore = []
     success_all = 0
     fidelity = 0
     for ppt_folder in glob(f"data/topic/*/pptx/*"):
@@ -278,43 +279,43 @@ def eval_experiment(model_id: int, ablation_id: int = "x"):
                 print("cannot find outline for", setting, pdf_input)
                 continue
 
-            if not pexists(pjoin(work_dir, pdf_input, "agent_steps.json")):
-                continue
-            steps = json.load(open(pjoin(work_dir, pdf_input, "agent_steps.json")))
+            # ? notion: json or jsonl
+            output_file = glob(pjoin(work_dir, pdf_input, "agent_steps.json*"))
+            if len(output_file) != 1:
+                print("Error: ", output_file)
+                exit(-1)
             # stat_succ_by_len.append([ppt_stat[ppt_folder], pdf_stat[pdf_input],0])
             if not pexists(pjoin(work_dir, pdf_input, "final.pptx")):
                 continue
             success_all += 1
+            if output_file[0].endswith("jsonl"):
+                steps = jsonlines.Reader(open(output_file[0]))
+            else:
+                steps = json.load(open(output_file[0]))
             # stat_succ_by_len[-1][2] = 1
             final_presentation = Presentation.from_file(
                 pjoin(work_dir, pdf_input, "final.pptx"), app_config
             )
             doc_json = json.load(
                 open(
-                    pjoin(
-                        "data/topic/",
-                        topic,
-                        "pdf",
-                        pdf_input,
-                        "refined_doc.json",
-                    )
+                    f"data/topic/{topic}/pdf/{pdf_input}/refined_doc.json",
                 )
             )
             for slide_idx, (step, (slide_title, slide)) in enumerate(
                 zip(steps, outline.items())
             ):
 
-                if step[0] not in original_textembeds:
-                    original_textembeds[step[0]] = get_text_embedding(
-                        source_presentation.slides[step[0] - 1].to_text()
+                if step[1] not in original_textembeds:
+                    original_textembeds[step[1]] = get_text_embedding(
+                        source_presentation.slides[step[1] - 1].to_text()
                     )
                 slide_content = get_slide_content(doc_json, slide_title, slide)
-                if not len(gscore) > 500:
-                    for i in final_presentation.slides:
-                        try:
-                            gscore.append(get_gscore(i.to_text(), slide_content))
-                        except:
-                            pass
+                # if not len(gscore) > 500:
+                #     for i in final_presentation.slides:
+                #         try:
+                #             gscore.append(get_gscore(i.to_text(), slide_content))
+                #         except:
+                #             pass
 
                 slide_embedding = get_text_embedding(
                     final_presentation.slides[slide_idx].to_text()
@@ -326,12 +327,12 @@ def eval_experiment(model_id: int, ablation_id: int = "x"):
                 ).item() / len(final_presentation.slides)
     # json.dump(stat_succ_by_len, open(f"data/stat_succ_by_len_{model}.json", "w"), indent=4)
     print(
-        "%s success_all: %d, similarity_source: %f, geval %f"
+        "%s success_all: %d, similarity_source: %f"  # , geval %f"
         % (
             setting,
             success_all,
             fidelity / success_all,
-            sum(gscore) / len(gscore),
+            # sum(gscore) / len(gscore),
         )
     )
 
@@ -393,7 +394,7 @@ def postprocess_final_pptx():
     process_filetype("pptx", ppt2images)
 
 
-def error_analysis(model_id: int, ablation_id: int = "x"):
+def error_analysis(model_id: int, ablation_id: int = None):
     setting = get_setting(model_id, ablation_id)
     error_stats = defaultdict(int)
     num_errors = 0
@@ -435,5 +436,5 @@ if __name__ == "__main__":
         eval_experiment,
         postprocess_final_pptx,
         get_fid,
-        error_analysis
+        error_analysis,
     )

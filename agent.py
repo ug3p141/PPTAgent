@@ -13,7 +13,7 @@ import llms
 from apis import CodeExecutor, get_code_executor, API_TYPES
 from model_utils import get_text_embedding
 from presentation import Presentation, SlidePage
-from utils import Config, clear_slides, pexists, pjoin, print
+from utils import Config, pexists, pjoin, print
 
 
 class PPTAgent:

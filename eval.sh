@@ -3,10 +3,10 @@
 python eval.py dataset_stat
 # 定义所有要运行的组合
 combinations=(
-    "0 x"
-    "1 x"
-    "2 x"
-    "3 x"
+    "0 -1"
+    "1 -1"
+    "2 -1"
+    "3 -1"
     "0 0"
     "0 1"
     "0 2"

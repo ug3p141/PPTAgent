@@ -44,7 +44,7 @@ class TemplateInducter:
                 ),
                 category_cluster["categories"],
             )
-        elif "Uncategorized" in category_cluster["categories"]:
+        elif "Uncategorized" in category_cluster.get("categories",[]):
             content_slides_index, functional_cluster = (
                 set(category_cluster["categories"].pop("Uncategorized")),
                 category_cluster["categories"],
