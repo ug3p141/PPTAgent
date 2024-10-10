@@ -1,6 +1,7 @@
 from collections import defaultdict
 import json
 import os
+import random
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -25,7 +26,7 @@ from model_utils import get_text_embedding
 from multimodal import ImageLabler
 from presentation import Presentation
 from template_induct import TemplateInducter
-from utils import Config, app_config, filename_normalize, pexists, pjoin, ppt_to_images
+from utils import Config, filename_normalize, pexists, pjoin, ppt_to_images
 from FlagEmbedding import BGEM3FlagModel
 
 fid.tqdm = lambda x: x
@@ -45,7 +46,7 @@ def get_setting(model_id: int, ablation_id=None):
         return ablations[ablation_id]
     llm, layout_llm = eval_models[model_id]
     if llm != layout_llm:
-        setting = f"{llm.model}+{layout_llm.model}"
+        setting = f"{llm.model}_{layout_llm.model}"
     else:
         setting = llm.model
     return setting
@@ -62,10 +63,11 @@ def walk_data(file_type: str, topic: str):
 def prepare_template():
     def gen_template(llm: llms.OPENAI, ppt_folder: str):
         ppt_image_folder = pjoin(ppt_folder, "slide_images")
+        config = Config()
         with TemporaryDirectory() as temp_dir:
-            app_config.set_rundir(temp_dir)
+            config.set_rundir(temp_dir)
             presentation = Presentation.from_file(
-                pjoin(ppt_folder, "source_standard.pptx")
+                pjoin(ppt_folder, "source_standard.pptx"), config
             )
         template_image_folder = pjoin(ppt_folder, "template_images")
         llms.long_model = llm
@@ -77,11 +79,11 @@ def prepare_template():
             shutil.rmtree(template_image_folder)
             presentation.save(pjoin(ppt_folder, "template.pptx"), True)
             ppt_to_images(pjoin(ppt_folder, "template.pptx"), template_image_folder)
-        app_config.set_rundir(pjoin(ppt_folder, llm.model))
+        config.set_rundir(pjoin(ppt_folder, llm.model))
         if not pexists(ppt_image_folder):
             raise Exception(f"ppt_image_folder not found: {ppt_image_folder}")
         template_inducter = TemplateInducter(
-            presentation, ppt_image_folder, template_image_folder
+            presentation, ppt_image_folder, template_image_folder, config
         )
         if not pexists(template_inducter.slide_split_file):
             template_inducter.category_split()
@@ -95,13 +97,24 @@ def prepare_template():
 
 def prepare_caption():
     def caption(ppt_folder: str):
-        app_config.set_rundir(ppt_folder)
-        presentation = Presentation.from_file(pjoin(ppt_folder, "source_standard.pptx"))
-        labler = ImageLabler(presentation)
+        config = Config()
+        config.set_rundir(ppt_folder)
+        presentation = Presentation.from_file(
+            pjoin(ppt_folder, "source_standard.pptx"), config
+        )
+        labler = ImageLabler(presentation, config)
         labler.caption_images()
         labler.apply_stats()
 
     process_filetype("pptx", caption)
+
+
+def get_text_models(thread_num: int):
+    text_models = [
+        BGEM3FlagModel("BAAI/bge-m3", use_fp16=True, device=i)
+        for i in range(min(torch.cuda.device_count(), thread_num))
+    ]
+    return text_models
 
 
 def do_generate(
@@ -131,7 +144,7 @@ def do_generate(
         slide_cluster,
     )
     layout_embeddings = torch.stack(
-        get_text_embedding(list(slide_cluster.keys()), 32, text_model)
+        get_text_embedding(list(slide_cluster.keys()), text_model)
     )
     for pdf_folder in pdf_folders:
         app_config.set_rundir(pjoin(ppt_folder, setting, os.path.basename(pdf_folder)))
@@ -175,14 +188,10 @@ def do_generate(
 # qwen w/o html
 # qwen w/o layout
 def generate_pres(model_id: int, thread_num: int = 16, ablation_id: int = None):
-
     retry_times = 1
     ablation_agents = [PPTAgentPPTC, PPTAgentRandom, PPTAgent]
     agentclass = PPTAgent
-    text_models = [
-        BGEM3FlagModel("BAAI/bge-m3", use_fp16=True, device=i)
-        for i in range(min(torch.cuda.device_count(), thread_num))
-    ]
+    text_models = get_text_models(thread_num)
     llm, layout_llm = eval_models[model_id]
     llms.agent_model = llm
     setting = get_setting(model_id, ablation_id)
@@ -208,9 +217,6 @@ def generate_pres(model_id: int, thread_num: int = 16, ablation_id: int = None):
             setting,
             retry_times,
         )
-        if thread_num == 1:
-            for ppt_folder in ppt_folders:
-                generate((0, ppt_folder))
         with ThreadPoolExecutor(thread_num) as executor:
             list(
                 executor.map(generate, enumerate(ppt_folders)),
@@ -218,53 +224,78 @@ def generate_pres(model_id: int, thread_num: int = 16, ablation_id: int = None):
         progressbar.close()
 
 
-# 这里的fid计算有问题，应该只把作为layout的拿出来计算，不然不公平
-def get_fid(model_id: int, ablation_id: int = "x"):
+# 把所以setting的都拿出来算一遍，还有dims
+def get_fid(model_id: int, ablation_id: int = -1):
     setting = get_setting(model_id, ablation_id)
-    fid_scores = []
-    for ppt_folder in glob(f"data/topic/*/pptx/*"):
-        source_folder = pjoin(ppt_folder, "slide_images")
-        with tempfile.TemporaryDirectory() as temp_dir:
-            for result_folder in glob(pjoin(ppt_folder, f"final_images/{setting}/*")):
-                pdf = result_folder.split("/")[-1]
-                for image in os.listdir(result_folder):
-                    shutil.copy(
-                        pjoin(result_folder, image),
-                        pjoin(temp_dir, f"{pdf}_{image}"),
-                    )
-            if len(os.listdir(temp_dir)) == 0:
-                continue
-            fid_scores.append(
-                fid.calculate_fid_given_paths(
-                    [source_folder, temp_dir], 128, "cuda:0", 64
-                )
+    device = f"cuda:{random.randint(0,torch.cuda.device_count()-1)}"
+    print("calc fid for", setting, "on device:", device)
+    results = defaultdict(dict)
+    for dim in [64, 192, 768, 2048]:
+        model = fid.InceptionV3([fid.InceptionV3.BLOCK_INDEX_BY_DIM[dim]]).to(device)
+        fid_scores = []
+
+        def calc_fid(ppt_folder: str):
+            source_folder = pjoin(ppt_folder, "slide_images")
+            m1, s1 = fid.compute_statistics_of_path(
+                source_folder, model, 128, dim, device
             )
-    print(setting, sum(fid_scores) / len(fid_scores))
+            for result_folder in glob(pjoin(ppt_folder, f"final_images/{setting}/*")):
+                if len(os.listdir(result_folder)) == 0:
+                    continue
+                m2, s2 = fid.compute_statistics_of_path(
+                    result_folder, model, 128, dim, device
+                )
+                fid_scores.append(fid.calculate_frechet_distance(m1, s1, m2, s2))
+
+        process_filetype("pptx", calc_fid)
+        results[setting][dim] = sum(fid_scores) / len(fid_scores)
+    json.dump(results, open(f"data/fid_{setting}.json", "w"), indent=4)
 
 
 def get_gscore(slide_content, slide_ref):
     prompt = Template(open("prompts/llm_judge.txt").read())
-    return int(
-        llms.gpt4o(prompt.render(slide_content=slide_content, slide_ref=slide_ref))
+    return llms.gpt4o(
+        prompt.render(slide_content=slide_content, slide_ref=slide_ref),
+        delay_batch=True,
     )
 
 
 # 成功率也做个分析吧
-def eval_experiment(model_id: int, ablation_id: int = None):
-    setting = get_setting(model_id, ablation_id)
+def eval_experiment(
+    model_id: int = 0,
+    ablation_id: int = None,
+    setting: str = None,
+    geval: bool = False,
+    succ_stat: bool = False,
+    thread_num: int = 10,
+    refer_idx: int = 1,
+):
+    setting = setting or get_setting(model_id, ablation_id)
     stat = json.load(open("data/stat.json"))
-    # ppt_stat = stat["ppt"]
+    ppt_stat = stat["ppt"]
     pdf_stat = stat["pdf"]
     pdf_stat = {k.split("/")[-1].rsplit(".", 1)[0]: v for k, v in pdf_stat.items()}
-    # stat_succ_by_len = list()
-    # gscore = []
+    stat_succ_by_len = list()
     success_all = 0
     fidelity = 0
-    for ppt_folder in glob(f"data/topic/*/pptx/*"):
+    source_config = Config()
+    final_config = Config()
+
+    if geval != -1:
+        thread_num = 1
+    text_models = get_text_models(thread_num)
+    ppt_folders = glob(f"data/topic/*/pptx/*")
+    pbar = tqdm(total=len(ppt_folders), desc="Evaluating")
+
+    def eval_ppt(ppt_folder: str, rank_id: int):
+        nonlocal success_all, fidelity
+        text_model = text_models[rank_id % len(text_models)]
+        source_config.set_rundir(ppt_folder)
         source_presentation = Presentation.from_file(
-            pjoin(ppt_folder, "source_standard.pptx"), app_config
+            pjoin(ppt_folder, "source_standard.pptx"), source_config
         )
         original_textembeds = {}
+        sub_fidelity = []
         topic = ppt_folder.split("/")[-3]
         work_dir = pjoin(ppt_folder, setting)
         for pdf_input in os.listdir(work_dir):
@@ -279,12 +310,11 @@ def eval_experiment(model_id: int, ablation_id: int = None):
                 print("cannot find outline for", setting, pdf_input)
                 continue
 
-            # ? notion: json or jsonl
             output_file = glob(pjoin(work_dir, pdf_input, "agent_steps.json*"))
+            if succ_stat:
+                stat_succ_by_len.append([ppt_stat[ppt_folder], pdf_stat[pdf_input], 0])
             if len(output_file) != 1:
-                print("Error: ", output_file)
-                exit(-1)
-            # stat_succ_by_len.append([ppt_stat[ppt_folder], pdf_stat[pdf_input],0])
+                continue
             if not pexists(pjoin(work_dir, pdf_input, "final.pptx")):
                 continue
             success_all += 1
@@ -292,9 +322,11 @@ def eval_experiment(model_id: int, ablation_id: int = None):
                 steps = jsonlines.Reader(open(output_file[0]))
             else:
                 steps = json.load(open(output_file[0]))
-            # stat_succ_by_len[-1][2] = 1
+            if succ_stat:
+                stat_succ_by_len[-1][2] = 1
+            final_config.set_rundir(pjoin(work_dir, pdf_input))
             final_presentation = Presentation.from_file(
-                pjoin(work_dir, pdf_input, "final.pptx"), app_config
+                pjoin(work_dir, pdf_input, "final.pptx"), final_config
             )
             doc_json = json.load(
                 open(
@@ -304,37 +336,54 @@ def eval_experiment(model_id: int, ablation_id: int = None):
             for slide_idx, (step, (slide_title, slide)) in enumerate(
                 zip(steps, outline.items())
             ):
-
-                if step[1] not in original_textembeds:
-                    original_textembeds[step[1]] = get_text_embedding(
-                        source_presentation.slides[step[1] - 1].to_text()
+                if slide_idx == len(final_presentation.slides):
+                    break
+                assert isinstance(step[refer_idx], int)
+                if step[refer_idx] not in original_textembeds:
+                    original_textembeds[step[refer_idx]] = get_text_embedding(
+                        source_presentation.slides[step[refer_idx] - 1].to_text(),
+                        text_model,
                     )
                 slide_content = get_slide_content(doc_json, slide_title, slide)
-                # if not len(gscore) > 500:
-                #     for i in final_presentation.slides:
-                #         try:
-                #             gscore.append(get_gscore(i.to_text(), slide_content))
-                #         except:
-                #             pass
-
                 slide_embedding = get_text_embedding(
-                    final_presentation.slides[slide_idx].to_text()
+                    final_presentation.slides[slide_idx].to_text(),
+                    text_model,
                 )
-                fidelity += torch.cosine_similarity(
-                    get_text_embedding(slide_content),
+                similarity = torch.cosine_similarity(
+                    get_text_embedding(slide_content, text_model),
                     slide_embedding,
                     -1,
-                ).item() / len(final_presentation.slides)
-    # json.dump(stat_succ_by_len, open(f"data/stat_succ_by_len_{model}.json", "w"), indent=4)
-    print(
-        "%s success_all: %d, similarity_source: %f"  # , geval %f"
-        % (
-            setting,
-            success_all,
-            fidelity / success_all,
-            # sum(gscore) / len(gscore),
+                ).item()
+                sub_fidelity.append(similarity)
+                if not geval:
+                    continue
+                for i in final_presentation.slides:
+                    get_gscore(i.to_text(), slide_content)
+        if len(sub_fidelity) > 0:
+            fidelity += sum(sub_fidelity) / len(sub_fidelity)
+        pbar.update(1)
+
+    with ThreadPoolExecutor(thread_num) as executor:
+        list(executor.map(eval_ppt, ppt_folders, range(len(ppt_folders))))
+
+    pbar.close()
+    result = {"success": success_all, "fidelity": fidelity / len(ppt_folders)}
+    if geval:
+        gscore = []
+        for result in llms.gpt4o.get_batch_result():
+            try:
+                gscore.append(int(result))
+            except:
+                pass
+        result["gscore"] = sum(gscore) / len(gscore)
+    print(json.dumps(result, indent=4))
+    json.dump(result, open(f"data/result_{setting}.json", "w"), indent=4)
+    if succ_stat:
+        json.dump(
+            stat_succ_by_len,
+            open(f"data/stat_succ_by_len_{setting}.json", "w"),
+            indent=4,
         )
-    )
 
 
 def dataset_stat():
@@ -389,45 +438,59 @@ def postprocess_final_pptx():
             dst = pjoin(ppt_folder, "final_images", model, pdf)
             if pexists(dst):
                 continue
-            ppt_to_images(pptx, dst)
+            try:
+                ppt_to_images(pptx, dst)
+            except:
+                print(pptx, " failed")
 
     process_filetype("pptx", ppt2images)
 
 
 def error_analysis(model_id: int, ablation_id: int = None):
     setting = get_setting(model_id, ablation_id)
-    error_stats = defaultdict(int)
-    num_errors = 0
+    error_stats = defaultdict(list)
     undefined_errors = []
+    element_grounding_errors = [
+        "textframe ID",
+        "The element is not a Picture",
+        "Only the element_id",
+        'element_id, text_id = textframe_id.split("_")',
+        "for para in shape.text_frame.data",
+        "shape = slide.shapes[element_id]",
+        "shape = slide.shapes[int(element_id)]",
+        "shape = slide.shapes[int(figure_id)]",
+    ]
+    instruction_following_errors = [
+        "The function ",
+        "has been",
+        "invalid literal for int()",
+        "SyntaxError",
+    ]
+    hallucination_errors = ["does not exist.", "got an unexpected keyword argument"]
     for step_file in glob(f"data/topic/*/pptx/*/{setting}/*/code_steps.jsonl"):
         steps = jsonlines.Reader(open(step_file))
         for code_step in steps:
             if code_step[-1] == None:
                 continue
-            num_errors += 1
             error_reason = code_step[-1]
-            if "textframe ID" in error_reason:
-                error_stats["element_grounding"] += 1
-            elif "The element is not a Picture" in error_reason:
-                error_stats["element_grounding"] += 1
-            elif "Only the element_id" in error_reason:
-                error_stats["element_grounding"] += 1
-            elif "The function " in error_reason:
-                error_stats["instruction_following"] += 1
-            elif "has been edited" in error_reason:
-                error_stats["instruction_following"] += 1
+
+            if any(err in error_reason for err in element_grounding_errors):
+                error_stats["element_grounding"].append(error_reason)
+            elif any(err in error_reason for err in instruction_following_errors):
+                error_stats["instruction_following"].append(error_reason)
+            elif any(err in error_reason for err in hallucination_errors):
+                error_stats["hallucination"].append(error_reason)
             elif "Incorrect shape: " in error_reason:
                 breakpoint()
-            elif "does not exist." in error_reason:
-                error_stats["hallucination"] += 1
             else:
                 undefined_errors.append(error_reason)
-    print(error_stats)
-    print(undefined_errors)
+
+    for k, v in error_stats.items():
+        print(k, len(v))
+    print("undefined", len(undefined_errors))
 
 
 if __name__ == "__main__":
-    app_config.DEBUG = True
     func_argparse.main(
         prepare_template,
         prepare_caption,

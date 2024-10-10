@@ -327,7 +327,7 @@ def ppt_gen(task_id: str):
                 doc_json,
                 functional_keys,
                 torch.stack(
-                    get_text_embedding(list(slide_cluster.keys()), model=text_model)
+                    get_text_embedding(list(slide_cluster.keys()), text_model)
                 ),
             ).work,
             3,

@@ -410,14 +410,14 @@ class Picture(ShapeElement):
                 f"{slide_idx}_{shape.name}.{shape.image.ext}",
             )
             HASH_IMAGE[img_hash] = img_path
-            if pexists(img_path):
-                with open(img_path,'rb') as f:
-                    assert (
-                        hashlib.sha1(f.read()).hexdigest() == img_hash
-                    ), f"Image {img_path} hash mismatch with existed file"
-            else:
+            if not pexists(img_path):
                 with open(img_path, "wb") as f:
                     f.write(shape.image.blob)
+            # ? else:
+            #     with open(img_path,'rb') as f:
+            #         assert (
+            #             hashlib.sha1(f.read()).hexdigest() == img_hash
+            #         ), f"Image {img_path} hash mismatch with existed file"
         style["img_style"] = {
             "crop_bottom": shape.crop_bottom,
             "crop_top": shape.crop_top,
@@ -608,7 +608,7 @@ class GraphicalShape(ShapeElement):
             [
                 "resource/pic_placeholder.png",
                 "graphicalshape",
-                self.orig_shape,
+                self.orig_shape+f'_{self.shape_idx}',
             ],
             self.text_frame,
             self.slide_area,

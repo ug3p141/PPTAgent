@@ -89,6 +89,18 @@ class Gemini:
         response = self._chat.send_message(content)
         return json_repair.loads(response.text.strip())
 
+def run_async(coroutine):
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    if loop.is_running():
+        job = loop.create_task(coroutine)
+        loop.run_until_complete(job)
+    else:
+        job = loop.run_until_complete(coroutine)
+    return job
 
 class OPENAI:
     def __init__(
@@ -120,6 +132,7 @@ class OPENAI:
         content: str,
         image_files: list[str] = None,
         save_history: bool = False,
+        delay_batch: bool = False,
     ) -> str:
         if len(self.history) > self.history_limit:
             self.history = self.history[-self.history_limit :]
@@ -148,25 +161,31 @@ class OPENAI:
             )
             response = completion.choices[0].message.content
         else:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                job = loop.create_task(self._run_batch(messages))
-                asyncio.get_event_loop().run_until_complete(job)
-            else:
-                job = loop.run_until_complete(self._run_batch(messages))
-            response = job.to_dict()["result"][0]["choices"][0]["message"]["content"]
+            result = run_async(self._run_batch(messages, delay_batch))
+            if delay_batch:
+                return
+            response = result.to_dict()["result"][0]["choices"][0]["message"]["content"]
         messages.append({"role": "assistant", "content": response})
         if save_history:
             self.history = messages
         return response
 
-    async def _run_batch(self, message: list):
+    async def _run_batch(self, message: list, delay_batch: bool = False):
         await self.oai_batch.add(
             "chat.completions.create",
             model=self._model,
             messages=self.system_message + message,
         )
+        if delay_batch:
+            return
         return await self.oai_batch.run()
+
+    def get_batch_result(self):
+        results = run_async(self.oai_batch.run())
+        return [
+            r["choices"][0]["message"]["content"]
+            for r in results.to_dict()["result"].values()
+        ]
 
     def clear_history(self):
         self.history = []
@@ -218,4 +237,4 @@ def get_refined_doc(text_content: str):
 
 
 if __name__ == "__main__":
-    qwen("who r u")
+    gpt4o("who r u")

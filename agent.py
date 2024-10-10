@@ -106,7 +106,7 @@ class PPTAgent:
         images = "No Images"
         if slide["layout"] not in self.layout_names:
             layout_sim = torch.cosine_similarity(
-                get_text_embedding(slide["layout"], model=self.text_model),
+                get_text_embedding(slide["layout"], self.text_model),
                 self.layout_embeddings,
             )
             slide["layout"] = self.layout_names[layout_sim.argmax().item()]

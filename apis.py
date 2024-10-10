@@ -152,7 +152,7 @@ def runs_merge(paragraph: _Paragraph):
 
 def get_textframe(slide: SlidePage, textframe_id: str):
     if "_" not in textframe_id:
-        raise ValueError("The textframe ID should contain a `_`")
+        raise ValueError("The textframe ID should contain a `_`, got: ", textframe_id)
     element_id, text_id = textframe_id.split("_")
     element_id, text_id = int(element_id), int(text_id)
     shape = slide.shapes[element_id]

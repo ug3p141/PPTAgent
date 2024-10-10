@@ -54,7 +54,6 @@ def parse_pdf(file: str, output_dir: str, api: str):
         shutil.unpack_archive(temp_zip.name, output_dir)
 
 
-
 def ppt_to_images(file: str, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -257,18 +256,16 @@ def dict_to_object(dict: dict, obj: object, exclude=None):
 
 
 class Config:
-    def __init__(self, session_id=None, debug=True):
+    def __init__(self, session_id=None, rundir=None, debug=True):
         self.DEBUG = debug
         if session_id is not None:
             self.set_session(session_id)
+        if rundir is not None:
+            self.set_rundir(rundir)
 
     def set_session(self, session_id):
         self.session_id = session_id
-        self.RUN_DIR = f"./runs/{session_id}"
-        self.IMAGE_DIR = pjoin(self.RUN_DIR, "images")
-        for the_dir in [self.RUN_DIR, self.IMAGE_DIR]:
-            if not pexists(the_dir):
-                os.makedirs(the_dir, exist_ok=True)
+        self.set_rundir(f"./runs/{session_id}")
 
     def set_rundir(self, rundir: str):
         self.RUN_DIR = rundir
@@ -289,7 +286,6 @@ class Config:
 pjoin = os.path.join
 pexists = os.path.exists
 pbasename = os.path.basename
-app_config = Config("test")
 
 if __name__ == "__main__":
     config = Config()

@@ -19,7 +19,7 @@ image_embed_model = None
 extractor = None
 
 
-def get_text_embedding(text: list[str], batchsize: int = 32, model=None):
+def get_text_embedding(text: list[str], model=None, batchsize: int = 32):
     global text_embed_model
     if model is None and text_embed_model is None:
         text_embed_model = BGEM3FlagModel(
@@ -44,7 +44,7 @@ def prs_dedup(
     
 ):
     text_embeddings = get_text_embedding(
-        [i.to_text() for i in presentation.slides], batchsize, model
+        [i.to_text() for i in presentation.slides], model, batchsize
     )
     pre_embedding = text_embeddings[0]
     slide_idx = 1

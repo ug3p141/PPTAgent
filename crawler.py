@@ -1,4 +1,5 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import glob
 import json
 import os
@@ -20,14 +21,15 @@ import llms
 from model_utils import image_embedding, images_cosine_similarity, prs_dedup
 from presentation import Presentation
 from utils import (
-    app_config,
     filename_normalize,
     parse_pdf,
+    Config,
     pexists,
     pjoin,
     ppt_to_images,
     print,
 )
+app_config = Config()
 
 topics = {
     "Artificial Intelligence and its Impact": [
@@ -312,16 +314,23 @@ def preprocess(file_type: str, limit: int = 20):
             )
 
 
-def process_filetype(file_type: str, func: callable):
+def process_filetype(file_type: str, func: callable, thread_num: int = 10):
     folders = glob.glob(f"data/topic/*/{file_type}/*")
     progress_bar = tqdm(total=len(folders), desc=f"processing {file_type}")
-    for folder in folders:
-        progress_bar.update(1)
+    
+    def process_folder(folder):
         try:
             func(folder)
         except Exception as e:
-            print(f"prepare {file_type} folder {folder} failed: {e}")
+            print(f"process {file_type} folder {folder} failed: {e}")
             traceback.print_exc()
+        finally:
+            progress_bar.update(1)
+
+    with ThreadPoolExecutor(thread_num) as executor:
+        executor.map(process_folder, folders)
+
+    progress_bar.close()
 
 
 def data_stat(check_integrity: bool = False):
