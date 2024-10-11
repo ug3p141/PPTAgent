@@ -229,12 +229,17 @@ def get_fid(model_id: int, ablation_id: int = -1):
     setting = get_setting(model_id, ablation_id)
     device = f"cuda:{random.randint(0,torch.cuda.device_count()-1)}"
     print("calc fid for", setting, "on device:", device)
+    pbar = tqdm(total=200, desc=f"calc fid for {setting}")
     results = defaultdict(dict)
     for dim in [64, 192, 768, 2048]:
+        if os.path.exists(f"data/fid_{setting}_{dim}.json"):
+            pbar.update(50)
+            continue
         model = fid.InceptionV3([fid.InceptionV3.BLOCK_INDEX_BY_DIM[dim]]).to(device)
         fid_scores = []
 
-        def calc_fid(ppt_folder: str):
+        for ppt_folder in glob(f"data/topic/*/pptx/*"):
+            pbar.update(1)
             source_folder = pjoin(ppt_folder, "slide_images")
             m1, s1 = fid.compute_statistics_of_path(
                 source_folder, model, 128, dim, device
@@ -245,11 +250,14 @@ def get_fid(model_id: int, ablation_id: int = -1):
                 m2, s2 = fid.compute_statistics_of_path(
                     result_folder, model, 128, dim, device
                 )
-                fid_scores.append(fid.calculate_frechet_distance(m1, s1, m2, s2))
+                try:
+                    fid_scores.append(fid.calculate_frechet_distance(m1, s1, m2, s2))
+                except:
+                    pass
 
-        process_filetype("pptx", calc_fid)
+        
         results[setting][dim] = sum(fid_scores) / len(fid_scores)
-    json.dump(results, open(f"data/fid_{setting}.json", "w"), indent=4)
+        json.dump(results, open(f"data/fid_{setting}_{dim}.json", "w"), indent=4)
 
 
 def get_gscore(slide_content, slide_ref):
