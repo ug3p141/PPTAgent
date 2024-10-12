@@ -1,14 +1,12 @@
 import json
 from collections import defaultdict
 
-import json_repair
 import PIL.Image
 from jinja2 import Template
 
 import llms
-import utils
 from presentation import Picture, Presentation, SlidePage
-from utils import Config, pbasename, pexists, pjoin, print
+from utils import Config, get_json_from_response, pbasename, pexists, pjoin, print
 
 
 class ImageLabler:
@@ -91,7 +89,7 @@ class ImageLabler:
                 slide_type = (
                     "Structural" if layout_name in functional_keys else "Non-Structural"
                 )
-                results = json_repair.loads(
+                results = get_json_from_response(
                     llms.caption_model(
                         template.render(
                             slide_type=slide_type,

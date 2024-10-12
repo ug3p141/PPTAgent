@@ -3,7 +3,6 @@ from copy import deepcopy
 from datetime import datetime
 import traceback
 
-import json_repair
 import PIL.Image
 import jsonlines
 import torch
@@ -13,7 +12,7 @@ import llms
 from apis import CodeExecutor, get_code_executor, API_TYPES
 from model_utils import get_text_embedding
 from presentation import Presentation, SlidePage
-from utils import Config, pexists, pjoin, print
+from utils import Config, get_json_from_response, get_slide_content, pexists, pjoin, print
 
 
 class PPTAgent:
@@ -56,7 +55,7 @@ class PPTAgent:
         if pexists(self.outline_file):
             self.outline = json.load(open(self.outline_file, "r"))
         else:
-            self.outline = json_repair.loads(self.generate_outline())
+            self.outline = self.generate_outline()
             json.dump(
                 self.outline, open(self.outline_file, "w"), ensure_ascii=False, indent=4
             )
@@ -155,17 +154,6 @@ class PPTAgent:
             json_content=self.doc_json,
             images=self.image_information,
         )
-        return llms.agent_model(prompt)
+        return get_json_from_response(llms.agent_model(prompt))
 
 
-def get_slide_content(doc_json: dict, slide_title: str, slide: dict):
-    slide_desc = slide.get("description", "")
-    slide_content = f"Title: {slide_title}\nSlide Description: {slide_desc}\n"
-    if len(slide.get("subsection_keys", [])) != 0:
-        slide_content += "Slide Reference Text: "
-        for key in slide["subsection_keys"]:
-            for section in doc_json["sections"]:
-                for subsection in section.get("subsections", []):
-                    if key in subsection:
-                        slide_content += f"SubSection {key}: {subsection[key]}\n"
-    return slide_content

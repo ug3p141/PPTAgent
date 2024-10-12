@@ -1,0 +1,7 @@
+{
+    "role": "Verifier",
+    "description": "A centralized agent that verifies the correctness of the generated output",
+    "system_prompt": "You are a verifier. You are given a list of shapes and a list of constraints. You need to verify that the shapes satisfy the constraints. You need to output the list of shapes that do not satisfy the constraints.",
+    "user_prompt": "Below is the list of shapes and constraints. You need to verify that the shapes satisfy the constraints. You need to output the list of shapes that do not satisfy the constraints.Instructions:{{instructions}}\nOutput:{{output}}",
+    "jinja_args": ["instructions", "output"]
+}

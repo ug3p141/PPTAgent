@@ -11,7 +11,6 @@ import json_repair
 import requests
 from lxml import etree
 from pdf2image import convert_from_path
-from pptx import Presentation as PPTXPre
 from pptx.dml.fill import _NoFill, _NoneFill
 from pptx.shapes.base import BaseShape
 from pptx.shapes.group import GroupShape
@@ -20,6 +19,19 @@ from rich import print
 from tenacity import RetryCallState, retry, stop_after_attempt, wait_fixed
 
 IMAGE_EXTENSIONS = {"bmp", "jpg", "jpeg", "pgm", "png", "ppm", "tif", "tiff", "webp"}
+
+
+def get_slide_content(doc_json: dict, slide_title: str, slide: dict):
+    slide_desc = slide.get("description", "")
+    slide_content = f"Title: {slide_title}\nSlide Description: {slide_desc}\n"
+    if len(slide.get("subsection_keys", [])) != 0:
+        slide_content += "Slide Reference Text: "
+        for key in slide["subsection_keys"]:
+            for section in doc_json["sections"]:
+                for subsection in section.get("subsections", []):
+                    if key in subsection:
+                        slide_content += f"SubSection {key}: {subsection[key]}\n"
+    return slide_content
 
 
 def tenacity_log(retry_state: RetryCallState):
@@ -36,11 +48,9 @@ def get_json_from_response(response: str):
     except:
         raise RuntimeError("Failed to parse JSON from response")
 
-
 tenacity = retry(
     wait=wait_fixed(3), stop=stop_after_attempt(3), after=tenacity_log, reraise=True
 )
-
 
 def parse_pdf(file: str, output_dir: str, api: str):
     os.makedirs(output_dir, exist_ok=True)
@@ -52,7 +62,6 @@ def parse_pdf(file: str, output_dir: str, api: str):
             temp_zip.flush()
 
         shutil.unpack_archive(temp_zip.name, output_dir)
-
 
 def ppt_to_images(file: str, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
@@ -79,15 +88,12 @@ def ppt_to_images(file: str, output_dir: str):
 
         raise RuntimeError("No PDF file was created in the temporary directory")
 
-
 def filename_normalize(filename: str):
     return filename.replace("/", "_").replace(" ", "_").replace("\\", "_")
-
 
 def set_proxy(proxy_url: str):
     os.environ["http_proxy"] = proxy_url
     os.environ["https_proxy"] = proxy_url
-
 
 def get_text_inlinestyle(para: dict, stylish: bool):
     if not stylish:
@@ -98,13 +104,6 @@ def get_text_inlinestyle(para: dict, stylish: bool):
     font_color = f"color='{font.color}';" if font.color else ""
     font_bold = "font-weight: bold;" if font.bold else ""
     return 'style="{}"'.format("".join([font_size, font_color, font_bold]))
-
-
-def get_text_pptcstyle(para: dict):
-    if "font" not in para:
-        return ""
-    font = SimpleNamespace(**para["font"])
-    return f"Font Style: bold={font.bold}, italic={font.italic}, underline={font.underline}, size={font.size}pt, color={font.color}, font style={font.name}\n"
 
 
 def extract_fill(shape: BaseShape):
@@ -121,13 +120,8 @@ def extract_fill(shape: BaseShape):
 def apply_fill(shape: BaseShape, fill: dict):
     if fill is None:
         return
-    replace_xml_node(shape.fill._xPr, fill["fill_xml"])
-
-
-def save_xml(xml_string: str, filename: str = "output.xml"):
-    root = ET.fromstring(xml_string)
-    tree = ET.ElementTree(root)
-    tree.write(filename, encoding="utf-8", xml_declaration=True)
+    new_element = etree.fromstring(fill["fill_xml"])
+    shape.fill._xPr.getparent().replace(shape.fill._xPr, new_element)
 
 
 def parse_groupshape(groupshape: GroupShape):
@@ -163,30 +157,6 @@ def parse_groupshape(groupshape: GroupShape):
             }
         )
     return group_shape_xy
-
-
-def replace_xml_node(old_element, new_xml):
-    new_element = etree.fromstring(new_xml)
-    old_element.getparent().replace(old_element, new_element)
-
-
-def xml_print(xml_str):
-    import xml.dom.minidom
-
-    print(xml.dom.minidom.parseString(xml_str).toprettyxml())
-
-
-def output_obj(obj):
-    for attr in dir(obj):
-        if not attr.startswith("_"):
-            try:
-                if not callable(getattr(obj, attr)):
-                    print("obj.%s = %s" % (attr, getattr(obj, attr)))
-                else:
-                    print("obj.%s is a method" % attr)
-            except Exception as e:
-                print("obj.%s error: %s" % (attr, e))
-            print("---***---")
 
 
 def is_primitive(obj):

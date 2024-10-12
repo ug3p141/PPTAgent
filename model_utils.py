@@ -1,6 +1,8 @@
 import os
 from copy import deepcopy
 
+from jinja2 import Template
+import llms
 import numpy as np
 import torch
 import torchvision.transforms as T
@@ -10,13 +12,19 @@ from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoFeatureExtractor, AutoModel
 
 from presentation import Presentation
-from utils import IMAGE_EXTENSIONS, pjoin
+from utils import IMAGE_EXTENSIONS, pjoin, get_json_from_response
 
 DEFAULT_DEVICE = "cuda:3"
 
 text_embed_model = None
 image_embed_model = None
 extractor = None
+
+
+def get_refined_doc(text_content: str):
+    template = Template(open("prompts/document_refine.txt").read())
+    prompt = template.render(markdown_document=text_content)
+    return get_json_from_response(llms.long_model(prompt))
 
 
 def get_text_embedding(text: list[str], model=None, batchsize: int = 32):

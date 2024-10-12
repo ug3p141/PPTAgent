@@ -30,9 +30,6 @@ from utils import (
     pexists,
 )
 
-HASH_IMAGE = dict()
-
-
 class TextFrame:
     def __init__(
         self,
@@ -82,30 +79,6 @@ class TextFrame:
             data.append(content)
         return cls(True, style, data, father_idx, shape.text)
 
-    def build(self, shape: BaseShape):
-        if not self.is_textframe:
-            return
-        tf = (
-            shape.text_frame
-            if shape.has_text_frame
-            else shape.add_textbox(**self.style["shape_bounds"])
-        )
-        for pid, para in enumerate(self.data):
-            font = para["font"] if "font" in para else None
-            p = tf.paragraphs[0]
-            if pid != 0:
-                p = tf.add_paragraph()
-            dict_to_object(para, p, exclude=["runs", "text", "font"])
-            if font is None:
-                continue
-            run = p.add_run()
-            if font["color"] is not None:
-                run.font.fill.solid()
-                run.font.fill.fore_color.rgb = RGBColor.from_string(font["color"])
-            run.text = para["text"]
-            dict_to_object(font, run.font, exclude=["color"])
-        dict_to_object(self.style, tf)
-
     def to_html(self, stylish: bool) -> str:
         repr_list = []
         pre_bullet = None
@@ -127,16 +100,6 @@ class TextFrame:
             pre_bullet = para["bullet"]
         return "\n".join(repr_list)
 
-    def to_pptc(self) -> str:
-        if not self.is_textframe:
-            return ""
-        s = ""
-        for para in self.data:
-            s += f"[Text id={self.father_idx}_{para['idx']}]\n"
-            s += para["text"] + "\n"
-            s += get_text_pptcstyle(para) + "\n"
-        return s
-
     def __repr__(self):
         return f"TextFrame: {self.text}"
 
@@ -144,18 +107,6 @@ class TextFrame:
         if not self.is_textframe:
             return 0
         return len(self.text)
-
-    def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, TextFrame):
-            return False
-        return (
-            self.is_textframe == __value.is_textframe
-            and self.style == __value.style
-            and self.data == __value.data
-            and self.father_idx == __value.father_idx
-            and self.text == __value.text
-        )
-
 
 class ShapeElement:
     def __init__(
@@ -215,7 +166,6 @@ class ShapeElement:
         return obj
 
     def build(self, slide, shape):
-        self.text_frame.build(shape)
         apply_fill(shape, self.style["fill"])
         if self.style["line"] is not None:
             apply_fill(shape.line, self.style["line"]["fill"])
@@ -232,9 +182,6 @@ class ShapeElement:
     def to_html(self, stylish) -> str:
         self.stylish = stylish
         return ""
-
-    def to_pptc(self) -> str:
-        pass
 
     @property
     def left(self):
@@ -279,31 +226,6 @@ class ShapeElement:
             style += f" style='left: {self.left}pt; top: {self.top}pt; width: {self.width}pt; height: {self.height}pt;'"
         return style
 
-    @property
-    def pptc_text_info(self):
-        return self.text_frame.to_pptc()
-
-    @property
-    def pptc_space_info(self):
-        return f"Visual Positions: left={self.left}pt, top={self.top}pt\n"
-
-    @property
-    def pptc_size_info(self):
-        return f"Size: height={self.height}pt, width={self.width}pt\n"
-
-    @property
-    def pptc_description(self):
-        return f"[{self.__class__.__name__} id={self.shape_idx}]\n"
-
-    def to_pptc(self):
-        s = ""
-        s += self.pptc_description
-        s += self.pptc_size_info
-        s += self.pptc_text_info
-        s += self.pptc_space_info
-        return s
-
-
 class UnsupportedShape(ShapeElement):
     @classmethod
     def from_shape(
@@ -315,53 +237,6 @@ class UnsupportedShape(ShapeElement):
         **kwargs,
     ):
         raise ValueError(f"unsupported shape {shape.shape_type}")
-
-
-class AutoShape(ShapeElement):
-    @classmethod
-    def from_shape(
-        cls,
-        slide_idx: int,
-        shape_idx: int,
-        shape: PPTXAutoShape,
-        style: dict,
-        text_frame: TextFrame,
-        app_config: Config,
-        slide_area: float,
-    ):
-        data = {
-            "auto_shape_type": shape.auto_shape_type.real,
-            "svg_tag": str(shape.auto_shape_type).split()[0].lower(),
-            "is_nofill": isinstance(shape.fill._fill, (_NoneFill, _NoFill)),
-            "is_line_nofill": isinstance(shape.line.fill._fill, (_NoneFill, _NoFill)),
-        }
-        return cls(slide_idx, shape_idx, style, data, text_frame, slide_area)
-
-    def build(self, slide: PPTXSlide):
-        shape = slide.shapes.add_shape(
-            self.data["auto_shape_type"], **self.style["shape_bounds"]
-        )
-        if self.data["is_nofill"]:
-            shape.fill.background()
-            self.style["fill"] = None
-
-        if self.data["is_line_nofill"]:
-            shape.line.fill.background()
-            self.style["line"] = None
-        shape = super().build(slide, shape)
-
-    def to_html(self, stylish) -> str:
-        self.stylish = stylish
-        text = self.text_frame.to_html(stylish)
-        return f"<div data-shape-type='{self.data['svg_tag']}' {self.inline_style}>\n{text}\n</div>\n"
-
-    @property
-    def pptc_text_info(self):
-        return self.text_frame.to_pptc()
-
-    @property
-    def pptc_description(self):
-        return f"[{self.data['svg_tag']} id={self.shape_idx}]\n"
 
 
 class TextBox(ShapeElement):
@@ -377,10 +252,6 @@ class TextBox(ShapeElement):
         slide_area: float,
     ):
         return cls(slide_idx, shape_idx, style, None, text_frame, slide_area)
-
-    def build(self, slide: PPTXSlide):
-        shape = slide.shapes.add_textbox(**self.style["shape_bounds"])
-        return super().build(slide, shape)
 
     def to_html(self, stylish) -> str:
         self.stylish = stylish
@@ -401,23 +272,13 @@ class Picture(ShapeElement):
     ):
         if shape.image.ext not in IMAGE_EXTENSIONS:
             raise ValueError(f"unsupported image type {shape.image.ext}")
-        img_hash = shape.image.sha1
-        if img_hash in HASH_IMAGE:
-            img_path = HASH_IMAGE[img_hash]
-        else:
-            img_path = pjoin(
-                app_config.IMAGE_DIR,
-                f"{slide_idx}_{shape.name}.{shape.image.ext}",
-            )
-            HASH_IMAGE[img_hash] = img_path
-            if not pexists(img_path):
-                with open(img_path, "wb") as f:
-                    f.write(shape.image.blob)
-            else:
-                with open(img_path,'rb') as f:
-                    assert (
-                        hashlib.sha1(f.read()).hexdigest() == img_hash
-                    ), f"Image {img_path} hash mismatch with existed file"
+        img_path = pjoin(
+            app_config.IMAGE_DIR,
+            f"{shape.image.sha1}.{shape.image.ext}",
+        )
+        if not pexists(img_path):
+            with open(img_path, "wb") as f:
+                f.write(shape.image.blob)
         style["img_style"] = {
             "crop_bottom": shape.crop_bottom,
             "crop_top": shape.crop_top,
@@ -509,10 +370,6 @@ class Placeholder(ShapeElement):
             )
         return data
 
-    def build(self, slide: PPTXSlide):
-        pass
-
-
 class GroupShape(ShapeElement):
     @classmethod
     def from_shape(
@@ -572,13 +429,6 @@ class GroupShape(ShapeElement):
             + "\n</div>\n"
         )
 
-    def to_pptc(self) -> str:
-        s = ""
-        for shape in self.data:
-            s += shape.to_pptc()
-        return s
-
-
 class GraphicalShape(ShapeElement):
     @classmethod
     def from_shape(
@@ -593,9 +443,6 @@ class GraphicalShape(ShapeElement):
     ):
         return cls(slide_idx, shape_idx, style, None, text_frame, slide_area)
 
-    def build(self, slide: PPTXSlide):
-        pass
-
     @property
     def orig_shape(self):
         return self.style["shape_type"].strip()
@@ -607,8 +454,8 @@ class GraphicalShape(ShapeElement):
             {"img_style": {}} | self.style,
             [
                 "resource/pic_placeholder.png",
-                "graphicalshape",
-                self.orig_shape+f'_{self.shape_idx}',
+                self.orig_shape,
+                f"{self.orig_shape}_{self.shape_idx}",
             ],
             self.text_frame,
             self.slide_area,
@@ -618,6 +465,30 @@ class GraphicalShape(ShapeElement):
         shape.is_background = False
         shape.text_frame.is_textframe = False
         return shape
+
+
+class FreeShape(ShapeElement):
+    @classmethod
+    def from_shape(
+        cls,
+        slide_idx: int,
+        shape_idx: int,
+        shape: PPTXAutoShape,
+        style: dict,
+        text_frame: TextFrame,
+        app_config: Config,
+        slide_area: float,
+    ):
+        data = {
+            "shape_type": shape.auto_shape_type.real,
+            "svg_tag": str(shape.auto_shape_type).split()[0].lower(),
+        }
+        return cls(slide_idx, shape_idx, style, data, text_frame, slide_area)
+
+    def to_html(self, stylish) -> str:
+        self.stylish = stylish
+        text = self.text_frame.to_html(stylish)
+        return f"<div data-shape-type='{self.data['svg_tag']}' {self.inline_style}>\n{text}\n</div>\n"
 
 
 class Connector(ShapeElement):
@@ -632,10 +503,14 @@ class Connector(ShapeElement):
         app_config: Config,
         slide_area: float,
     ):
-        return cls(slide_idx, shape_idx, style, None, text_frame, slide_area)
-
-    def build(self, slide: PPTXSlide):
-        pass
+        return FreeShape(
+            slide_idx,
+            shape_idx,
+            style,
+            {"shape_type": "connector", "svg_tag": "connector"},
+            text_frame,
+            slide_area,
+        )
 
 
 class SlidePage:
@@ -753,11 +628,6 @@ class SlidePage:
             ]
         )
 
-    def to_pptc(self) -> str:
-        s = ""
-        for shape in self.shapes:
-            s += shape.to_pptc()
-        return s
 
     def to_text(self) -> str:
         return "\n".join(
@@ -767,7 +637,7 @@ class SlidePage:
                 if shape.text_frame.is_textframe
             ]
             + [
-                shape.caption
+                "Image: "+shape.caption
                 for shape in self.shape_filter(Picture)
                 if not shape.is_background
             ]
@@ -795,14 +665,6 @@ class SlidePage:
 
     def __len__(self):
         return len(self.shapes)
-
-    def __eq__(self, __value) -> bool:
-        if not isinstance(__value, SlidePage):
-            return False
-        return (
-            self.shapes == __value.shapes
-            and self.slide_layout_name == __value.slide_layout_name
-        )
 
 
 class Presentation:
@@ -922,19 +784,9 @@ class Presentation:
     def __len__(self):
         return len(self.slides)
 
-    def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, Presentation):
-            return False
-        return (
-            self.slides == __value.slides
-            and self.slide_width == __value.slide_width
-            and self.slide_height == __value.slide_height
-            and self.num_pages == __value.num_pages
-        )
-
 
 SHAPECAST: dict[int, ShapeElement] = {
-    MSO_SHAPE_TYPE.AUTO_SHAPE: AutoShape,
+    MSO_SHAPE_TYPE.AUTO_SHAPE: FreeShape,
     MSO_SHAPE_TYPE.PLACEHOLDER: Placeholder,
     MSO_SHAPE_TYPE.PICTURE: Picture,
     MSO_SHAPE_TYPE.GROUP: GroupShape,
