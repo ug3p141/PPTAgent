@@ -156,6 +156,8 @@ def get_textframe(slide: SlidePage, textframe_id: str):
     element_id, text_id = textframe_id.split("_")
     element_id, text_id = int(element_id), int(text_id)
     shape = slide.shapes[element_id]
+    if not shape.text_frame.is_textframe:
+        raise ValueError(f"The element {element_id} doesn't have a text frame.")
     for para in shape.text_frame.data:
         if para["idx"] == text_id:
             return shape, para

@@ -51,7 +51,12 @@ class PPTAgent:
 
         self.outline_file = pjoin(config.RUN_DIR, "presentation_outline.json")
 
-    def work(self, retry_times: int = 1, force_pages: bool = True):
+    def work(
+        self,
+        retry_times: int = 3,
+        force_pages: bool = False,
+        error_exit: bool = True,
+    ):
         if pexists(self.outline_file):
             self.outline = json.load(open(self.outline_file, "r"))
         else:
@@ -69,9 +74,9 @@ class PPTAgent:
                 for slide_idx, slide_title in enumerate(self.outline)
             ]
         )
-        self.generate_slides(retry_times, force_pages)
+        self.generate_slides(retry_times, force_pages, error_exit)
 
-    def generate_slides(self, retry_times: int, force_pages: bool):
+    def generate_slides(self, retry_times: int, force_pages: bool, error_exit: bool):
         succ_flag = True
         code_executor = get_code_executor(retry_times)
         self.gen_prs.slides = []
@@ -82,11 +87,12 @@ class PPTAgent:
                 self.gen_prs.slides.append(
                     self._generate_slide(slide_data, code_executor)
                 )
-            except Exception as e:
-                succ_flag = False
+            except Exception:
                 if self.config.DEBUG:
                     traceback.print_exc()
-                break
+                if error_exit:
+                    succ_flag = False
+                    break
         with jsonlines.Writer(
             open(pjoin(self.config.RUN_DIR, "agent_steps.jsonl"), "w")
         ) as writer:
