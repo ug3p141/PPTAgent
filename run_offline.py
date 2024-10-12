@@ -43,11 +43,6 @@ def load_internvl(system: str, prompt, image_urls: List[str]):
     prompt = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
-
-    # Stop tokens for InternVL
-    # models variants may have different stop tokens
-    # please refer to the model card for the correct "stop words":
-    # https://huggingface.co/OpenGVLab/InternVL2-2B#service
     stop_token_ids = [128001, 128002, 128003]
     return llm, prompt, stop_token_ids
 

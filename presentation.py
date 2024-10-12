@@ -413,11 +413,11 @@ class Picture(ShapeElement):
             if not pexists(img_path):
                 with open(img_path, "wb") as f:
                     f.write(shape.image.blob)
-            # ? else:
-            #     with open(img_path,'rb') as f:
-            #         assert (
-            #             hashlib.sha1(f.read()).hexdigest() == img_hash
-            #         ), f"Image {img_path} hash mismatch with existed file"
+            else:
+                with open(img_path,'rb') as f:
+                    assert (
+                        hashlib.sha1(f.read()).hexdigest() == img_hash
+                    ), f"Image {img_path} hash mismatch with existed file"
         style["img_style"] = {
             "crop_bottom": shape.crop_bottom,
             "crop_top": shape.crop_top,
@@ -933,7 +933,6 @@ class Presentation:
         )
 
 
-# 注意这里修改了之后，就slide_cluster的index就会发生变化
 SHAPECAST: dict[int, ShapeElement] = {
     MSO_SHAPE_TYPE.AUTO_SHAPE: AutoShape,
     MSO_SHAPE_TYPE.PLACEHOLDER: Placeholder,

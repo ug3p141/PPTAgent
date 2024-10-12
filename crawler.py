@@ -8,7 +8,6 @@ import shutil
 import traceback
 from collections import defaultdict
 from itertools import product
-from tempfile import TemporaryDirectory
 
 import aiohttp
 import func_argparse

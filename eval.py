@@ -19,8 +19,6 @@ from tqdm.auto import tqdm
 
 import llms
 from agent import PPTAgent, get_slide_content
-from agent_random import PPTAgent as PPTAgentRandom
-from agent_pptc import PPTAgent as PPTAgentPPTC
 from crawler import process_filetype, topics
 from model_utils import get_text_embedding
 from multimodal import ImageLabler
@@ -181,21 +179,17 @@ def do_generate(
 
         progressbar.update(1)
 
-
-# 先确保一下qwen+gpt4o 的完成率能和之前一样吧, 应该是exit(-1导致的)
-# qwen 重测以分析错误原因
-# qwen w/o code_render
-# qwen w/o html
-# qwen w/o layout
 def generate_pres(model_id: int, thread_num: int = 16, ablation_id: int = None):
     retry_times = 1
-    ablation_agents = [PPTAgentPPTC, PPTAgentRandom, PPTAgent]
     agentclass = PPTAgent
     text_models = get_text_models(thread_num)
     llm, layout_llm = eval_models[model_id]
     llms.agent_model = llm
     setting = get_setting(model_id, ablation_id)
     if isinstance(ablation_id, int):
+        from agent_random import PPTAgent as PPTAgentRandom
+        from agent_pptc import PPTAgent as PPTAgentPPTC
+        ablation_agents = [PPTAgentPPTC, PPTAgentRandom, PPTAgent]
         agentclass = ablation_agents[ablation_id]
         if ablation_id == 2:
             retry_times = 0
@@ -223,41 +217,33 @@ def generate_pres(model_id: int, thread_num: int = 16, ablation_id: int = None):
             )
         progressbar.close()
 
-
-# 把所以setting的都拿出来算一遍，还有dims
 def get_fid(model_id: int, ablation_id: int = -1):
     setting = get_setting(model_id, ablation_id)
     device = f"cuda:{random.randint(0,torch.cuda.device_count()-1)}"
+    if pexists(f"data/fid_{setting}.json"):
+        return
     print("calc fid for", setting, "on device:", device)
-    pbar = tqdm(total=200, desc=f"calc fid for {setting}")
+    pbar = tqdm(total=50, desc=f"calc fid for {setting}")
     results = defaultdict(dict)
-    for dim in [64, 192, 768, 2048]:
-        if os.path.exists(f"data/fid_{setting}_{dim}.json"):
-            pbar.update(50)
-            continue
-        model = fid.InceptionV3([fid.InceptionV3.BLOCK_INDEX_BY_DIM[dim]]).to(device)
-        fid_scores = []
-
-        for ppt_folder in glob(f"data/topic/*/pptx/*"):
-            pbar.update(1)
-            source_folder = pjoin(ppt_folder, "slide_images")
-            m1, s1 = fid.compute_statistics_of_path(
-                source_folder, model, 128, dim, device
+    model = fid.InceptionV3([fid.InceptionV3.BLOCK_INDEX_BY_DIM[64]]).to(device)
+    fid_scores = []
+    for ppt_folder in glob(f"data/topic/*/pptx/*"):
+        pbar.update(1)
+        source_folder = pjoin(ppt_folder, "slide_images")
+        m1, s1 = fid.compute_statistics_of_path(source_folder, model, 128, 64, device)
+        for result_folder in glob(pjoin(ppt_folder, f"final_images/{setting}/*")):
+            if len(os.listdir(result_folder)) == 0:
+                continue
+            m2, s2 = fid.compute_statistics_of_path(
+                result_folder, model, 128, 64, device
             )
-            for result_folder in glob(pjoin(ppt_folder, f"final_images/{setting}/*")):
-                if len(os.listdir(result_folder)) == 0:
-                    continue
-                m2, s2 = fid.compute_statistics_of_path(
-                    result_folder, model, 128, dim, device
-                )
-                try:
-                    fid_scores.append(fid.calculate_frechet_distance(m1, s1, m2, s2))
-                except:
-                    pass
+            try:
+                fid_scores.append(fid.calculate_frechet_distance(m1, s1, m2, s2))
+            except:
+                print(f"fid in {result_folder} failed, got {len(os.listdir(result_folder))} images")
 
-        
-        results[setting][dim] = sum(fid_scores) / len(fid_scores)
-        json.dump(results, open(f"data/fid_{setting}_{dim}.json", "w"), indent=4)
+    results[setting] = sum(fid_scores) / len(fid_scores)
+    json.dump(results, open(f"data/fid_{setting}.json", "w"), indent=4)
 
 
 def get_gscore(slide_content, slide_ref):
@@ -268,7 +254,6 @@ def get_gscore(slide_content, slide_ref):
     )
 
 
-# 成功率也做个分析吧
 def eval_experiment(
     model_id: int = 0,
     ablation_id: int = None,
@@ -459,23 +444,28 @@ def error_analysis(model_id: int, ablation_id: int = None):
     error_stats = defaultdict(list)
     undefined_errors = []
     element_grounding_errors = [
-        "textframe ID",
         "The element is not a Picture",
         "Only the element_id",
         'element_id, text_id = textframe_id.split("_")',
         "for para in shape.text_frame.data",
-        "shape = slide.shapes[element_id]",
-        "shape = slide.shapes[int(element_id)]",
-        "shape = slide.shapes[int(figure_id)]",
+        "shape = slide.shapes[",
+        "contain a `_`",
     ]
     instruction_following_errors = [
         "The function ",
         "has been",
-        "invalid literal for int()",
+        "invalid literal",
         "SyntaxError",
     ]
-    hallucination_errors = ["does not exist.", "got an unexpected keyword argument"]
-    for step_file in glob(f"data/topic/*/pptx/*/{setting}/*/code_steps.jsonl"):
+    hallucination_errors = [
+        "does not exist.",
+        "got an unexpected keyword argument",
+        "Incorrect textframe ID",
+    ]
+    steps = glob(f"data/topic/*/pptx/*/{setting}/*/code_steps.jsonl")
+    print(setting, len(steps))
+    error_stats["instruction_following"] += [None] * (500 - len(steps))
+    for step_file in steps:
         steps = jsonlines.Reader(open(step_file))
         for code_step in steps:
             if code_step[-1] == None:
@@ -492,7 +482,6 @@ def error_analysis(model_id: int, ablation_id: int = None):
                 breakpoint()
             else:
                 undefined_errors.append(error_reason)
-
     for k, v in error_stats.items():
         print(k, len(v))
     print("undefined", len(undefined_errors))

@@ -16,6 +16,6 @@ for combo in "${combinations[@]}"; do
     read model_id ablation_id <<< "$combo"
     python eval.py generate_pres --model_id "$model_id" --thread_num 32 --ablation_id "$ablation_id"
     python eval.py postprocess_final_pptx
-    python eval.py eval_experiment --model_id "$model_id" --ablation_id "$ablation_id"
+    python eval.py eval_experiment --model_id "$model_id" --ablation_id "$ablation_id" --geval
     python eval.py get_fid --model_id "$model_id" --ablation_id "$ablation_id"
 done
