@@ -1,9 +1,6 @@
-output
 __pycache__
-baselines
 data
 .vscode
-models
 *.ppt*
 *.html*
 *DS_Store*
@@ -12,3 +9,4 @@ models
 runs
 resource
 node_modules
+zenodo-cc-pptx

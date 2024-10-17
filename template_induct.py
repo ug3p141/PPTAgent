@@ -8,12 +8,16 @@ from jinja2 import Template
 import llms
 from model_utils import get_cluster, image_embedding, images_cosine_similarity
 from presentation import Presentation
-from utils import Config, get_json_from_response, pexists, pjoin, ppt_to_images
+from utils import Config, pexists, pjoin, ppt_to_images
 
 
 class TemplateInducter:
     def __init__(
-        self, prs: Presentation, ppt_image_folder: str, template_image_folder: str, config:Config
+        self,
+        prs: Presentation,
+        ppt_image_folder: str,
+        template_image_folder: str,
+        config: Config,
     ):
         self.prs = prs
         self.ppt_image_folder = ppt_image_folder
@@ -24,7 +28,7 @@ class TemplateInducter:
         self.slide_cluster_file = pjoin(self.output_dir, "slides_cluster.json")
         os.makedirs(self.output_dir, exist_ok=True)
 
-    def work(self, most_image = 3):
+    def work(self, most_image=3):
         if pexists(self.slide_cluster_file):
             self.slide_cluster = json.load(open(self.slide_cluster_file))
             return set(self.slide_cluster.pop("functional_keys")), self.slide_cluster
@@ -44,7 +48,7 @@ class TemplateInducter:
                 ),
                 category_cluster["categories"],
             )
-        elif "Uncategorized" in category_cluster.get("categories",[]):
+        elif "Uncategorized" in category_cluster.get("categories", []):
             content_slides_index, functional_cluster = (
                 set(category_cluster["categories"].pop("Uncategorized")),
                 category_cluster["categories"],
@@ -107,7 +111,7 @@ class TemplateInducter:
         category_split_template = Template(
             open("prompts/template_induct/category_split.txt").read()
         )
-        response = llms.long_model(
+        category_cluster = llms.long_model(
             category_split_template.render(
                 slides="\n----\n".join(
                     [
@@ -124,9 +128,9 @@ class TemplateInducter:
                         for slide in self.prs.slides
                     ]
                 ),
-            )
+            ),
+            return_json=True,
         )
-        category_cluster = get_json_from_response(response)
         json.dump(
             category_cluster,
             open(self.slide_split_file, "w"),
@@ -135,11 +139,7 @@ class TemplateInducter:
         )
         return category_cluster
 
-    def layout_split(
-        self,
-        content_slides_index: set[int],
-        most_image:int
-    ):
+    def layout_split(self, content_slides_index: set[int], most_image: int):
         embeddings = image_embedding(self.template_image_folder)
         template = Template(open("prompts/template_induct/ask_category.txt").read())
         content_split = defaultdict(list)

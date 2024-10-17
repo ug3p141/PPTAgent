@@ -1,10 +1,11 @@
+# conda install -c conda-forge poppler
+# binary: libreoffice
 git+https://github.com/Force1ess/python-pptx
 jinja2
 openai
 aiohttp
 func_argparse
 jsonlines
-google-generativeai
 tenacity
 transformers
 FlagEmbedding
@@ -21,10 +22,6 @@ numpy
 rich
 sentencepiece
 lxml
-torch
-torchvision
 pytorch_fid
-poppler-utils # conda install -c conda-forge poppler
 pdf2image
 PyPDF2
-# binary: libreoffice

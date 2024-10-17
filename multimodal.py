@@ -6,7 +6,7 @@ from jinja2 import Template
 
 import llms
 from presentation import Picture, Presentation, SlidePage
-from utils import Config, get_json_from_response, pbasename, pexists, pjoin, print
+from utils import Config, pbasename, pexists, pjoin, print
 
 
 class ImageLabler:
@@ -89,22 +89,21 @@ class ImageLabler:
                 slide_type = (
                     "Structural" if layout_name in functional_keys else "Non-Structural"
                 )
-                results = get_json_from_response(
-                    llms.caption_model(
-                        template.render(
-                            slide_type=slide_type,
-                            slide_images=slide_images,
-                            provided_images="----\n".join(
-                                [f"{pbasename(k)}: {v}" for k, v in images.items()]
-                            )
-                            + "----",
-                        ),
-                        pjoin(
-                            self.config.RUN_DIR,
-                            "slide_images",
-                            f"slide_{slide_idx:04d}.jpg",
-                        ),
-                    )
+                results = llms.caption_model(
+                    template.render(
+                        slide_type=slide_type,
+                        slide_images=slide_images,
+                        provided_images="----\n".join(
+                            [f"{pbasename(k)}: {v}" for k, v in images.items()]
+                        )
+                        + "----",
+                    ),
+                    pjoin(
+                        self.config.RUN_DIR,
+                        "slide_images",
+                        f"slide_{slide_idx:04d}.jpg",
+                    ),
+                    return_json=True,
                 )
                 if not isinstance(results, list):
                     results = [results]

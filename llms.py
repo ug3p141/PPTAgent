@@ -1,10 +1,12 @@
 import asyncio
 import base64
+
 import requests
 from oaib import Auto
 from openai import OpenAI
 
-from utils import print, tenacity
+from utils import get_json_from_response, print, tenacity
+
 
 def run_async(coroutine):
     try:
@@ -18,6 +20,7 @@ def run_async(coroutine):
     else:
         job = loop.run_until_complete(coroutine)
     return job
+
 
 class OPENAI:
     def __init__(
@@ -50,6 +53,7 @@ class OPENAI:
         image_files: list[str] = None,
         save_history: bool = False,
         delay_batch: bool = False,
+        return_json: bool = False,
     ) -> str:
         if len(self.history) > self.history_limit:
             self.history = self.history[-self.history_limit :]
@@ -73,9 +77,13 @@ class OPENAI:
                         }
                     )
         if not self._use_batch:
-            completion = self.client.chat.completions.create(
-                model=self._model, messages=self.system_message + messages
-            )
+            try:
+                completion = self.client.chat.completions.create(
+                    model=self._model, messages=self.system_message + messages
+                )
+            except Exception as e:
+                print(e)
+                raise e
             response = completion.choices[0].message.content
         else:
             result = run_async(self._run_batch(messages, delay_batch))
@@ -85,7 +93,7 @@ class OPENAI:
         messages.append({"role": "assistant", "content": response})
         if save_history:
             self.history = messages
-        return response
+        return response if not return_json else get_json_from_response(response)
 
     async def _run_batch(self, message: list, delay_batch: bool = False):
         await self.oai_batch.add(
@@ -136,14 +144,20 @@ class APIModel:
 gpt4o = OPENAI(use_batch=True)
 gpt4omini = OPENAI(model="gpt-4o-mini")
 qwen = OPENAI(model="Qwen2-72B-Instruct", api_base="http://localhost:7999/v1")
+qwen2_5 = OPENAI(
+    model="Qwen2.5-72B-Instruct-GPTQ-Int4", api_base="http://124.16.138.143:7812/v1"
+)
+qwen_vl = OPENAI(
+    model="Qwen2-VL-72B-Instruct-GPTQ-Int4", api_base="http://124.16.138.144:7813/v1"
+)
 internvl_multi = APIModel(
     model="InternVL2-Llama3-76B",
     api_base="http://124.16.138.150:5000/generate",
 )
 internvl_76 = OPENAI(model="InternVL2-Llama3-76B", api_base="http://127.0.0.1:8000/v1")
-caption_model = internvl_76
-long_model = qwen
-agent_model = gpt4o
+caption_model = qwen_vl
+long_model = qwen2_5
+agent_model = qwen2_5
 
 if __name__ == "__main__":
     gpt4o("who r u")

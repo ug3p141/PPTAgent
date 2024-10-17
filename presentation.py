@@ -1,4 +1,5 @@
 import hashlib
+
 from pptx import Presentation as PPTXPre
 from pptx.chart.chart import Chart as PPTXChart
 from pptx.dml.color import RGBColor
@@ -23,12 +24,12 @@ from utils import (
     dict_to_object,
     extract_fill,
     get_text_inlinestyle,
-    get_text_pptcstyle,
     object_to_dict,
     parse_groupshape,
-    pjoin,
     pexists,
+    pjoin,
 )
+
 
 class TextFrame:
     def __init__(
@@ -107,6 +108,7 @@ class TextFrame:
         if not self.is_textframe:
             return 0
         return len(self.text)
+
 
 class ShapeElement:
     def __init__(
@@ -226,6 +228,7 @@ class ShapeElement:
             style += f" style='left: {self.left}pt; top: {self.top}pt; width: {self.width}pt; height: {self.height}pt;'"
         return style
 
+
 class UnsupportedShape(ShapeElement):
     @classmethod
     def from_shape(
@@ -248,7 +251,7 @@ class TextBox(ShapeElement):
         shape: TextFrame,
         style: dict,
         text_frame: TextFrame,
-        app_config: Config,
+        config: Config,
         slide_area: float,
     ):
         return cls(slide_idx, shape_idx, style, None, text_frame, slide_area)
@@ -267,13 +270,13 @@ class Picture(ShapeElement):
         shape: PPTXPicture,
         style: dict,
         text_frame: TextFrame,
-        app_config: Config,
+        config: Config,
         slide_area: float,
     ):
         if shape.image.ext not in IMAGE_EXTENSIONS:
             raise ValueError(f"unsupported image type {shape.image.ext}")
         img_path = pjoin(
-            app_config.IMAGE_DIR,
+            config.IMAGE_DIR,
             f"{shape.image.sha1}.{shape.image.ext}",
         )
         if not pexists(img_path):
@@ -342,7 +345,7 @@ class Placeholder(ShapeElement):
         shape: SlidePlaceholder,
         style: dict,
         text_frame: TextFrame,
-        app_config: Config,
+        config: Config,
         slide_area: float,
     ):
         assert (
@@ -358,17 +361,18 @@ class Placeholder(ShapeElement):
         ), "placeholder should have only one type"
         if isinstance(shape, PlaceholderPicture):
             data = Picture.from_shape(
-                slide_idx, shape_idx, shape, style, text_frame, app_config, slide_area
+                slide_idx, shape_idx, shape, style, text_frame, config, slide_area
             )
         elif shape.has_text_frame:
             data = TextBox.from_shape(
-                slide_idx, shape_idx, shape, style, text_frame, app_config, slide_area
+                slide_idx, shape_idx, shape, style, text_frame, config, slide_area
             )
         elif shape.has_chart or shape.has_table:
             data = GraphicalShape.from_shape(
-                slide_idx, shape_idx, shape, style, text_frame, app_config, slide_area
+                slide_idx, shape_idx, shape, style, text_frame, config, slide_area
             )
         return data
+
 
 class GroupShape(ShapeElement):
     @classmethod
@@ -379,12 +383,12 @@ class GroupShape(ShapeElement):
         shape: PPTXGroupShape,
         style: dict,
         text_frame: TextFrame,
-        app_config: Config,
+        config: Config,
         slide_area: float,
     ):
         data = [
             ShapeElement.from_shape(
-                slide_idx, (shape_idx + 1) * 100 + i, sub_shape, app_config, slide_area
+                slide_idx, (shape_idx + 1) * 100 + i, sub_shape, config, slide_area
             )
             for i, sub_shape in enumerate(shape.shapes)
         ]
@@ -429,6 +433,7 @@ class GroupShape(ShapeElement):
             + "\n</div>\n"
         )
 
+
 class GraphicalShape(ShapeElement):
     @classmethod
     def from_shape(
@@ -438,7 +443,7 @@ class GraphicalShape(ShapeElement):
         shape: PPTXChart | PPTXTable,
         style: dict,
         text_frame: TextFrame,
-        app_config: Config,
+        config: Config,
         slide_area: float,
     ):
         return cls(slide_idx, shape_idx, style, None, text_frame, slide_area)
@@ -476,7 +481,7 @@ class FreeShape(ShapeElement):
         shape: PPTXAutoShape,
         style: dict,
         text_frame: TextFrame,
-        app_config: Config,
+        config: Config,
         slide_area: float,
     ):
         data = {
@@ -500,7 +505,7 @@ class Connector(ShapeElement):
         shape: PPTXConnector,
         style: dict,
         text_frame: TextFrame,
-        app_config: Config,
+        config: Config,
         slide_area: float,
     ):
         return FreeShape(
@@ -550,11 +555,11 @@ class SlidePage:
         real_idx: int,
         slide_width: int,
         slide_height: int,
-        app_config: Config,
+        config: Config,
     ):
         shapes = [
             ShapeElement.from_shape(
-                slide_idx, i, shape, app_config, slide_width * slide_height
+                slide_idx, i, shape, config, slide_width * slide_height
             )
             for i, shape in enumerate(slide.shapes)
         ]
@@ -628,7 +633,6 @@ class SlidePage:
             ]
         )
 
-
     def to_text(self) -> str:
         return "\n".join(
             [
@@ -637,7 +641,7 @@ class SlidePage:
                 if shape.text_frame.is_textframe
             ]
             + [
-                "Image: "+shape.caption
+                "Image: " + shape.caption
                 for shape in self.shape_filter(Picture)
                 if not shape.is_background
             ]
@@ -688,7 +692,7 @@ class Presentation:
         self.prs.core_properties.last_modified_by = "PPTAgent"
 
     @classmethod
-    def from_file(cls, file_path: str, app_config: Config):
+    def from_file(cls, file_path: str, config: Config):
         prs = PPTXPre(file_path)
         slide_width = prs.slide_width
         slide_height = prs.slide_height
@@ -713,12 +717,12 @@ class Presentation:
                         slide_idx,
                         slide_width.pt,
                         slide_height.pt,
-                        app_config,
+                        config,
                     )
                 )
             except Exception as e:
                 error_history.append((slide_idx, str(e)))
-                if app_config.DEBUG:
+                if config.DEBUG:
                     print(f"Warning in slide {slide_idx}: {e}")
 
         num_pages = len(slides)

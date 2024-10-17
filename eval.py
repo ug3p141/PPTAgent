@@ -1,20 +1,21 @@
-from collections import defaultdict
 import json
 import os
 import random
 import shutil
+import tempfile
+import traceback
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from glob import glob
 from tempfile import TemporaryDirectory
-import tempfile
-import traceback
 
 import func_argparse
-from jinja2 import Template
 import jsonlines
 import pytorch_fid.fid_score as fid
 import torch
+from FlagEmbedding import BGEM3FlagModel
+from jinja2 import Template
 from tqdm.auto import tqdm
 
 import llms
@@ -24,8 +25,7 @@ from model_utils import get_text_embedding
 from multimodal import ImageLabler
 from presentation import Presentation
 from template_induct import TemplateInducter
-from utils import Config, filename_normalize, pexists, pjoin, ppt_to_images
-from FlagEmbedding import BGEM3FlagModel
+from utils import Config, pexists, pjoin, ppt_to_images
 
 fid.tqdm = lambda x: x
 eval_models = [
@@ -179,6 +179,7 @@ def do_generate(
 
         progressbar.update(1)
 
+
 def generate_pres(model_id: int, thread_num: int = 16, ablation_id: int = None):
     retry_times = 1
     agentclass = PPTAgent
@@ -187,8 +188,9 @@ def generate_pres(model_id: int, thread_num: int = 16, ablation_id: int = None):
     llms.agent_model = llm
     setting = get_setting(model_id, ablation_id)
     if isinstance(ablation_id, int):
-        from agent_random import PPTAgent as PPTAgentRandom
         from agent_pptc import PPTAgent as PPTAgentPPTC
+        from agent_random import PPTAgent as PPTAgentRandom
+
         ablation_agents = [PPTAgentPPTC, PPTAgentRandom, PPTAgent]
         agentclass = ablation_agents[ablation_id]
         if ablation_id == 2:
@@ -217,6 +219,7 @@ def generate_pres(model_id: int, thread_num: int = 16, ablation_id: int = None):
             )
         progressbar.close()
 
+
 def get_fid(model_id: int, ablation_id: int = -1):
     setting = get_setting(model_id, ablation_id)
     device = f"cuda:{random.randint(0,torch.cuda.device_count()-1)}"
@@ -240,7 +243,9 @@ def get_fid(model_id: int, ablation_id: int = -1):
             try:
                 fid_scores.append(fid.calculate_frechet_distance(m1, s1, m2, s2))
             except:
-                print(f"fid in {result_folder} failed, got {len(os.listdir(result_folder))} images")
+                print(
+                    f"fid in {result_folder} failed, got {len(os.listdir(result_folder))} images"
+                )
 
     results[setting] = sum(fid_scores) / len(fid_scores)
     json.dump(results, open(f"data/fid_{setting}.json", "w"), indent=4)

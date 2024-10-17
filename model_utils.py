@@ -1,40 +1,65 @@
+import json
 import os
 from copy import deepcopy
 
-from jinja2 import Template
-import llms
 import numpy as np
+import pypdfium2  # noqa
 import torch
 import torchvision.transforms as T
-from FlagEmbedding import BGEM3FlagModel
+from jinja2 import Template
+from marker.convert import convert_single_pdf
 from PIL import Image
 from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoFeatureExtractor, AutoModel
 
+import llms
 from presentation import Presentation
-from utils import IMAGE_EXTENSIONS, pjoin, get_json_from_response
+from utils import IMAGE_EXTENSIONS, pjoin, tenacity
 
-DEFAULT_DEVICE = "cuda:3"
 
-text_embed_model = None
-image_embed_model = None
-extractor = None
+def get_image_model(device: str = "cuda"):
+    model_base = "google/vit-base-patch16-224-in21k"
+    return (
+        AutoFeatureExtractor.from_pretrained(
+            model_base,
+            torch_dtype=torch.float16,
+            device_map=device,
+        ),
+        AutoModel.from_pretrained(
+            model_base,
+            torch_dtype=torch.float16,
+            device_map=device,
+        ).eval(),
+    )
+
+
+def parse_pdf(
+    pdf_path: str,
+    output_path: str,
+    model_lst: list,
+):
+    os.makedirs(output_path, exist_ok=True)
+    full_text, images, metadata = convert_single_pdf(
+        pdf_path, model_lst, batch_multiplier=64, ocr_all_pages=False
+    )
+    with open(pjoin(output_path, "source.md"), "w+", encoding="utf-8") as f:
+        f.write(full_text)
+    for filename, image in images.items():
+        image_filepath = os.path.join(output_path, filename)
+        image.save(image_filepath, "PNG")
+    with open(pjoin(output_path, "meta.json"), "w+") as f:
+        f.write(json.dumps(metadata, indent=4))
+
+    return full_text
 
 
 def get_refined_doc(text_content: str):
     template = Template(open("prompts/document_refine.txt").read())
     prompt = template.render(markdown_document=text_content)
-    return get_json_from_response(llms.long_model(prompt))
+    return llms.long_model(prompt, return_json=True)
 
 
-def get_text_embedding(text: list[str], model=None, batchsize: int = 32):
-    global text_embed_model
-    if model is None and text_embed_model is None:
-        text_embed_model = BGEM3FlagModel(
-            "BAAI/bge-m3", use_fp16=True, device=DEFAULT_DEVICE
-        )
-    if model is None:
-        model = text_embed_model
+def get_text_embedding(text: list[str], model, batchsize: int = 32):
     if isinstance(text, str):
         return torch.tensor(model.encode(text)["dense_vecs"]).to(model.device)
     result = []
@@ -47,10 +72,7 @@ def get_text_embedding(text: list[str], model=None, batchsize: int = 32):
     return result
 
 
-def prs_dedup(
-    presentation: Presentation, ppt_image_folder: str, batchsize: int = 32, model=None
-    
-):
+def prs_dedup(presentation: Presentation, model, batchsize: int = 32):
     text_embeddings = get_text_embedding(
         [i.to_text() for i in presentation.slides], model, batchsize
     )
@@ -66,21 +88,7 @@ def prs_dedup(
     return [presentation.slides.pop(i) for i in reversed(duplicates)]
 
 
-def image_embedding(image_dir: str, batchsize: int = 16, model=None):
-    global extractor
-    global image_embed_model
-    if model is None and image_embed_model is None:
-        image_embed_model = AutoModel.from_pretrained(
-            "google/vit-base-patch16-224-in21k",
-            torch_dtype=torch.float16,
-            device_map=DEFAULT_DEVICE,
-        ).eval()
-    if model is None:
-        model = image_embed_model
-    if extractor is None:
-        extractor = AutoFeatureExtractor.from_pretrained(
-            "google/vit-base-patch16-224-in21k"
-        )
+def image_embedding(image_dir: str, extractor, model, batchsize: int = 16):
     transform = T.Compose(
         [
             T.Resize(int((256 / 224) * extractor.size["height"])),

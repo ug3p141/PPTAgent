@@ -16,8 +16,15 @@ from typing import Dict, List
 import PIL.Image
 import PyPDF2
 import torch
-from fastapi import (FastAPI, File, Form, HTTPException, UploadFile, WebSocket,
-                     WebSocketDisconnect)
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.logger import logger
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -29,8 +36,7 @@ from model_utils import get_text_embedding, prs_dedup
 from multimodal import ImageLabler
 from presentation import Presentation
 from template_induct import TemplateInducter
-from utils import (IMAGE_EXTENSIONS, Config, parse_pdf, pjoin, ppt_to_images,
-                   print)
+from utils import IMAGE_EXTENSIONS, Config, parse_pdf, pjoin, ppt_to_images, print
 
 RUNS_DIR = "runs"
 STAGES = [
@@ -45,15 +51,6 @@ STAGES = [
     "PPT Generation",
     "PPT Saving",
 ]
-qwen = llms.OPENAI(
-    model="Qwen2.5-72B-Instruct-GPTQ-Int4", api_base="http://124.16.138.143:7812/v1"
-)
-qwen_vl = llms.OPENAI(
-    model="Qwen2-VL-72B-Instruct-GPTQ-Int4", api_base="http://124.16.138.144:7813/v1"
-)
-llms.long_model = qwen
-llms.agent_model = qwen
-llms.caption_model = qwen_vl
 
 # Allow CORS for frontend requests
 app = FastAPI()
@@ -326,9 +323,7 @@ def ppt_gen(task_id: str):
                 text_model,
                 doc_json,
                 functional_keys,
-                torch.stack(
-                    get_text_embedding(list(slide_cluster.keys()), text_model)
-                ),
+                torch.stack(get_text_embedding(list(slide_cluster.keys()), text_model)),
             ).work,
             3,
         )

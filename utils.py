@@ -8,7 +8,6 @@ import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 
 import json_repair
-import requests
 from lxml import etree
 from pdf2image import convert_from_path
 from pptx.dml.fill import _NoFill, _NoneFill
@@ -48,21 +47,13 @@ def get_json_from_response(response: str):
     except:
         raise RuntimeError("Failed to parse JSON from response")
 
+
 tenacity = retry(
     wait=wait_fixed(3), stop=stop_after_attempt(3), after=tenacity_log, reraise=True
 )
 
-def parse_pdf(file: str, output_dir: str, api: str):
-    os.makedirs(output_dir, exist_ok=True)
-    with tempfile.NamedTemporaryFile(suffix=".zip") as temp_zip:
-        with open(file, "rb") as f:
-            response = requests.post(api, files={"pdf": f})
-            response.raise_for_status()
-            temp_zip.write(response.content)
-            temp_zip.flush()
 
-        shutil.unpack_archive(temp_zip.name, output_dir)
-
+@tenacity
 def ppt_to_images(file: str, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -88,12 +79,11 @@ def ppt_to_images(file: str, output_dir: str):
 
         raise RuntimeError("No PDF file was created in the temporary directory")
 
-def filename_normalize(filename: str):
-    return filename.replace("/", "_").replace(" ", "_").replace("\\", "_")
 
 def set_proxy(proxy_url: str):
     os.environ["http_proxy"] = proxy_url
     os.environ["https_proxy"] = proxy_url
+
 
 def get_text_inlinestyle(para: dict, stylish: bool):
     if not stylish:

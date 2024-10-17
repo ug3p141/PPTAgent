@@ -1,18 +1,18 @@
 import json
+import traceback
 from copy import deepcopy
 from datetime import datetime
-import traceback
 
-import PIL.Image
 import jsonlines
+import PIL.Image
 import torch
 from jinja2 import Template
 
 import llms
-from apis import CodeExecutor, get_code_executor, API_TYPES
+from apis import API_TYPES, CodeExecutor, get_code_executor
 from model_utils import get_text_embedding
 from presentation import Presentation, SlidePage
-from utils import Config, get_json_from_response, get_slide_content, pexists, pjoin, print
+from utils import Config, get_slide_content, pexists, pjoin, print
 
 
 class PPTAgent:
@@ -160,6 +160,4 @@ class PPTAgent:
             json_content=self.doc_json,
             images=self.image_information,
         )
-        return get_json_from_response(llms.agent_model(prompt))
-
-
+        return llms.agent_model(prompt, return_json=True)
