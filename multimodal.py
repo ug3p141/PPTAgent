@@ -33,7 +33,7 @@ class ImageLabler:
                 shape.caption = stats["caption"]
 
     def caption_images(self):
-        caption_prompt = open("prompts/image_label/caption.txt").read()
+        caption_prompt = open("prompts/caption.txt").read()
         for image, stats in self.image_stats.items():
             if "caption" not in stats:
                 stats["caption"] = llms.caption_model(caption_prompt, image)

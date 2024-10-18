@@ -8,7 +8,7 @@ from jinja2 import Template
 import llms
 from model_utils import get_cluster, image_embedding, images_cosine_similarity
 from presentation import Presentation
-from utils import Config, pexists, pjoin, ppt_to_images
+from utils import Config, pexists, pjoin, ppt_to_images, tenacity
 
 
 class TemplateInducter:
@@ -28,33 +28,16 @@ class TemplateInducter:
         self.slide_cluster_file = pjoin(self.output_dir, "slides_cluster.json")
         os.makedirs(self.output_dir, exist_ok=True)
 
-    def work(self, most_image=3):
+    def work(
+        self,
+        image_models: list,
+        most_image=3,
+    ):
         if pexists(self.slide_cluster_file):
             self.slide_cluster = json.load(open(self.slide_cluster_file))
             return set(self.slide_cluster.pop("functional_keys")), self.slide_cluster
-        if pexists(self.slide_split_file):
-            category_cluster = json.load(open(self.slide_split_file))
-        else:
-            category_cluster = self.category_split()
-        if "content" in category_cluster:
-            content_slides_index, functional_cluster = (
-                set(category_cluster.pop("content")),
-                category_cluster,
-            )
-        elif "Uncategorized" in category_cluster:
-            content_slides_index, functional_cluster = (
-                set(
-                    category_cluster.pop("Uncategorized"),
-                ),
-                category_cluster["categories"],
-            )
-        elif "Uncategorized" in category_cluster.get("categories", []):
-            content_slides_index, functional_cluster = (
-                set(category_cluster["categories"].pop("Uncategorized")),
-                category_cluster["categories"],
-            )
-        else:
-            raise Exception(f"Unknown category cluster: {category_cluster}")
+        content_slides_index, functional_cluster = self.category_split()
+
         self.slide_cluster = defaultdict(list)
         for layout_name, cluster in functional_cluster.items():
             for slide_idx in cluster:
@@ -74,7 +57,7 @@ class TemplateInducter:
         for i in range(len(self.prs.slides)):
             if i + 1 not in used_slides_index:
                 content_slides_index.add(i + 1)
-        self.layout_split(content_slides_index, most_image)
+        self.layout_split(content_slides_index, most_image, image_models)
         if self.config.DEBUG:
             for layout_name, cluster in self.slide_cluster.items():
                 os.makedirs(
@@ -107,41 +90,68 @@ class TemplateInducter:
         )
         return set(self.slide_cluster.pop("functional_keys")), self.slide_cluster
 
+    @tenacity
     def category_split(self):
-        category_split_template = Template(
-            open("prompts/template_induct/category_split.txt").read()
-        )
-        category_cluster = llms.long_model(
-            category_split_template.render(
-                slides="\n----\n".join(
-                    [
-                        (
-                            f"Slide {slide.slide_idx} of {len(self.prs.slides)}\n"
-                            + (
-                                f"Title:{slide.slide_title}\n"
-                                if slide.slide_title
-                                else ""
+        if pexists(self.slide_split_file):
+            category_cluster = json.load(open(self.slide_split_file))
+        else:
+            category_split_template = Template(
+                open("prompts/category_split.txt").read()
+            )
+            category_cluster = llms.long_model(
+                category_split_template.render(
+                    slides="\n----\n".join(
+                        [
+                            (
+                                f"Slide {slide.slide_idx} of {len(self.prs.slides)}\n"
+                                + (
+                                    f"Title:{slide.slide_title}\n"
+                                    if slide.slide_title
+                                    else ""
+                                )
+                                + f"Layout: {slide.slide_layout_name}\n"
+                                + slide.to_text()
                             )
-                            + f"Layout: {slide.slide_layout_name}\n"
-                            + slide.to_text()
-                        )
-                        for slide in self.prs.slides
-                    ]
+                            for slide in self.prs.slides
+                        ]
+                    ),
                 ),
-            ),
-            return_json=True,
-        )
-        json.dump(
-            category_cluster,
-            open(self.slide_split_file, "w"),
-            indent=4,
-            ensure_ascii=False,
-        )
-        return category_cluster
+                return_json=True,
+            )
+            json.dump(
+                category_cluster,
+                open(self.slide_split_file, "w"),
+                indent=4,
+                ensure_ascii=False,
+            )
 
-    def layout_split(self, content_slides_index: set[int], most_image: int):
-        embeddings = image_embedding(self.template_image_folder)
-        template = Template(open("prompts/template_induct/ask_category.txt").read())
+        if "content" in category_cluster:
+            content_slides_index, functional_cluster = (
+                set(category_cluster.pop("content")),
+                category_cluster,
+            )
+        elif "Uncategorized" in category_cluster:
+            content_slides_index, functional_cluster = (
+                set(
+                    category_cluster.pop("Uncategorized"),
+                ),
+                category_cluster["categories"],
+            )
+        elif "Uncategorized" in category_cluster.get("categories", []):
+            content_slides_index, functional_cluster = (
+                set(category_cluster["categories"].pop("Uncategorized")),
+                category_cluster["categories"],
+            )
+        else:
+            os.remove(self.slide_split_file)
+            raise Exception(f"Unknown category cluster: {category_cluster}")
+        return content_slides_index, functional_cluster
+
+    def layout_split(
+        self, content_slides_index: set[int], most_image: int, image_models: list
+    ):
+        embeddings = image_embedding(self.template_image_folder, *image_models)
+        template = Template(open("prompts/ask_category.txt").read())
         content_split = defaultdict(list)
         for slide_idx in content_slides_index:
             slide = self.prs.slides[slide_idx - 1]

@@ -80,11 +80,6 @@ def ppt_to_images(file: str, output_dir: str):
         raise RuntimeError("No PDF file was created in the temporary directory")
 
 
-def set_proxy(proxy_url: str):
-    os.environ["http_proxy"] = proxy_url
-    os.environ["https_proxy"] = proxy_url
-
-
 def get_text_inlinestyle(para: dict, stylish: bool):
     if not stylish:
         return ""

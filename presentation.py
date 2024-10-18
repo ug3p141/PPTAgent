@@ -1,9 +1,5 @@
-import hashlib
-
 from pptx import Presentation as PPTXPre
 from pptx.chart.chart import Chart as PPTXChart
-from pptx.dml.color import RGBColor
-from pptx.dml.fill import _NoFill, _NoneFill
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.oxml import parse_xml
 from pptx.shapes.autoshape import Shape as PPTXAutoShape

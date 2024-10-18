@@ -1,8 +1,0 @@
-You will receive a text presentation, and its reference text.
-Your task is to rate the the similarity between the text presentation and the reference text, effectiveness, clarity, and overall quality of the text presentation, considering factors such as organization, coherence, and the ability to convey complex ideas to the audience.
-0 is the lowest score, whereas 10 is the highest score.  
-Presentation: {{slide_content}}
-Reference text of Presentation: {{slide_ref}}
-Score (an integer between 0 and 10):
-Example Output: 8
-Output: 
