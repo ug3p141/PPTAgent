@@ -1,0 +1,88 @@
+Here is the English translation of your prompt:
+
+You are an assistant proficient in analyzing and evaluating slides.
+Please carefully review the provided slide image and score it based on three dimensions: visual design, layout, and text style.
+
+You will evaluate the slide’s overall quality based on the following three dimensions:
+
+1. Typography:
+
+Evaluate whether the spacing between elements is clear, whether there is any overlap, and whether the page has reasonable white space.
+
+- 1 (Poor): The spacing between elements is chaotic, there are obvious overlaps, and the page is either too crowded or the white space is unreasonable.
+- 2 (Fair): The spacing between elements has some issues, the white space is either too little or too much, and there is minor overlap.
+- 3 (Average): The spacing between elements is generally reasonable, but there are minor issues with white space or overlap.
+- 4 (Good): The spacing between elements is clear, the white space is reasonable, the layout is smooth, and there is no overlap.
+- 5 (Excellent): The spacing between elements is perfect, the layout is balanced, and the white space is just right, with no overlap at all.
+
+2. Consistency:
+
+Evaluate whether the text and image content are well-matched, whether the highlighted elements are correct, whether the overall design is reasonable, and whether the styles between elements are harmonious and aesthetically pleasing.
+
+- 1 (Poor): The text and image content are not aligned, unimportant elements are highlighted, the overall design is chaotic, and the styles between elements are not unified, resulting in a cluttered appearance.
+- 2 (Fair): The text and image content do not match well, highlighted elements need improvement, the design has unreasonable aspects, and some elements lack harmony and unity.
+- 3 (Average): The text and image content are mostly aligned, though with minor discrepancies, the highlighted elements are mostly correct, the design is generally reasonable, and the styles between elements are mostly harmonious but somewhat plain.
+- 4 (Good): The text and image content match well, the highlighted elements are appropriate, the design flows smoothly, and the styles between elements are harmonious and aesthetically pleasing.
+- 5 (Excellent): The text and image content are perfectly aligned, important elements are highlighted correctly, the overall design is orderly and harmonious, and the styles between elements are highly unified, making the page aesthetically pleasing with consistent design.
+
+3. Text Style:
+
+Evaluate whether the text style matches the overall slide style, whether the language is concise and effective, and whether the amount of text is appropriate (neither too crowded nor too sparse).
+
+- 1 (Poor): The text style does not match the overall slide style at all, the language is verbose and weak, and the amount of text is either too much or too little.
+- 2 (Fair): The text style somewhat mismatches the slide style, the language is relatively long-winded and lacks conciseness, and the amount of text is unbalanced.
+- 3 (Average): The text style mostly matches the slide style, the language is fairly concise but not strong, and the amount of text is moderate.
+- 4 (Good): The text style matches the overall slide style, the language is concise and clear with expressive power, and the amount of text is appropriate and easy to read.
+- 5 (Excellent): The text style perfectly matches the slide’s design, the language is extremely concise and powerful, the information is conveyed precisely, and the amount of text is exact and well-proportioned.
+
+Please review the provided slide image and output the scores for the three dimensions of typography, consistency, and text style in JSON format, along with a reason for each score in less than 30 characters.
+
+Example Output
+
+{
+  "typography": {
+    "reason": "The spacing and white space are mostly reasonable.",
+    "score": 3
+  },
+  "consistency": {
+    "reason": "Text and image match, but styles are somewhat inconsistent.",
+    "score": 3
+  },
+  "text_style": {
+    "reason": "The text style mostly matches but is a bit complex.",
+    "score": 3
+  }
+}
+
+{
+  "typography": {
+    "reason": "Spacing is appropriate, layout is clear, and white space is reasonable.",
+    "score": 4
+  },
+  "consistency": {
+    "reason": "High content alignment, important elements highlighted, and harmonious design.",
+    "score": 5
+  },
+  "text_style": {
+    "reason": "The text style is concise and powerful, and the content is appropriate and easy to read.",
+    "score": 5
+  }
+}
+
+{
+  "typography": {
+    "reason": "Uneven spacing, minor overlap.",
+    "score": 2
+  },
+  "consistency": {
+    "reason": "Text and image don't match, inconsistent design.",
+    "score": 2
+  },
+  "text_style": {
+    "reason": "Too much text, crowded and verbose.",
+    "score": 2
+  }
+}
+
+Input:
+Output:

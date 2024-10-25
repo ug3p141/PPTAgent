@@ -6,6 +6,7 @@ import numpy as np
 import pypdfium2  # noqa
 import torch
 import torchvision.transforms as T
+from FlagEmbedding import BGEM3FlagModel
 from jinja2 import Template
 from marker.convert import convert_single_pdf
 from PIL import Image
@@ -16,31 +17,49 @@ import llms
 from presentation import Presentation
 from utils import IMAGE_EXTENSIONS, pjoin, tenacity
 
+device_count = torch.cuda.device_count()
 
-def get_image_model(device: str = "cuda"):
+
+def get_text_models(num_models: int = device_count):
+    text_models = [
+        BGEM3FlagModel(
+            "BAAI/bge-m3",
+            use_fp16=True,
+            device=f"cuda:{i%device_count}",
+        )
+        for i in range(num_models)
+    ]
+    return text_models
+
+
+def get_image_model(num_models: int = device_count):
     model_base = "google/vit-base-patch16-224-in21k"
-    return (
-        AutoFeatureExtractor.from_pretrained(
-            model_base,
-            torch_dtype=torch.float16,
-            device_map=device,
-        ),
-        AutoModel.from_pretrained(
-            model_base,
-            torch_dtype=torch.float16,
-            device_map=device,
-        ).eval(),
-    )
+    return [
+        (
+            AutoFeatureExtractor.from_pretrained(
+                model_base,
+                torch_dtype=torch.float16,
+                device_map=f"cuda:{i%device_count}",
+            ),
+            AutoModel.from_pretrained(
+                model_base,
+                torch_dtype=torch.float16,
+                device_map=f"cuda:{i%device_count}",
+            ).eval(),
+        )
+        for i in range(num_models)
+    ]
 
 
 def parse_pdf(
     pdf_path: str,
     output_path: str,
     model_lst: list,
+    batch_size: int = 2,
 ):
     os.makedirs(output_path, exist_ok=True)
     full_text, images, metadata = convert_single_pdf(
-        pdf_path, model_lst, batch_multiplier=64, ocr_all_pages=False
+        pdf_path, model_lst, batch_multiplier=batch_size, ocr_all_pages=False
     )
     with open(pjoin(output_path, "source.md"), "w+", encoding="utf-8") as f:
         f.write(full_text)

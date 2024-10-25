@@ -1,10 +1,8 @@
-import json
 import os
 import shutil
 import subprocess
 import tempfile
 import traceback
-import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 
 import json_repair
@@ -34,7 +32,7 @@ def get_slide_content(doc_json: dict, slide_title: str, slide: dict):
 
 
 def tenacity_log(retry_state: RetryCallState):
-    print(f"Retry attempt {retry_state.attempt_number}")
+    print(retry_state)
     traceback.print_tb(retry_state.outcome.exception().__traceback__)
 
 
@@ -211,7 +209,8 @@ def dict_to_object(dict: dict, obj: object, exclude=None):
 
 
 class Config:
-    def __init__(self, session_id=None, rundir=None, debug=True):
+
+    def __init__(self, rundir=None, session_id=None, debug=True):
         self.DEBUG = debug
         if session_id is not None:
             self.set_session(session_id)

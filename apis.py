@@ -1,20 +1,19 @@
 import inspect
 import os
-import string
+import re
 import traceback
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial
 
-from jinja2 import Template
 from pptx.dml.color import RGBColor
 from pptx.oxml import parse_xml
 from pptx.shapes.base import BaseShape
 from pptx.text.text import _Paragraph, _Run
 from pptx.util import Pt
 
-import llms
+from llms import Role
 from presentation import Picture, SlidePage
 
 
@@ -26,25 +25,21 @@ class HistoryMark:
     CODE_RUN_CORRECT = "code_run_correct"
 
 
+# 让llm注意元素层级
+# 想办法让模型不会同时编辑和删除
 class CodeExecutor:
 
-    def __init__(self, local_vars: dict[str, list[callable]], retry_times: int = 1):
+    def __init__(self, coder: Role, retry_times: int):
         self.api_history = []
         self.code_history = []
-        self.registered_functions = local_vars
+        self.coder = coder
+        if coder is None:
+            retry_times = 0
         self.retry_times = retry_times
-        self.local_vars = {func.__name__: func for func in sum(local_vars.values(), [])}
-        self.correct_template = Template(open("prompts/agent/code_feedback.txt").read())
+        self.registered_functions = API_TYPES.all_funcs()
+        self.function_regex = re.compile(r"^[a-z]+_[a-z]+\(.+\)$")
 
-    def get_apis_docs(self, op_types: list[str], need_doc: bool = False):
-        return "\n".join(
-            [
-                self._func_doc(self.registered_functions[op_type], need_doc)
-                for op_type in op_types
-            ]
-        )
-
-    def _func_doc(self, funcs: list[callable], need_doc: bool):
+    def get_apis_docs(self, funcs: list[callable], show_example: bool = False):
         api_doc = []
         for func in funcs:
             sig = inspect.signature(func)
@@ -59,77 +54,54 @@ class CodeExecutor:
                     param_str += f" = {repr(param.default)}"
                 params.append(param_str)
             signature = f"def {func.__name__}({', '.join(params)})"
-            if not need_doc:
+            if not show_example:
                 api_doc.append(signature)
                 continue
             doc = inspect.getdoc(func)
             api_doc.append(f"{signature}\n\t{doc}")
         return "\n".join(api_doc)
 
-    def execute_actions(self, prompt: str, actions: str, edit_slide: SlidePage):
-        api_calls = actions.strip().split("\n")
-        err_time = 0
-        line_idx = 0
-        code_start = False
+    def execute_actions(self, actions: str, edit_slide: SlidePage, error_time: int = 0):
         found_code = False
+        api_calls = actions.strip().split("\n")
         backup_state = deepcopy(edit_slide)
         self.api_history.append(
-            [HistoryMark.API_CALL_ERROR, edit_slide.slide_idx, prompt, actions]
+            [HistoryMark.API_CALL_ERROR, edit_slide.slide_idx, actions]
         )
-        while line_idx < len(api_calls):
-            line = api_calls[line_idx]
-            line_idx += 1
-
-            if line == "```python":
-                code_start = True
-                found_code = True
-                continue
-            elif line == "```" or not code_start:
-                code_start = False
-                continue
-            elif not line or line[0] not in string.ascii_lowercase:
-                continue
-            self.code_history.append([HistoryMark.CODE_RUN_ERROR, line, None])
+        for line_idx, line in enumerate(api_calls):
             try:
-                func = line.split("(")[0]
-                if func.startswith("def"):
+                if line_idx == len(api_calls) - 1 and not found_code:
+                    raise ValueError("No code block found in the api call.")
+                if line.startswith("def"):
                     raise ValueError("The function definition should not be output.")
-                if func not in self.local_vars:
+                if not self.function_regex.match(line):
+                    continue
+                found_code = True
+                func = line.split("(")[0]
+                if func not in self.registered_functions:
                     raise ValueError(f"The function {func} is not defined.")
-                partial_func = partial(self.local_vars[func], edit_slide)
+                self.code_history.append([HistoryMark.CODE_RUN_ERROR, line, None])
+                partial_func = partial(self.registered_functions[func], edit_slide)
                 eval(line, {}, {func: partial_func})
                 self.code_history[-1][0] = HistoryMark.CODE_RUN_CORRECT
             except:
-                err_time += 1
+                error_time += 1
                 trace_msg = traceback.format_exc()
                 self.code_history[-1][-1] = trace_msg
-                if err_time > self.retry_times:
-                    break
+                if error_time > self.retry_times:
+                    return None
                 api_lines = (
                     "\n".join(api_calls[: line_idx - 1])
                     + f"\n--> Error Line: {line}\n"
                     + "\n".join(api_calls[line_idx:])
                 )
-                edit_slide = deepcopy(backup_state)
-                prompt = self.correct_template.render(
-                    previous_task_prompt=prompt,
+                actions = self.coder(
                     error_message=trace_msg,
                     faulty_api_sequence=api_lines,
                 )
-                actions = llms.agent_model(prompt)
-                api_calls = actions.strip().split("\n")
-                line_idx = 0
-                self.api_history.append(
-                    [HistoryMark.API_CALL_ERROR, edit_slide.slide_idx, prompt, actions]
-                )
-        if not found_code:
-            self.api_history[-1][0] = HistoryMark.API_CALL_ERROR
-            raise ValueError("No code block found in the api call.")
-        if err_time > self.retry_times:
-            self.api_history[-1][0] = HistoryMark.API_CALL_ERROR
-            raise ValueError("The api call failed too many times.")
-        else:
-            self.api_history[-1][0] = HistoryMark.API_CALL_CORRECT
+                return self.execute_actions(actions, backup_state, error_time)
+        self.api_history[-1][0] = HistoryMark.API_CALL_CORRECT
+        return edit_slide
 
 
 def runs_merge(paragraph: _Paragraph):
@@ -144,9 +116,9 @@ def runs_merge(paragraph: _Paragraph):
     run = max(runs, key=lambda x: len(x.text))
     run.text = paragraph.text
 
-    for run in runs:
-        if run != run:
-            run._element.getparent().remove(run._element)
+    for r in runs:
+        if r != run:
+            r._r.getparent().remove(r._r)
     return run
 
 
@@ -184,6 +156,7 @@ def replace_para(orig_text: str, new_text: str, text_shape: BaseShape):
     raise ValueError(f"Incorrect shape: {text_shape}.")
 
 
+# 融合一下del textframe和del para
 def del_textframe(slide: SlidePage, textframe_id: str):
     """Delete the textframe with the given id."""
     shape, para = get_textframe(slide, textframe_id)
@@ -292,7 +265,7 @@ def replace_image(slide: SlidePage, figure_id: str, image_path: str):
     shape.img_path = image_path
 
 
-def del_element_byid(slide: SlidePage, element_id: str):
+def del_element(slide: SlidePage, element_id: str):
     """Delete the element with the given id"""
     if "_" in element_id:
         raise ValueError(
@@ -317,29 +290,29 @@ def del_element_byid(slide: SlidePage, element_id: str):
 
 
 class API_TYPES(Enum):
-    PPTAgent = "pptagent"
-    PPTCrew = "pptcrew"
+    Agent = [
+        replace_text,
+        del_textframe,
+        replace_image,
+        del_element,
+    ]
+    Coder = [
+        replace_text,
+        del_textframe,
+        replace_image,
+        del_element,
+    ]
+    Typographer = [
+        set_font_style,
+        adjust_element_geometry,
+    ]
 
+    # return all functions in the enum
     @classmethod
-    def all_types(cls):
-        return [i for i in API_TYPES]
-
-
-def get_code_executor(retry_times: int = 1):
-    return CodeExecutor(
-        {
-            API_TYPES.PPTAgent: [
-                replace_text,
-                del_textframe,
-                replace_image,
-                del_element_byid,
-            ],
-            API_TYPES.PPTCrew: [
-                replace_text,
-                del_textframe,
-                replace_image,
-                del_element_byid,
-            ],
-        },
-        retry_times=retry_times,
-    )
+    def all_funcs(cls) -> dict[str, callable]:
+        funcs = {}
+        for attr in dir(cls):
+            if attr.startswith("__"):
+                continue
+            funcs |= {func.__name__: func for func in getattr(cls, attr).value}
+        return funcs

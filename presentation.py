@@ -26,6 +26,10 @@ from utils import (
     pjoin,
 )
 
+# TODO 添加prompt：只能对出现了的id进行操作
+# TODO 添加css用来编辑
+INDENT = "\t"
+
 
 class TextFrame:
     def __init__(
@@ -34,18 +38,20 @@ class TextFrame:
         style: dict,
         data: list[dict],
         father_idx: int,
-        text: str = "",
+        text: str,
+        level: int,
     ):
         self.is_textframe = is_textframe
         self.style = style
         self.data = data
         self.father_idx = father_idx
         self.text = text
+        self.level = level
 
     @classmethod
-    def from_shape(cls, shape: BaseShape, father_idx: int):
+    def from_shape(cls, shape: BaseShape, father_idx: int, level: int):
         if not shape.has_text_frame:
-            return cls(False, None, None, None, None)
+            return cls(False, None, None, None, None, level)
         shape = shape.text_frame
         style = object_to_dict(shape, exclude=["text"])
         data = []
@@ -74,7 +80,7 @@ class TextFrame:
             if content["font"]["name"] == "+mj-ea":
                 content["font"]["name"] = "宋体"
             data.append(content)
-        return cls(True, style, data, father_idx, shape.text)
+        return cls(True, style, data, father_idx, shape.text, level)
 
     def to_html(self, stylish: bool) -> str:
         repr_list = []
@@ -92,10 +98,11 @@ class TextFrame:
                 )
             elif para["text"]:
                 bullets.append(
-                    f"<li id='{self.father_idx}_{para['idx']}' {get_text_inlinestyle(para, stylish)}>{para['text']}</li>"
+                    INDENT
+                    + f"<li id='{self.father_idx}_{para['idx']}' {get_text_inlinestyle(para, stylish)}>{para['text']}</li>"
                 )
             pre_bullet = para["bullet"]
-        return "\n".join(repr_list)
+        return "\n".join([INDENT * self.level + repr for repr in repr_list])
 
     def __repr__(self):
         return f"TextFrame: {self.text}"
@@ -115,6 +122,7 @@ class ShapeElement:
         data: dict,
         text_frame: TextFrame,
         slide_area: float,
+        level: int,
     ):
         self.slide_idx = slide_idx
         self.shape_idx = shape_idx
@@ -124,6 +132,7 @@ class ShapeElement:
         self.stylish = False
         self.closures = {}
         self.slide_area = slide_area
+        self.level = level
 
     @classmethod
     def from_shape(
@@ -133,6 +142,7 @@ class ShapeElement:
         shape: BaseShape,
         config: Config,
         slide_area: float,
+        level: int = 0,
     ):
         if shape_idx > 100 and isinstance(shape, PPTXGroupShape):
             raise ValueError(f"nested group shapes are not allowed")
@@ -156,11 +166,19 @@ class ShapeElement:
             "fill": fill,
             "line": line,
         }
-        text_frame = TextFrame.from_shape(shape, shape_idx)
+        text_frame = TextFrame.from_shape(shape, shape_idx, level + 1)
         obj = SHAPECAST.get(shape.shape_type, UnsupportedShape).from_shape(
-            slide_idx, shape_idx, shape, style, text_frame, config, slide_area
+            slide_idx,
+            shape_idx,
+            shape,
+            style,
+            text_frame,
+            config,
+            slide_area,
+            level,
         )
         obj.xml = shape._element.xml
+        # ? obj.shape = shape
         return obj
 
     def build(self, slide, shape):
@@ -178,8 +196,11 @@ class ShapeElement:
         return f"{self.__class__.__name__}: shape {self.shape_idx} of slide {self.slide_idx}"
 
     def to_html(self, stylish) -> str:
-        self.stylish = stylish
-        return ""
+        raise NotImplementedError
+
+    @property
+    def indent(self):
+        return "\t" * self.level
 
     @property
     def left(self):
@@ -249,12 +270,18 @@ class TextBox(ShapeElement):
         text_frame: TextFrame,
         config: Config,
         slide_area: float,
+        level: int,
     ):
-        return cls(slide_idx, shape_idx, style, None, text_frame, slide_area)
+        return cls(slide_idx, shape_idx, style, None, text_frame, slide_area, level)
 
     def to_html(self, stylish) -> str:
         self.stylish = stylish
-        return f"<div {self.inline_style}>\n{self.text_frame.to_html(stylish)}\n</div>"
+        return (
+            self.indent
+            + f"<div {self.inline_style}>\n{self.text_frame.to_html(stylish)}\n"
+            + self.indent
+            + "</div>\n"
+        )
 
 
 class Picture(ShapeElement):
@@ -268,6 +295,7 @@ class Picture(ShapeElement):
         text_frame: TextFrame,
         config: Config,
         slide_area: float,
+        level: int,
     ):
         if shape.image.ext not in IMAGE_EXTENSIONS:
             raise ValueError(f"unsupported image type {shape.image.ext}")
@@ -291,6 +319,7 @@ class Picture(ShapeElement):
             [img_path, shape.name, ""],
             text_frame,
             slide_area,
+            level=level,
         )
         picture.is_background = False
         return picture
@@ -326,9 +355,15 @@ class Picture(ShapeElement):
             return ""
 
         return (
-            f"<figure  id='{self.shape_idx}' {self.inline_style}>"
-            + (f"\n<figcaption>{self.caption}</figcaption>" if self.caption else "")
-            + "\n</figure>"
+            self.indent
+            + f"<figure  id='{self.shape_idx}' {self.inline_style}>\n"
+            + (
+                f"{self.indent+INDENT}<figcaption>{self.caption}</figcaption>\n"
+                if self.caption
+                else ""
+            )
+            + self.indent
+            + "</figure>\n"
         )
 
 
@@ -343,6 +378,7 @@ class Placeholder(ShapeElement):
         text_frame: TextFrame,
         config: Config,
         slide_area: float,
+        level: int,
     ):
         assert (
             sum(
@@ -357,15 +393,36 @@ class Placeholder(ShapeElement):
         ), "placeholder should have only one type"
         if isinstance(shape, PlaceholderPicture):
             data = Picture.from_shape(
-                slide_idx, shape_idx, shape, style, text_frame, config, slide_area
+                slide_idx,
+                shape_idx,
+                shape,
+                style,
+                text_frame,
+                config,
+                slide_area,
+                level,
             )
         elif shape.has_text_frame:
             data = TextBox.from_shape(
-                slide_idx, shape_idx, shape, style, text_frame, config, slide_area
+                slide_idx,
+                shape_idx,
+                shape,
+                style,
+                text_frame,
+                config,
+                slide_area,
+                level,
             )
         elif shape.has_chart or shape.has_table:
             data = GraphicalShape.from_shape(
-                slide_idx, shape_idx, shape, style, text_frame, config, slide_area
+                slide_idx,
+                shape_idx,
+                shape,
+                style,
+                text_frame,
+                config,
+                slide_area,
+                level,
             )
         return data
 
@@ -381,16 +438,24 @@ class GroupShape(ShapeElement):
         text_frame: TextFrame,
         config: Config,
         slide_area: float,
+        level: int,
     ):
         data = [
             ShapeElement.from_shape(
-                slide_idx, (shape_idx + 1) * 100 + i, sub_shape, config, slide_area
+                slide_idx,
+                (shape_idx + 1) * 100 + i,
+                sub_shape,
+                config,
+                slide_area,
+                level=level + 1,
             )
             for i, sub_shape in enumerate(shape.shapes)
         ]
         for idx, shape_bounds in enumerate(parse_groupshape(shape)):
             data[idx].style["shape_bounds"] = shape_bounds
-        return cls(slide_idx, shape_idx, style, data, text_frame, slide_area)
+        return cls(
+            slide_idx, shape_idx, style, data, text_frame, slide_area, level=level
+        )
 
     def build(self, slide: PPTXSlide):
         for sub_shape in self.data:
@@ -424,9 +489,12 @@ class GroupShape(ShapeElement):
     def to_html(self, stylish) -> str:
         self.stylish = stylish
         return (
-            f"<div class='{self.group_label}' {self.inline_style}>\n"
+            self.indent
+            + f"<div class='{self.group_label}' {self.inline_style}>\n"
             + "\n".join([shape.to_html(stylish) for shape in self.data])
-            + "\n</div>\n"
+            + "\n"
+            + self.indent
+            + "</div>\n"
         )
 
 
@@ -441,8 +509,11 @@ class GraphicalShape(ShapeElement):
         text_frame: TextFrame,
         config: Config,
         slide_area: float,
+        level: int,
     ):
-        return cls(slide_idx, shape_idx, style, None, text_frame, slide_area)
+        return cls(
+            slide_idx, shape_idx, style, None, text_frame, slide_area, level=level
+        )
 
     @property
     def orig_shape(self):
@@ -460,6 +531,7 @@ class GraphicalShape(ShapeElement):
             ],
             self.text_frame,
             self.slide_area,
+            level=self.level,
         )
         shape.style["fill"] = None
         shape.style["line"] = None
@@ -479,17 +551,24 @@ class FreeShape(ShapeElement):
         text_frame: TextFrame,
         config: Config,
         slide_area: float,
+        level: int,
     ):
         data = {
             "shape_type": shape.auto_shape_type.real,
             "svg_tag": str(shape.auto_shape_type).split()[0].lower(),
         }
-        return cls(slide_idx, shape_idx, style, data, text_frame, slide_area)
+        return cls(
+            slide_idx, shape_idx, style, data, text_frame, slide_area, level=level
+        )
 
     def to_html(self, stylish) -> str:
         self.stylish = stylish
-        text = self.text_frame.to_html(stylish)
-        return f"<div data-shape-type='{self.data['svg_tag']}' {self.inline_style}>\n{text}\n</div>\n"
+        text = ""
+        if self.text_frame.is_textframe:
+            text = self.text_frame.to_html(stylish)
+        elif not stylish:
+            return ""
+        return f"{self.indent}<div data-shape-type='{self.data['svg_tag']}' {self.inline_style}>\n{text}\n{self.indent}</div>\n"
 
 
 class Connector(ShapeElement):
@@ -503,6 +582,7 @@ class Connector(ShapeElement):
         text_frame: TextFrame,
         config: Config,
         slide_area: float,
+        level: int,
     ):
         return FreeShape(
             slide_idx,
@@ -511,6 +591,7 @@ class Connector(ShapeElement):
             {"shape_type": "connector", "svg_tag": "connector"},
             text_frame,
             slide_area,
+            level,
         )
 
 
@@ -796,3 +877,11 @@ SHAPECAST: dict[int, ShapeElement] = {
     MSO_SHAPE_TYPE.DIAGRAM: GraphicalShape,
     MSO_SHAPE_TYPE.LINE: Connector,
 }
+
+if __name__ == "__main__":
+    from glob import glob
+
+    for ppt in glob("data/*/pptx/*/source_standard.pptx"):
+        prs = Presentation.from_file(ppt, Config("/tmp"))
+        for slide in prs.slides:
+            print(slide.to_html(True))

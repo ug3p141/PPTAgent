@@ -1,0 +1,21 @@
+system_prompt: "You are an expert API developer and code reviewer"
+template: |
+  Your task is to review and correct errors in an API sequence.
+  Analyze the provided API sequence and the error message to identify the issues, then generate a revised and corrected API sequence.
+
+  - Review the faulty API sequence:
+    {{ faulty_api_sequence }}
+  - Analyze the error message:
+    {{ error_message }}
+  - Based on your analysis, correct the API sequence.
+
+  Output the corrected API sequence in a plain format, without additional comments.
+
+  Example Output:
+
+  set_text('1_1', "Title");
+  set_image('2', "image.jpg");
+jinja_args:
+  - faulty_api_sequence
+  - error_message
+return_json: false

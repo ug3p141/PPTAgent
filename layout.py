@@ -8,10 +8,10 @@ from jinja2 import Template
 import llms
 from model_utils import get_cluster, image_embedding, images_cosine_similarity
 from presentation import Presentation
-from utils import Config, pexists, pjoin, ppt_to_images, tenacity
+from utils import Config, pexists, pjoin, tenacity
 
 
-class TemplateInducter:
+class LayoutInducter:
     def __init__(
         self,
         prs: Presentation,
@@ -25,19 +25,18 @@ class TemplateInducter:
         self.config = config
         self.output_dir = pjoin(config.RUN_DIR, "template_induct")
         self.slide_split_file = pjoin(self.output_dir, "slides_split.json")
-        self.slide_cluster_file = pjoin(self.output_dir, "slides_cluster.json")
+        self.layout_cache = pjoin(self.output_dir, "slides_cluster.json")
         os.makedirs(self.output_dir, exist_ok=True)
 
-    def work(
+    def induct(
         self,
         image_models: list,
         most_image=3,
     ):
-        if pexists(self.slide_cluster_file):
-            self.slide_cluster = json.load(open(self.slide_cluster_file))
+        if pexists(self.layout_cache):
+            self.slide_cluster = json.load(open(self.layout_cache))
             return set(self.slide_cluster.pop("functional_keys")), self.slide_cluster
         content_slides_index, functional_cluster = self.category_split()
-
         self.slide_cluster = defaultdict(list)
         for layout_name, cluster in functional_cluster.items():
             for slide_idx in cluster:
@@ -84,7 +83,7 @@ class TemplateInducter:
         self.slide_cluster["functional_keys"] = functional_keys
         json.dump(
             self.slide_cluster,
-            open(self.slide_cluster_file, "w"),
+            open(self.layout_cache, "w"),
             indent=4,
             ensure_ascii=False,
         )
@@ -143,6 +142,7 @@ class TemplateInducter:
                 category_cluster["categories"],
             )
         else:
+            breakpoint()
             os.remove(self.slide_split_file)
             raise Exception(f"Unknown category cluster: {category_cluster}")
         return content_slides_index, functional_cluster

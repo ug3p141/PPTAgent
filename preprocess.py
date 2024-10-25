@@ -1,20 +1,21 @@
 import glob
 import json
+import multiprocessing
 import os
 import re
 import shutil
 import sys
 import traceback
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from functools import partial
 from time import sleep, time
 
-import jsonlines
 import torch
 from FlagEmbedding import BGEM3FlagModel
-from marker.models import load_all_models
 from tqdm import tqdm
 
 import llms
+from layout import LayoutInducter
 from model_utils import (
     get_image_model,
     get_refined_doc,
@@ -23,13 +24,23 @@ from model_utils import (
     parse_pdf,
     prs_dedup,
 )
+from multimodal import ImageLabler
 from presentation import Presentation
 from utils import Config, pexists, pjoin, ppt_to_images
 
-text_models = BGEM3FlagModel("BAAI/bge-m3", use_fp16=True, device=2)
-image_models = get_image_model(device=f"cuda:{3}")
-marker_models = []
 markdown_clean_pattern = re.compile(r"!\[.*?\]\((.*?)\)")
+device_count = torch.cuda.device_count()
+
+
+def rm_folder(folder: str):
+    try:
+        shutil.rmtree(folder)
+    except:
+        for i in os.listdir(folder):
+            try:
+                rm_folder(pjoin(folder, i))
+            except:
+                pass
 
 
 def older_than(filepath, seconds: int = 10):
@@ -40,33 +51,56 @@ def older_than(filepath, seconds: int = 10):
     return seconds < (current_time - file_creation_time)
 
 
-def prepare_pdf_folder(pdf_folder: str, idx: int):
-    if not len(marker_models) > idx:
-        model = load_all_models(
-            device=f"cuda:{idx%torch.cuda.device_count()}", dtype=torch.float16
-        )
-        marker_models.append(model)
-    else:
-        model = marker_models[idx]
-    if not older_than(pdf_folder + "/original.pdf"):
-        return
-    if not os.path.exists(pjoin(pdf_folder, "source.md")):
-        text_content = parse_pdf(
-            pdf_folder + "/original.pdf",
-            pdf_folder,
-            model,
-        )
-    else:
-        text_content = open(pjoin(pdf_folder, "source.md")).read()
+def process_filetype(file_type: str, func: callable, thread_num: int):
+    folders = glob.glob(f"data/*/{file_type}/*")
+    progress_bar = tqdm(total=len(folders), desc=f"processing {file_type}")
 
-    if len(text_content) < 512 or len(text_content) > 32768:
-        shutil.rmtree(pdf_folder)
+    def process_folder(folder, *args, **kwargs):
+        try:
+            func(folder, *args, **kwargs)
+        except Exception as e:
+            print(f"process {file_type} folder {folder} failed: {e}")
+            traceback.print_exc()
+        finally:
+            progress_bar.update(1)
+
+    with ThreadPoolExecutor(thread_num) as executor:
+        list(executor.map(process_folder, folders, range(len(folders))))
+
+    progress_bar.close()
+
+
+def parse_pdfs(pdf_folders: list[str], idx: int):
+    from marker.models import (  # require numpy==1.26.0, which is conflict with other packages
+        load_all_models,
+    )
+
+    model = load_all_models(device=idx % device_count, dtype=torch.float16)
+    for pdf_folder in pdf_folders:
+        if not older_than(pdf_folder + "/original.pdf"):
+            continue
+        if not pexists(pjoin(pdf_folder, "source.md")):
+            text_content = parse_pdf(
+                pdf_folder + "/original.pdf",
+                pdf_folder,
+                model,
+            )
+            if len(text_content) < 512 or len(text_content) > 32768:
+                rm_folder(pdf_folder)
+                continue
+
+
+def prepare_pdf_folder(pdf_folder: str, rank, image_models):
+    if not pexists(pjoin(pdf_folder, "source.md")):
         return
-    if not pexists(pjoin(pdf_folder, "image_caption.jsonl")):
-        images_embeddings = image_embedding(pdf_folder, *image_models)
+    text_content = open(pjoin(pdf_folder, "source.md")).read()
+    if not pexists(pjoin(pdf_folder, "image_caption.json")):
+        images_embeddings = image_embedding(
+            pdf_folder, *image_models[rank % len(image_models)]
+        )
         images = [pjoin(pdf_folder, image) for image in images_embeddings]
-        if len(images_embeddings) < 3:
-            shutil.rmtree(pdf_folder)
+        if len(images_embeddings) == 0:
+            rm_folder(pdf_folder)
             return
         similarity_matrix = images_cosine_similarity(list(images_embeddings.values()))
         for i in range(len(similarity_matrix)):
@@ -77,16 +111,11 @@ def prepare_pdf_folder(pdf_folder: str, idx: int):
                     break
         images = [image for image in images if pexists(image)]
         image_stats = {}
-        caption_prompt = open("prompts/image_label/caption.txt").read()
+        caption_prompt = open("prompts/caption.txt").read()
         for image in images:
-            try:
-                image_stats[image] = llms.caption_model(caption_prompt, image)
-            except:
-                os.remove(image)
-        with jsonlines.open(
-            pjoin(pdf_folder, "image_caption.jsonl"), mode="w"
-        ) as writer:
-            writer.write_all(image_stats)
+            image_stats[image] = llms.internvl_76(caption_prompt, image)
+        with open(pjoin(pdf_folder, "image_caption.json"), mode="w") as f:
+            json.dump(image_stats, f, indent=4, ensure_ascii=False)
 
     if not pexists(pjoin(pdf_folder, "refined_doc.json")):
         text_content = markdown_clean_pattern.sub("", text_content)
@@ -99,18 +128,18 @@ def prepare_pdf_folder(pdf_folder: str, idx: int):
         )
 
 
-def prepare_ppt_folder(ppt_folder: str):
-    if os.path.exists(ppt_folder + "/template_images"):
-        return
-    if not older_than(ppt_folder + "/original.pptx"):
+def prepare_ppt_folder(ppt_folder: str, text_model):
+    if os.path.exists(ppt_folder + "/image_stats.json") or not older_than(
+        ppt_folder + "/original.pptx"
+    ):
         return
     config = Config(rundir=ppt_folder, debug=False)
     presentation = Presentation.from_file(ppt_folder + "/original.pptx", config=config)
     ppt_image_folder = pjoin(config.RUN_DIR, "slide_images")
     ppt_to_images(presentation.source_file, ppt_image_folder)
-    duplicates = prs_dedup(presentation, text_models)
+    duplicates = prs_dedup(presentation, text_model)
     if len(duplicates) > len(presentation) / 2:
-        shutil.rmtree(ppt_folder)
+        rm_folder(ppt_folder)
         return
     for slide in duplicates:
         os.remove(pjoin(ppt_image_folder, f"slide_{slide.real_idx:04d}.jpg"))
@@ -134,56 +163,63 @@ def prepare_ppt_folder(ppt_folder: str):
         pjoin(ppt_folder, "template_images"),
     )
     os.remove(pjoin(ppt_folder, "template.pptx"))
+    ImageLabler(presentation, config).caption_images()
 
 
-def process_filetype(file_type: str, func: callable, thread_num: int = 32):
-    folders = glob.glob(f"data/*/{file_type}/*")
-    progress_bar = tqdm(total=len(folders), desc=f"processing {file_type}")
+# wait for vllm, 让每个layout model自己来split
+# 它只能要么接受image要么不接受好像
+def prepare_layout(thread_num: int):
+    layout_llms = [llms.gpt4o]
 
-    def process_folder(folder, *args, **kwargs):
-        try:
-            func(folder, *args, **kwargs)
-        except Exception as e:
-            print(f"process {file_type} folder {folder} failed: {e}")
-            traceback.print_exc()
-        finally:
-            progress_bar.update(1)
+    def get_layout(llm: llms.LLM, image_models: list, ppt_folder: str, rank: int):
+        if not pexists(ppt_folder + "/image_stats.json"):
+            return
+        ppt_image_folder = pjoin(ppt_folder, "slide_images")
+        config = Config(rundir=ppt_folder)
+        presentation = Presentation.from_file(
+            pjoin(ppt_folder, "source_standard.pptx"), config
+        )
+        template_image_folder = pjoin(ppt_folder, "template_images")
+        llms.long_model = llm
+        llms.caption_model = llm
+        if len(os.listdir(template_image_folder)) != len(presentation):
+            raise Exception(f"template_image_folder {template_image_folder} not match")
+        config.set_rundir(pjoin(ppt_folder, llm.model))
+        layout_inducter = LayoutInducter(
+            presentation, ppt_image_folder, template_image_folder, config
+        )
+        layout_inducter.induct(image_models[rank % len(image_models)])
 
-    with ThreadPoolExecutor(thread_num) as executor:
-        list(executor.map(process_folder, folders, range(thread_num)))
-
-    progress_bar.close()
-
-
-def data_stat(check_integrity: bool = True):
-    for topic in glob.glob("data/*/*/*"):
-        for file_type in os.listdir(topic):
-            if file_type not in ["pptx", "pdf"]:
-                continue
-            num_files = len(os.listdir(pjoin(topic, file_type)))
-            print(f"{topic.split('/')[-1]}: {num_files} {file_type} files")
-            if not check_integrity:
-                continue
-            if file_type == "pdf":
-                for folder in glob.glob(pjoin(topic, file_type, "*")):
-                    if not pexists(pjoin(folder, "image_caption.jsonl")):
-                        print(f"{folder} has no image_caption.jsonl")
-                    if not pexists(pjoin(folder, "refined_doc.json")):
-                        print(f"{folder} has no refined_doc.json")
-            if file_type == "pptx":
-                for folder in glob.glob(pjoin(topic, file_type, "*")):
-                    if not pexists(pjoin(folder, "source_standard.pptx")):
-                        print(f"{folder} has no source_standard.pptx")
+    for layout_llm in layout_llms:
+        print(f"Preparing templates using {layout_llm.model}")
+        image_models = [
+            get_image_model(device=i % device_count) for i in range(thread_num)
+        ]
+        process_filetype(
+            "pptx", partial(get_layout, layout_llm, image_models), thread_num
+        )
 
 
 if __name__ == "__main__":
     while True:
         if sys.argv[1] == "prepare_ppt":
+            text_model = BGEM3FlagModel("BAAI/bge-m3", use_fp16=True, device=2)
             for ppt_folder in tqdm(glob.glob("data/*/pptx/*"), desc="prepare ppt"):
-                prepare_ppt_folder(ppt_folder)
+                prepare_ppt_folder(ppt_folder, text_model)
+        elif sys.argv[1] == "prepare_template":
+            prepare_layout(int(sys.argv[2]))
+        elif sys.argv[1] == "parse_pdf":
+            multiprocessing.set_start_method("spawn", force=True)
+            num_process = int(sys.argv[2])
+            with ProcessPoolExecutor(max_workers=num_process) as executor:
+                folders = glob.glob("data/*/pdf/*")
+                subfolders = [[] for _ in range(num_process)]
+                for idx, folder in enumerate(folders):
+                    subfolders[idx % num_process].append(folder)
+                list(executor.map(parse_pdfs, subfolders, range(num_process)))
         elif sys.argv[1] == "prepare_pdf":
+            image_models = [get_image_model(device=i) for i in range(device_count)]
+            prepare_pdf_folder = partial(prepare_pdf_folder, image_models=image_models)
             process_filetype("pdf", prepare_pdf_folder, int(sys.argv[2]))
-        elif sys.argv[1] == "stat":
-            data_stat()
-            exit()
         print("process finished, waiting for next task")
+        sleep(16)

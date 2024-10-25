@@ -21,15 +21,10 @@ from utils import Config, tenacity
 
 topics = [
     "culture",
-    "economy",
     "education",
-    "environment",
-    "health",
-    "media",
     "science",
     "society",
     "technology",
-    "transportation",
 ]
 
 BANNED_LICENSES = [

@@ -1,11 +1,14 @@
 import asyncio
 import base64
 
+import jsonlines
 import requests
+import yaml
+from jinja2 import Template
 from oaib import Auto
 from openai import OpenAI
 
-from utils import get_json_from_response, print, tenacity
+from utils import get_json_from_response, pexists, pjoin, print, tenacity
 
 
 def run_async(coroutine):
@@ -14,96 +17,117 @@ def run_async(coroutine):
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-    if loop.is_running():
-        job = loop.create_task(coroutine)
-        loop.run_until_complete(job)
-    else:
-        job = loop.run_until_complete(coroutine)
+    job = loop.run_until_complete(coroutine)
     return job
 
 
-class OPENAI:
+class LLM:
     def __init__(
         self,
         model: str = "gpt-4o-2024-08-06",
         api_base: str = None,
+        use_openai: bool = True,
         use_batch: bool = False,
-        history_limit: int = 8,
     ) -> None:
-        self.client = OpenAI(base_url=api_base)
+        if use_openai:
+            self.client = OpenAI(base_url=api_base)
         if use_batch:
+            assert use_openai, "use_batch must be used with use_openai"
             self.oai_batch = Auto(loglevel=0)
-        self._model = model
         self.model = model
+        self.api_base = api_base
+        self._use_openai = use_openai
         self._use_batch = use_batch
-        self.system_message = [
-            {
-                "role": "system",
-                "content": [{"type": "text", "text": "You are a helpful assistant"}],
-            }
-        ]
-        self.history = []
-        self.history_limit = history_limit
-        assert history_limit % 2 == 0, "history_limit must be even"
 
-    @tenacity
     def __call__(
         self,
         content: str,
-        image_files: list[str] = None,
-        save_history: bool = False,
+        images: list[str] = None,
+        system_message: str = None,
+        history: list = None,
         delay_batch: bool = False,
         return_json: bool = False,
+        return_message: bool = False,
     ) -> str:
-        if len(self.history) > self.history_limit:
-            self.history = self.history[-self.history_limit :]
         if content.startswith("You are"):
             system_message, content = content.split("\n", 1)
-            self.system_message[0]["content"][0]["text"] = system_message
-        messages = self.history + [
-            {"role": "user", "content": [{"type": "text", "text": content}]}
-        ]
-        if image_files is not None:
-            if not isinstance(image_files, list):
-                image_files = [image_files]
-            for image_file in image_files:
-                with open(image_file, "rb") as image:
-                    messages[-1]["content"].append(
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64.b64encode(image.read()).decode('utf-8')}"
-                            },
-                        }
-                    )
-        if not self._use_batch:
-            try:
-                completion = self.client.chat.completions.create(
-                    model=self._model, messages=self.system_message + messages
-                )
-            except Exception as e:
-                print(e)
-                raise e
-            response = completion.choices[0].message.content
-        else:
-            result = run_async(self._run_batch(messages, delay_batch))
+        if history is None:
+            history = []
+        system, message = self.format_message(content, images, system_message)
+        if self._use_batch:
+            result = run_async(self._run_batch(system + history + message, delay_batch))
             if delay_batch:
                 return
             response = result.to_dict()["result"][0]["choices"][0]["message"]["content"]
-        messages.append({"role": "assistant", "content": response})
-        if save_history:
-            self.history = messages
-        return response if not return_json else get_json_from_response(response)
+        elif self._use_openai:
+            completion = self.client.chat.completions.create(
+                model=self.model, messages=system + history + message
+            )
+            response = completion.choices[0].message.content
+        else:
+            response = requests.post(
+                self.api_base,
+                json={
+                    "system": system_message,
+                    "prompt": content,
+                    "image": [
+                        i["image_url"]["url"]
+                        for i in message[-1]["content"]
+                        if i["type"] == "image_url"
+                    ],
+                },
+            )
+            response.raise_for_status()
+            response = response.text
+        message.append({"role": "assistant", "content": response})
+        if return_json:
+            response = get_json_from_response(response)
+        if return_message:
+            return response, message
+        return response
 
-    async def _run_batch(self, message: list, delay_batch: bool = False):
+    def __repr__(self) -> str:
+        return f"LLM(model={self.model}, api_base={self.api_base})"
+
+    async def _run_batch(self, messages: list, delay_batch: bool = False):
         await self.oai_batch.add(
             "chat.completions.create",
-            model=self._model,
-            messages=self.system_message + message,
+            model=self.model,
+            messages=messages,
         )
         if delay_batch:
             return
         return await self.oai_batch.run()
+
+    def format_message(
+        self,
+        content: str,
+        images: list[str] = None,
+        system_message: str = None,
+    ):
+        if system_message is None:
+            system_message = "You are a helpful assistant"
+        system = [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": system_message}],
+            }
+        ]
+        message = [{"role": "user", "content": [{"type": "text", "text": content}]}]
+        if images is not None:
+            if not isinstance(images, list):
+                images = [images]
+            for image in images:
+                with open(image, "rb") as f:
+                    message[0]["content"].append(
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64.b64encode(f.read()).decode('utf-8')}"
+                            },
+                        }
+                    )
+        return system, message
 
     def get_batch_result(self):
         results = run_async(self.oai_batch.run())
@@ -115,49 +139,69 @@ class OPENAI:
     def clear_history(self):
         self.history = []
 
-    def __repr__(self):
-        return f"OPENAI Server (model={self.model}, use_batch={self._use_batch})"
+
+# by type, by relevance, by time
+class Role:
+    def __init__(self, name: str, llm: LLM, config: dict = None):
+        self.name = name
+        self.llm = llm
+        self.model = llm.model
+        if config is None:
+            with open(f"roles/{name}.yaml", "r") as f:
+                config = yaml.safe_load(f)
+        self.prompt_args = set(config["jinja_args"])
+        self.system_message = config["system_prompt"]
+        self.return_json = config["return_json"]
+        self.template = Template(config["template"])
+        self.history = []
+
+    def get_history(self):
+        pass
+
+    def save_history(self, output_dir: str):
+        history_file = pjoin(output_dir, f"{self.name}.jsonl")
+        if pexists(history_file) and len(self.history) == 0:
+            return
+        with jsonlines.open(history_file, "w") as writer:
+            writer.write_all(self.history)
+
+    def __repr__(self) -> str:
+        return f"Role(name={self.name}, model={self.model})"
+
+    def __call__(self, images: list[str] = None, **jinja_args):
+        assert self.prompt_args == set(jinja_args.keys()), "Invalid arguments"
+        response, message = self.llm(
+            self.template.render(**jinja_args),
+            system_message=self.system_message,
+            history=self.get_history(),
+            images=images,
+            return_json=self.return_json,
+            return_message=True,
+        )
+        self.history.append(message)
+        return response
 
 
-class APIModel:
-    def __init__(self, model: str, api_base: str):
-        self.api_base = api_base
-        self.model = model
-
-    def __call__(self, content: str, image_files: list[str] = None):
-        system_message = "You are a helpful assistant"
-        if content.startswith("You are"):
-            system_message, content = content.split("\n", 1)
-        data = {"prompt": content, "system": system_message, "image": []}
-
-        if image_files:
-            for image_file in image_files:
-                with open(image_file, "rb") as image:
-                    base64_image = base64.b64encode(image.read()).decode("utf-8")
-                    data["image"].append(f"data:image/jpeg;base64,{base64_image}")
-
-        response = requests.post(self.api_base, json=data)
-        response.raise_for_status()
-        return response.text
-
-
-gpt4o = OPENAI(use_batch=True)
-gpt4omini = OPENAI(model="gpt-4o-mini")
-qwen = OPENAI(model="Qwen2-72B-Instruct", api_base="http://localhost:7999/v1")
-qwen2_5 = OPENAI(
-    model="Qwen2.5-72B-Instruct-GPTQ-Int4", api_base="http://124.16.138.143:7812/v1"
-)
-qwen_vl = OPENAI(
+gpt4o = LLM(use_batch=True)
+gpt4omini = LLM(model="gpt-4o-mini")
+qwen2_5 = LLM(model="Qwen2.5-72B-Instruct", api_base="http://127.0.0.1:7999/v1")
+qwen_vl = LLM(
     model="Qwen2-VL-72B-Instruct-GPTQ-Int4", api_base="http://124.16.138.144:7813/v1"
 )
-internvl_multi = APIModel(
+internvl_76 = LLM(model="InternVL2-Llama3-76B", api_base="http://127.0.0.1:8000/v1")
+internvl_multi = LLM(
     model="InternVL2-Llama3-76B",
-    api_base="http://124.16.138.150:5000/generate",
+    api_base="http://127.0.0.1:5000/generate",
+    use_openai=False,
 )
-internvl_76 = OPENAI(model="InternVL2-Llama3-76B", api_base="http://127.0.0.1:8000/v1")
-caption_model = qwen_vl
+caption_model = internvl_76
 long_model = qwen2_5
 agent_model = qwen2_5
 
+
 if __name__ == "__main__":
-    gpt4o("who r u")
+    print(
+        qwen2_5(
+            "who r u",
+        )
+    )
