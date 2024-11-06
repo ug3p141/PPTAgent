@@ -1,0 +1,43 @@
+You are an assistant proficient in analyzing and evaluating slide text.
+Please carefully review the provided reference content and slide text, focusing on text quality and similarity to reference.
+
+Scoring Criteria:
+1 (Poor): Any of the following conditions:
+  - Unprofessional expressions or errors, confused sentence structure, inappropriate word choice
+  - Significant deviation from reference, missing key information or containing incorrect information
+
+2 (Average): Any of the following conditions:
+  - Generally professional but needs improvement in expressions, sentence structure, or word choice
+  - Generally aligned with reference but with minor information gaps or deviations
+
+3 (Excellent): All of the following conditions:
+  - Professional and accurate expressions, clear sentence structure, appropriate word choice
+  - Accurately reflects reference content, retains all key information without errors
+
+Please evaluate the text and output in JSON format with a justification (within 50 characters) and score.
+
+Example Output:
+```json
+{
+  "reason": "Poor expression, major deviation from reference",
+  "score": 1
+}
+```
+
+```json
+{
+  "reason": "Clear but needs polish, minor information gaps",
+  "score": 2
+}
+```
+
+```json
+{
+  "reason": "Professional writing, perfectly matches reference",
+  "score": 3
+}
+```
+Input:
+slide: {{slide}}
+reference: {{reference}}
+Output:

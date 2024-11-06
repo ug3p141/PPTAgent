@@ -1,0 +1,21 @@
+Please analyze the slide elements and create a structured template schema in JSON format. The schema should:
+
+1. Identify key content elements (both text and images) that make up the slide
+2. For each element, specify:
+   - "description": A clear description of the element's purpose, do not mention any detail
+   - "type": Whether it's "text" or "image"
+   - "data":
+      * For text elements: The actual text content as string or array
+      * For image elements: Describe the image's main content and classify its type (Table/Chart/Diagram/Banner/Background/Icon/Logo/Picture) in this format - <type>: <50-word description>
+
+Example format:
+{
+  "element_name": {
+    "description": "purpose of this element", # do not mention any detail, just purpose
+    "type": "text" or "image",
+    "data": "actual text" or "<type>:<50-word description>" # describe the detail here
+            ["content1", "content2"]  // Multiple elements
+  }
+}
+
+Please provide a schema that could be used as a template for creating similar slides.

@@ -1,3 +1,45 @@
-# number of slides
-# logically flow
-# function layouts
+You are an assistant proficient in analyzing and evaluating presentation outlines.
+Please carefully review the provided outline and evaluate comprehensively from three aspects: logical structure, content distribution, and comprehension difficulty.
+
+Scoring Criteria:
+1 (Poor): Any of the following conditions:
+  - Chaotic section order, scattered related content, lack of logical connections
+  - Severe imbalance between primary and secondary content, insufficient core sections
+  - Fragmented information organization, difficult to grasp main points
+
+2 (Average): Any of the following conditions:
+  - Generally logical order but some sections need repositioning
+  - Uneven content distribution, key points not sufficiently emphasized
+  - Generally understandable but transitions need improvement
+
+3 (Excellent): All of the following conditions:
+  - Logical section order with cohesive related content
+  - Clear primary and secondary focus with well-developed key points
+  - Clear structure that's easy to follow and understand
+
+Please evaluate the outline and output an overall score with justification (within 50 characters) in JSON format.
+
+Example Output:
+```json
+{
+  "reason": "Scattered content, weak core sections, unclear flow"
+  "score": 1,
+}
+```
+
+```json
+{
+  "reason": "Logical but key points need better emphasis"
+  "score": 2,
+}
+```
+
+```json
+{
+  "reason": "Clear logic, strong focus, easily followed"
+  "score": 3,
+}
+```
+Input:
+{{outline}}
+Output:
