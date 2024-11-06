@@ -4,10 +4,12 @@ import base64
 import jsonlines
 import requests
 import yaml
-from jinja2 import Template
+from FlagEmbedding import BGEM3FlagModel
+from jinja2 import Environment
 from oaib import Auto
 from openai import OpenAI
 
+from model_utils import get_text_embedding
 from utils import get_json_from_response, pexists, pjoin, print, tenacity
 
 
@@ -142,43 +144,71 @@ class LLM:
 
 # by type, by relevance, by time
 class Role:
-    def __init__(self, name: str, llm: LLM, config: dict = None):
+    def __init__(
+        self,
+        name: str,
+        env: Environment,
+        text_model: BGEM3FlagModel = None,
+        llm: LLM = None,
+        config: dict = None,
+    ):
         self.name = name
-        self.llm = llm
-        self.model = llm.model
         if config is None:
             with open(f"roles/{name}.yaml", "r") as f:
                 config = yaml.safe_load(f)
+        if llm is None:
+            llm = globals()[config["use_model"] + "_model"]
+        self.llm = llm
+        self.model = llm.model
+        self.text_model = text_model
         self.prompt_args = set(config["jinja_args"])
         self.system_message = config["system_prompt"]
         self.return_json = config["return_json"]
-        self.template = Template(config["template"])
-        self.history = []
+        self.template = env.from_string(config["template"])
+        self._history = []
 
-    def get_history(self):
-        pass
+    def append_history(self, message: list):
+        # calc similarity of request
+        if self.text_model is not None:
+            request = message[0]["content"][0]["text"]
+            embedding = get_text_embedding(request, self.text_model)
+            self._history.append((embedding, message))
+        else:
+            self._history.append(message)
+
+    def add_validator(self, validator):
+        self.validator = validator
+
+    def get_history(self, add_history: int = 0):
+        if add_history > 0:
+            return self._history[-add_history:]
 
     def save_history(self, output_dir: str):
         history_file = pjoin(output_dir, f"{self.name}.jsonl")
-        if pexists(history_file) and len(self.history) == 0:
+        if pexists(history_file) and len(self._history) == 0:
             return
         with jsonlines.open(history_file, "w") as writer:
-            writer.write_all(self.history)
+            writer.write_all(self._history)
 
     def __repr__(self) -> str:
         return f"Role(name={self.name}, model={self.model})"
 
-    def __call__(self, images: list[str] = None, **jinja_args):
+    def __call__(
+        self,
+        images: list[str] = None,
+        add_history: int = 0,
+        **jinja_args,
+    ):
         assert self.prompt_args == set(jinja_args.keys()), "Invalid arguments"
         response, message = self.llm(
             self.template.render(**jinja_args),
             system_message=self.system_message,
-            history=self.get_history(),
+            history=self.get_history(add_history),
             images=images,
             return_json=self.return_json,
             return_message=True,
         )
-        self.history.append(message)
+        self.append_history(message)
         return response
 
 
@@ -194,9 +224,9 @@ internvl_multi = LLM(
     api_base="http://127.0.0.1:5000/generate",
     use_openai=False,
 )
-caption_model = internvl_76
-long_model = qwen2_5
-agent_model = qwen2_5
+language_model = qwen2_5
+code_model = qwen2_5
+vision_model = internvl_76
 
 
 if __name__ == "__main__":

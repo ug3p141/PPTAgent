@@ -3,19 +3,67 @@ import shutil
 import subprocess
 import tempfile
 import traceback
+from time import time
 from types import SimpleNamespace
 
 import json_repair
 from lxml import etree
 from pdf2image import convert_from_path
 from pptx.dml.fill import _NoFill, _NoneFill
+from pptx.oxml import parse_xml
 from pptx.shapes.base import BaseShape
 from pptx.shapes.group import GroupShape
+from pptx.text.text import _Paragraph, _Run
 from pptx.util import Length
 from rich import print
 from tenacity import RetryCallState, retry, stop_after_attempt, wait_fixed
 
 IMAGE_EXTENSIONS = {"bmp", "jpg", "jpeg", "pgm", "png", "ppm", "tif", "tiff", "webp"}
+
+
+def get_font_style(font: dict):
+    font = SimpleNamespace(**font)
+    styles = []
+    if font.size:
+        styles.append(f"font-size: {Length(font.size).pt}pt")
+    if font.color:
+        styles.append(f"color: #{font.color}")
+    if font.bold:
+        styles.append("font-weight: bold")
+    if font.italic:
+        styles.append("font-style: italic")
+    return "; ".join(styles)
+
+
+def runs_merge(paragraph: _Paragraph):
+    runs = paragraph.runs
+    if len(runs) == 0:
+        runs = [
+            _Run(r, paragraph)
+            for r in parse_xml(paragraph._element.xml.replace("fld", "r")).r_lst
+        ]
+    if len(runs) < 1:
+        return runs
+    pre_run = runs[0]
+    new_runs = [pre_run]
+    pre_font = runs[0].font
+    for run in runs[1:]:
+        if run.font != pre_font:
+            new_runs.append(run)
+            pre_run = run
+            pre_font = run.font
+        else:
+            pre_run.text += run.text
+            run._r.getparent().remove(run._r)
+    return new_runs
+
+
+def older_than(filepath, seconds: int = 10):
+    if not os.path.exists(filepath):
+        return False
+    file_creation_time = os.path.getctime(filepath)
+    current_time = time()
+    return seconds < (current_time - file_creation_time)
 
 
 def get_slide_content(doc_json: dict, slide_title: str, slide: dict):
@@ -76,17 +124,6 @@ def ppt_to_images(file: str, output_dir: str):
             return
 
         raise RuntimeError("No PDF file was created in the temporary directory")
-
-
-def get_text_inlinestyle(para: dict, stylish: bool):
-    if not stylish:
-        return ""
-    font = SimpleNamespace(**para["font"])
-    font_size = f"font-size: {Length(font.size).pt}pt;" if font.size else ""
-    # font_family = f"font-family: {font.name};" if font.name else ""
-    font_color = f"color='{font.color}';" if font.color else ""
-    font_bold = "font-weight: bold;" if font.bold else ""
-    return 'style="{}"'.format("".join([font_size, font_color, font_bold]))
 
 
 def extract_fill(shape: BaseShape):
@@ -188,6 +225,12 @@ def object_to_dict(obj, result=None, exclude=None):
         except:
             pass
     return result
+
+
+def merge_dict(d1: dict, d2: dict):
+    for k, v in d1.items():
+        d1[k] = v or d2[k]
+    return d1
 
 
 def dict_to_object(dict: dict, obj: object, exclude=None):

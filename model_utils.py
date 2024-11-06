@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 from copy import deepcopy
 
 import numpy as np
@@ -14,41 +15,44 @@ from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoFeatureExtractor, AutoModel
 
 import llms
-from presentation import Presentation
-from utils import IMAGE_EXTENSIONS, pjoin, tenacity
+from presentation import Presentation, SlidePage
+from utils import IMAGE_EXTENSIONS, pjoin, ppt_to_images, tenacity
 
 device_count = torch.cuda.device_count()
 
 
-def get_text_models(num_models: int = device_count):
-    text_models = [
-        BGEM3FlagModel(
-            "BAAI/bge-m3",
-            use_fp16=True,
-            device=f"cuda:{i%device_count}",
-        )
-        for i in range(num_models)
-    ]
-    return text_models
+def get_slide_image(slide: SlidePage, prs: Presentation, outfile: str):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_prs = deepcopy(prs)
+        temp_prs.slides = [slide]
+        temp_prs.save(temp_dir + "/temp.pptx")
+        ppt_to_images(temp_dir + "/temp.pptx", temp_dir)
+        assert len(os.listdir(temp_dir)) == 2
+        os.rename(pjoin(temp_dir, "slide_0001.jpg"), outfile)
 
 
-def get_image_model(num_models: int = device_count):
+def get_text_model(device: str = None):
+    return BGEM3FlagModel(
+        "BAAI/bge-m3",
+        use_fp16=True,
+        device=device,
+    )
+
+
+def get_image_model(device: str = None):
     model_base = "google/vit-base-patch16-224-in21k"
-    return [
-        (
-            AutoFeatureExtractor.from_pretrained(
-                model_base,
-                torch_dtype=torch.float16,
-                device_map=f"cuda:{i%device_count}",
-            ),
-            AutoModel.from_pretrained(
-                model_base,
-                torch_dtype=torch.float16,
-                device_map=f"cuda:{i%device_count}",
-            ).eval(),
-        )
-        for i in range(num_models)
-    ]
+    return (
+        AutoFeatureExtractor.from_pretrained(
+            model_base,
+            torch_dtype=torch.float16,
+            device_map=device,
+        ),
+        AutoModel.from_pretrained(
+            model_base,
+            torch_dtype=torch.float16,
+            device_map=device,
+        ).eval(),
+    )
 
 
 def parse_pdf(
@@ -75,7 +79,7 @@ def parse_pdf(
 def get_refined_doc(text_content: str):
     template = Template(open("prompts/document_refine.txt").read())
     prompt = template.render(markdown_document=text_content)
-    return llms.long_model(prompt, return_json=True)
+    return llms.language_model(prompt, return_json=True)
 
 
 def get_text_embedding(text: list[str], model, batchsize: int = 32):
