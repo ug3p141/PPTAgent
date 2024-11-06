@@ -6,15 +6,17 @@ from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial
+from typing import Any, Literal
 
 from pptx.dml.color import RGBColor
-from pptx.oxml import parse_xml
 from pptx.shapes.base import BaseShape
-from pptx.text.text import _Paragraph, _Run
+from pptx.slide import Slide
+from pptx.text.text import _Paragraph
 from pptx.util import Pt
 
 from llms import Role
 from presentation import Picture, SlidePage
+from utils import get_font_style, runs_merge
 
 
 @dataclass
@@ -25,8 +27,7 @@ class HistoryMark:
     CODE_RUN_CORRECT = "code_run_correct"
 
 
-# 让llm注意元素层级
-# 想办法让模型不会同时编辑和删除
+# todo sort 一下，根据操作类型
 class CodeExecutor:
 
     def __init__(self, coder: Role, retry_times: int):
@@ -71,7 +72,9 @@ class CodeExecutor:
         for line_idx, line in enumerate(api_calls):
             try:
                 if line_idx == len(api_calls) - 1 and not found_code:
-                    raise ValueError("No code block found in the api call.")
+                    raise ValueError(
+                        "No code block found in the output, wrap your code with ```python```"
+                    )
                 if line.startswith("def"):
                     raise ValueError("The function definition should not be output.")
                 if not self.function_regex.match(line):
@@ -87,7 +90,8 @@ class CodeExecutor:
             except:
                 error_time += 1
                 trace_msg = traceback.format_exc()
-                self.code_history[-1][-1] = trace_msg
+                if found_code:
+                    self.code_history[-1][-1] = trace_msg
                 if error_time > self.retry_times:
                     return None
                 api_lines = (
@@ -104,81 +108,122 @@ class CodeExecutor:
         return edit_slide
 
 
-def runs_merge(paragraph: _Paragraph):
-    runs = paragraph.runs
-    if len(runs) == 0:
-        runs = [
-            _Run(r, paragraph)
-            for r in parse_xml(paragraph._element.xml.replace("fld", "r")).r_lst
-        ]
-    if len(runs) == 1:
-        return runs[0]
-    run = max(runs, key=lambda x: len(x.text))
-    run.text = paragraph.text
-
-    for r in runs:
-        if r != run:
-            r._r.getparent().remove(r._r)
-    return run
+# supporting functions
+def element_index(slide: SlidePage, element_id: str):
+    element_id = int(element_id)
+    for i in slide.shapes:
+        if i.shape_idx == element_id:
+            return i
+    raise ValueError(f"Cannot find element {element_id}, is it deleted or not exist?")
 
 
-def get_textframe(slide: SlidePage, textframe_id: str):
-    if "_" not in textframe_id:
-        raise ValueError("The textframe ID should contain a `_`, got: ", textframe_id)
-    element_id, text_id = textframe_id.split("_")
-    element_id, text_id = int(element_id), int(text_id)
-    shape = slide.shapes[element_id]
+def textframe_index(slide: SlidePage, element_id: str, textframe_id: str):
+    shape = element_index(slide, element_id)
     if not shape.text_frame.is_textframe:
         raise ValueError(f"The element {element_id} doesn't have a text frame.")
-    for para in shape.text_frame.data:
-        if para["idx"] == text_id:
-            return shape, para
+    for para in shape.text_frame.paragraphs:
+        for run in para.runs:
+            if run.idx == int(textframe_id):
+                return shape, para, run
     raise ValueError(f"Incorrect textframe ID: {textframe_id}.")
 
 
-def del_para(text: str, text_shape: BaseShape):
-    for para in text_shape.text_frame.paragraphs:
-        if para.text == text:
-            para._element.getparent().remove(para._element)
-            if len(text_shape.text_frame.paragraphs) == 0:
-                text_shape.element.getparent().remove(text_shape.element)
-            return
-    raise ValueError(f"Incorrect shape: {text_shape}.")
+def replace_para(orig_text: str, new_text: str, shape: BaseShape):
+    for para in shape.text_frame.paragraphs:
+        for r in runs_merge(para):
+            if r.text == orig_text:
+                r.text = new_text
+                return
+    raise ValueError(f"Cannot find para {orig_text}.")
 
 
-# 这里有问题，因为可能遇到重复的文本，以后需要用id来区分(reverse一下)
-def replace_para(orig_text: str, new_text: str, text_shape: BaseShape):
-    for para in text_shape.text_frame.paragraphs:
-        if para.text == orig_text:
-            run = runs_merge(para)
-            run.text = new_text
-            return
-    raise ValueError(f"Incorrect shape: {text_shape}.")
+def del_para(text: str, shape: BaseShape):
+    for para in shape.text_frame.paragraphs:
+        for run in runs_merge(para):
+            if run.text == text:
+                para._element.getparent().remove(para._element)
+                if len(runs_merge(para)) == 0:
+                    para._element.getparent().remove(para._element)
+                if len(shape.text_frame.paragraphs) == 0:
+                    shape._element.getparent().remove(shape._element)
+                return
+    raise ValueError(f"Cannot find para {text}.")
 
 
-# 融合一下del textframe和del para
-def del_textframe(slide: SlidePage, textframe_id: str):
-    """Delete the textframe with the given id."""
-    shape, para = get_textframe(slide, textframe_id)
-    if textframe_id in shape.closures:
+# api functions
+def del_textframe(slide: SlidePage, element_id: str, textframe_id: str):
+    shape, para, run = textframe_index(slide, element_id, textframe_id)
+    shape.closures[element_id + "-" + textframe_id] = partial(del_para, run.text)
+
+
+def del_picture(slide: SlidePage, element_id: str):
+    shape = element_index(slide, element_id)
+    if not isinstance(shape, Picture):
+        raise ValueError("The element is not a Picture.")
+    slide.shapes.remove(shape)
+
+
+def replace_text(slide: SlidePage, element_id: str, textframe_id: str, text: str):
+    shape, para, run = textframe_index(slide, element_id, textframe_id)
+    shape.closures[element_id + "-" + textframe_id] = partial(
+        replace_para, run.text, text
+    )
+
+
+def replace_image(slide: SlidePage, element_id: str, image_path: str):
+    if not os.path.exists(image_path):
+        raise ValueError(f"The image {image_path} does not exist.")
+    shape = element_index(slide, element_id)
+    if not isinstance(shape, Picture):
+        raise ValueError("The element is not a Picture.")
+    shape.img_path = image_path
+
+
+def clone_textframe(slide: SlidePage, element_id: str, textframe_id: str):
+    """Clone a textframe, new textframe_id will be the textframe_id + 1."""
+    shape, para, run = textframe_index(slide, element_id, textframe_id)
+    para._element.getparent().insert(para._element.getprevious(), para._element)
+    # todo implement clone
+
+
+# 理论上来说只可能是image 或者textframe
+# ? 当且仅当一个text_frame都没有的时候，自动删除整个element
+# ? text_frame的命名方式和new_element冲突了
+
+
+# delete 应该不需要，从最后一个开始删除就好了
+def spacing_elements(
+    slide: SlidePage,
+    element_ids: list[str],
+    spacing_type: Literal["horizontal", "vertical"],
+):
+    """Arrange the spacing between elements."""
+    top = min(slide.shapes[i].top for i in element_ids)
+    left = min(slide.shapes[i].left for i in element_ids)
+    bottom = max(slide.shapes[i].bottom for i in element_ids)
+    right = max(slide.shapes[i].right for i in element_ids)
+    sum_width = sum(slide.shapes[i].width for i in element_ids)
+    sum_height = sum(slide.shapes[i].height for i in element_ids)
+    if spacing_type == "horizontal":
+        # 每两个元素之间要是相同的spacing
+        el_spacing = (right - left - sum_width) / (len(element_ids) - 1)
+        for rel_idx, shape_id in enumerate(element_ids):
+            shape = slide.shapes[shape_id]
+            shape.left = left + rel_idx * el_spacing
+    elif spacing_type == "vertical":
+        el_spacing = (bottom - top - sum_height) / (len(element_ids) - 1)
+        for rel_idx, shape_id in enumerate(element_ids):
+            shape = slide.shapes[shape_id]
+            shape.top = top + rel_idx * el_spacing
+    else:
         raise ValueError(
-            f"The textframe {textframe_id} has been edited, your should not delete it."
+            f"Incorrect spacing type, should be `horizontal` or `vertical`."
         )
-    shape.closures[textframe_id] = partial(del_para, para["text"])
-
-
-def replace_text(slide: SlidePage, textframe_id: str, text: str):
-    """Replace the text of the textframe with the given id."""
-    shape, para = get_textframe(slide, textframe_id)
-    if textframe_id in shape.closures:
-        raise ValueError(
-            f"The textframe {textframe_id} has been edited, your should not edit it again."
-        )
-    shape.closures[textframe_id] = partial(replace_para, para["text"], text)
 
 
 def set_font_style(
     slide: SlidePage,
+    element_id: str,
     textframe_id: str,
     bold: bool = None,
     italic: bool = None,
@@ -191,8 +236,8 @@ def set_font_style(
     Example:
     >>> set_font_style("1_1", bold=True, font_size=24, font_color="FF0000")
     """
-    shape, para = get_textframe(slide, textframe_id)
-    paratext = para["text"]
+    shape, para, run = textframe_index(slide, element_id, textframe_id)
+    paratext = run.text
 
     def set_font(text_shape: BaseShape):
         find = False
@@ -219,74 +264,22 @@ def set_font_style(
     shape.closures[textframe_id] = set_font
 
 
-def adjust_element_geometry(
-    slide: SlidePage, element_id: str, left: int, top: int, width: int, height: int
-):
-    """
-    Set the position and size of a element.
-
-    Parameters:
-    element_id (str, required): The ID of the element.
-    left (int, required): The left position of the element.
-    top (int, required): The top position of the element.
-    width (int, required): The width of the element.
-    height (int, required): The height of the element.
-
-    Example:
-    >>> set_shape_position("1", 100, 150, 200, 300)
-    """
+def set_geometry(slide: SlidePage, element_id: str, left: int = None, top: int = None):
     shape = slide.shapes[int(element_id)]
     shape.left = Pt(left)
     shape.top = Pt(top)
+
+
+def set_size(slide: SlidePage, element_id: str, width: int, height: int):
+    shape = slide.shapes[int(element_id)]
     shape.width = Pt(width)
     shape.height = Pt(height)
 
     def set_geometry(shape: BaseShape):
-        shape.left = left
-        shape.top = top
         shape.width = width
         shape.height = height
 
     shape.closures[element_id] = set_geometry
-
-
-def replace_image(slide: SlidePage, figure_id: str, image_path: str):
-    """Replace the image of the element with the given id."""
-    if not os.path.exists(image_path):
-        raise ValueError(f"The image {image_path} does not exist.")
-    shape = slide.shapes[int(figure_id)]
-    if not isinstance(shape, Picture):
-        raise ValueError("The element is not a Picture.")
-    if figure_id in shape.closures:
-        raise ValueError(
-            f"The element {figure_id} has been edited, your should not edit it again."
-        )
-    shape.closures[figure_id] = lambda x: None
-    shape.img_path = image_path
-
-
-def del_element(slide: SlidePage, element_id: str):
-    """Delete the element with the given id"""
-    if "_" in element_id:
-        raise ValueError(
-            "Only the element_id of a textframe can contain a `_`, not an element."
-        )
-    shape = slide.shapes[int(element_id)]
-
-    def del_shape(shape: BaseShape):
-        shape.element.getparent().remove(shape.element)
-
-    if shape.text_frame.is_textframe:
-        for i in range(len(shape.text_frame.data)):
-            if f"{element_id}_{i}" in shape.closures:
-                raise ValueError(
-                    f"The element {element_id} has been edited, your should not delete it."
-                )
-    if element_id in shape.closures:
-        raise ValueError(
-            f"The element {element_id} has been deleted, your should not delete it again."
-        )
-    shape.closures[element_id] = del_shape
 
 
 class API_TYPES(Enum):
@@ -294,17 +287,19 @@ class API_TYPES(Enum):
         replace_text,
         del_textframe,
         replace_image,
-        del_element,
+        del_picture,
     ]
     Coder = [
-        replace_text,
         del_textframe,
+        del_picture,
+        clone_textframe,
+        replace_text,
         replace_image,
-        del_element,
     ]
     Typographer = [
         set_font_style,
-        adjust_element_geometry,
+        # set_geometry,
+        spacing_elements,
     ]
 
     # return all functions in the enum
@@ -316,3 +311,32 @@ class API_TYPES(Enum):
                 continue
             funcs |= {func.__name__: func for func in getattr(cls, attr).value}
         return funcs
+
+
+# 这是基于slide 元素， pptx shape 而不是presentation的操作
+# 操作样式, 不操作文本内容, 单位是一个slide
+# 似乎还是应该以shape为基本单位而不是slide，不然可能导致不应该被变大变小的元素也被变了
+# 感觉也没事
+# run的切割问题
+class StyleOperator:
+    def __init__(self, slide: SlidePage, pptxslide: Slide):
+        self.slide = slide
+        self.pptxslide = pptxslide
+        cascading_styles: list[str, (list[_Paragraph], dict)]
+
+    def set_property(self, style_class: str, property: str, value: Any):
+        for para in self.cascading_styles[style_class][0]:
+            assert len(para.runs) == 1
+            setattr(para.runs[0].font, property, value)
+
+    # 这里的k可以结合之前 text induct的结果
+    def get_all_css(self):
+        css_list = []
+        for k, v in self.cascading_styles:
+            style_str = get_font_style(v[1])
+            css_list.append(f".{k} {{ {style_str}; }}")
+        return css_list
+
+
+if __name__ == "__main__":
+    print(CodeExecutor(None, 0).get_apis_docs(API_TYPES.Coder.value))

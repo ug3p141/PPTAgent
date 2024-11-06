@@ -1,11 +1,9 @@
 import json
-from collections import defaultdict
 
 import PIL.Image
-from jinja2 import Template
 
 import llms
-from presentation import Picture, Presentation, SlidePage
+from presentation import Picture, Presentation
 from utils import Config, pbasename, pexists, pjoin, print
 
 
@@ -17,14 +15,17 @@ class ImageLabler:
         self.stats_file = pjoin(config.RUN_DIR, "image_stats.json")
         self.config = config
         self.collect_images()
-        self.image_stats["resource/pic_placeholder.png"] = {
-            "label": "content",
+        self.image_stats["pic_placeholder.png"] = {
             "caption": "it's a placeholder",
         }
         if pexists(self.stats_file):
-            image_stats = json.load(open(self.stats_file, "r"))
+            image_stats: dict[str, dict] = json.load(open(self.stats_file, "r"))
             if self.image_stats.keys() == image_stats.keys():
                 self.image_stats = image_stats
+            else:
+                raise ValueError(
+                    "image stats file is not consistent with current images"
+                )
 
     def apply_stats(self):
         for slide in self.presentation.slides:
@@ -36,7 +37,9 @@ class ImageLabler:
         caption_prompt = open("prompts/caption.txt").read()
         for image, stats in self.image_stats.items():
             if "caption" not in stats:
-                stats["caption"] = llms.caption_model(caption_prompt, image)
+                stats["caption"] = llms.vision_model(
+                    caption_prompt, pjoin(self.config.IMAGE_DIR, image)
+                )
                 if self.config.DEBUG:
                     print(image, ": ", stats["caption"])
         json.dump(
@@ -47,106 +50,17 @@ class ImageLabler:
         )
         return self.image_stats
 
-    def label_images(
-        self,
-        functional_keys: list[str],
-        slide_cluster: dict[str, list[int]],
-        images: dict[str, str],
-    ):
-        template = Template(open("prompts/image_label/vision_cls.txt").read())
-
-        image_labels = defaultdict(lambda: defaultdict(int))
-        for layout_name, cluster in slide_cluster.items():
-            for slide_idx in cluster:
-                slide_images = ""
-                if all(
-                    [
-                        "label" in self.image_stats[shape.img_path]
-                        for shape in self.presentation.slides[
-                            slide_idx - 1
-                        ].shape_filter(Picture)
-                    ]
-                ):
-                    continue
-                for shape in self.presentation.slides[slide_idx - 1].shape_filter(
-                    Picture
-                ):
-                    if shape.img_path == "resource/pic_placeholder.png":
-                        continue
-                    slide_images += f"{pbasename(shape.img_path)}: {self.image_stats[shape.img_path]['caption']}\n"
-                    slide_images += f"Appeared {self.image_stats[shape.img_path]['appear_times']} times including slides: {self.image_stats[shape.img_path]['top_ranges_str']}\n"
-                    slide_images += f"Coverage Area: {self.image_stats[shape.img_path]['relative_area']:.2f}% of the slide\n"
-                    slide_images += "----\n"
-                if not "Picture" in layout_name or all(
-                    [
-                        shape.img_path == "resource/pic_placeholder.png"
-                        for shape in self.presentation.slides[
-                            slide_idx - 1
-                        ].shape_filter(Picture)
-                    ]
-                ):
-                    continue
-                slide_type = (
-                    "Structural" if layout_name in functional_keys else "Non-Structural"
-                )
-                results = llms.caption_model(
-                    template.render(
-                        slide_type=slide_type,
-                        slide_images=slide_images,
-                        provided_images="----\n".join(
-                            [f"{pbasename(k)}: {v}" for k, v in images.items()]
-                        )
-                        + "----",
-                    ),
-                    pjoin(
-                        self.config.RUN_DIR,
-                        "slide_images",
-                        f"slide_{slide_idx:04d}.jpg",
-                    ),
-                    return_json=True,
-                )
-                if not isinstance(results, list):
-                    results = [results]
-                if "results" in results:
-                    results = results["results"]
-                for result in results:
-                    if result["label"] != "background":
-                        continue
-                    image_labels[result["image"]][result["replace"]] += 1
-        image_labels = {
-            pjoin(self.config.IMAGE_DIR, k): pjoin(
-                self.config.IMAGE_DIR,
-                max(v.items(), key=lambda x: x[1])[0],
-            )
-            for k, v in image_labels.items()
-        }
-        self.apply_labels(image_labels)
-
-    def apply_labels(self, image_labels: dict[str, str]):
-        for slide in self.presentation.slides:
-            for shape in slide.shape_filter(Picture):
-                if shape.img_path in image_labels:
-                    shape.is_background = True
-                    self.image_stats[shape.img_path]["label"] = "background"
-                    self.image_stats[shape.img_path]["replace"] = image_labels[
-                        shape.img_path
-                    ]
-                else:
-                    self.image_stats[shape.img_path]["label"] = "content"
-        json.dump(
-            self.image_stats, open(self.stats_file, "w"), indent=4, ensure_ascii=False
-        )
-        self.apply_stats()
-
     def collect_images(self):
         for slide_index, slide in enumerate(self.presentation.slides):
             for shape in slide.shape_filter(Picture):
-                image_path = shape.data[0]
+                image_path = pbasename(shape.data[0])
                 self.image_stats[image_path] = {
                     "appear_times": 0,
                     "slide_numbers": set(),
                     "relative_area": shape.area / self.slide_area * 100,
-                    "size": PIL.Image.open(image_path).size,
+                    "size": PIL.Image.open(
+                        pjoin(self.config.IMAGE_DIR, image_path)
+                    ).size,
                 }
                 self.image_stats[image_path]["appear_times"] += 1
                 self.image_stats[image_path]["slide_numbers"].add(slide_index + 1)

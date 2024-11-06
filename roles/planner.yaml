@@ -26,12 +26,12 @@ template: |
   Example:
   {
      "Opening of the XX": {
-        "layout": "Opening",
+        "layout": "Opening(text)",
         "subsection_keys": [],
         "description": "This section provides the introductory information, including the author's name and the date of the presentation."
      },
      "Introduction to the XX": {
-        "layout": "Bulleted Information Breakdown with Highlighted Key Points",
+        "layout": "Bulleted Information Breakdown with Highlighted Key Points(picture)",
         "subsection_keys": ["Title of Subsection 1.1", "Title of Subsection 1.2"],
         "description": "This section introduces the main concepts of the presentation, summarizing the core ideas and objectives."
     }
@@ -49,4 +49,5 @@ jinja_args:
   - functional_keys
   - layouts
   - json_content
+use_model: language
 return_json: true

@@ -1,21 +1,55 @@
-system_prompt: "You are an expert API developer and code reviewer"
+# 要根据indent理解元素层级
+system_prompt: You are a Code Generator agent specializing in slide content manipulation. You precisely translate content edit commands into API calls by following HTML structure, distinguishing between textframes and image elements, and maintaining proper parent-child relationships to ensure accurate element targeting and ordering of operations.
 template: |
-  Your task is to review and correct errors in an API sequence.
-  Analyze the provided API sequence and the error message to identify the issues, then generate a revised and corrected API sequence.
+  Available APIs:
+  {{api_docs}}
 
-  - Review the faulty API sequence:
-    {{ faulty_api_sequence }}
-  - Analyze the error message:
-    {{ error_message }}
-  - Based on your analysis, correct the API sequence.
+  Processing Steps: First output quantity adjustment operations, then perform content replacement
+  1. Quantity Adjustment:
+    - For commands with quantity_change, clone/delete from the parent element's last textframe:
+      * If positive: Use clone_textframe()
+      * If negative: Use del_textframe() or del_image()
+  2. Content Replacement:
+    - Text content: Use replace_text(), must specify both element_id and textframe_id
+    - Image content: Use replace_image(), only needs element_id
 
-  Output the corrected API sequence in a plain format, without additional comments.
+  Example HTML:
+  <div id="7">
+    <p id="1">First item</p>
+  </div>
+  <figure id="8">
+    <figcaption>logo: an image description</figcaption>
+  </figure>
 
-  Example Output:
+  Example Commands:
+  [
+      ("remove", "text", "Second item with element_id '7' and textframe_id '2'"),
+      ("change", "text", "quantity_change: 1", ["First item"], ["New First", "New Second"]),
+      ("change", "image", "logo:an image description", "path/to/image.png")
+  ]
+  Output API Calls:
+  ```python
+  clone_textframe("7", "1")
+  replace_text("7", "1", "New First")
+  replace_text("7", "2", "New Second")
+  replace_image("8", "logo", "path/to/image.png")
+  ```
 
-  set_text('1_1', "Title");
-  set_image('2', "image.jpg");
+  Requirements:
+  1. Determine parent-child relationships based on HTML indentation structure
+  2. Distinguish between <p> and <li> elements (using textframe-related APIs) and <figure> elements
+  3. Textframe-related operations must provide both element_id and textframe_id
+
+  HTML Target:
+  {{edit_target}}
+
+  Command List:
+  {{command_list}}
+
+  Please output only the API call sequence, one call per line, wrapped with ```python and ```.
 jinja_args:
-  - faulty_api_sequence
-  - error_message
+  - api_docs
+  - edit_target
+  - command_list
+use_model: code
 return_json: false

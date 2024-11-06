@@ -45,4 +45,5 @@ jinja_args:
   - content
   - image_information
   - api_documentation
+use_model: language
 return_json: false
