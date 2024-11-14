@@ -40,7 +40,7 @@ export default {
       }
       socket.onerror = (error) => {
         console.error("WebSocket error:", error)
-        this.statusMessage = 'WebSocket connection failed.'
+        this.statusMessage = 'WebSocket connection lost.'
       }
     },
     async fetchDownloadLink() {

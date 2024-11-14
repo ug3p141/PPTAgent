@@ -83,7 +83,6 @@ export default {
       formData.append('pptxFile', this.pptxFile)
       formData.append('pdfFile', this.pdfFile)
       formData.append('numberOfPages', this.selectedPages)
-      formData.append('selectedModel', this.selectedModel)
 
       try {
         const uploadResponse = await this.$axios.post('/api/upload', formData, {

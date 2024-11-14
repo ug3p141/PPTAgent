@@ -1,20 +1,19 @@
-# TODO 改成多页同时生成，生成成功的页面都发回去，不成功的就不要了
 import asyncio
 import hashlib
-import io
+import importlib
+import itertools
 import json
 import os
+import sys
 import time
 import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import datetime
-from glob import glob
 from typing import Dict, List
 
 import PIL.Image
-import PyPDF2
 import torch
 from fastapi import (
     FastAPI,
@@ -29,30 +28,42 @@ from fastapi.logger import logger
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from FlagEmbedding import BGEM3FlagModel
+from marker.models import load_all_models
 
 import llms
-from agent import PPTAgent
-from model_utils import get_text_embedding, prs_dedup
+import pptgen
+from induct import SlideInducter
+from model_utils import get_image_model, get_refined_doc, parse_pdf
 from multimodal import ImageLabler
 from presentation import Presentation
-from template_induct import TemplateInducter
-from utils import IMAGE_EXTENSIONS, Config, parse_pdf, pjoin, ppt_to_images, print
+from utils import IMAGE_EXTENSIONS, Config, pjoin, ppt_to_images
 
+# constants
 RUNS_DIR = "runs"
 STAGES = [
     "PPT Parsing",
-    "PDF Parsing (1min/page)",
+    "PDF Parsing",
     "Document Refinement",
-    "PPT Image Captioning",
-    "PPT to Images",
-    "Slides Deduplication",
-    "PDF Image Captioning",
-    "Template Induction",
+    "Slide Induction",
     "PPT Generation",
-    "PPT Saving",
+    "Success!",
+]
+NUM_MODELS = 1 if len(sys.argv) == 1 else int(sys.argv[1])
+NUM_INSTANCES_PER_MODEL = 4
+DEVICE_COUNT = torch.cuda.device_count()
+
+# models
+text_models = [
+    BGEM3FlagModel("BAAI/bge-m3", use_fp16=True, device=i % DEVICE_COUNT)
+    for i in range(NUM_MODELS)
+]
+image_models = [get_image_model(device=i % DEVICE_COUNT) for i in range(NUM_MODELS)]
+marker_models = [
+    load_all_models(device=i % DEVICE_COUNT, dtype=torch.float16)
+    for i in range(NUM_MODELS)
 ]
 
-# Allow CORS for frontend requests
+# server
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -61,16 +72,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# In-memory storage for progress and files
-text_models = [
-    BGEM3FlagModel("BAAI/bge-m3", use_fp16=True, device=i)
-    for i in range(torch.cuda.device_count())
-]
-executor = ThreadPoolExecutor(max_workers=30)
 progress_store: Dict[str, Dict] = {}
-result_store: Dict[str, str] = {}
 active_connections: Dict[str, WebSocket] = {}
+counter = itertools.cycle(range(NUM_MODELS))
+executor = ThreadPoolExecutor(max_workers=NUM_MODELS * NUM_INSTANCES_PER_MODEL)
 
 
 class ProgressManager:
@@ -125,23 +130,25 @@ class ProgressManager:
 async def create_task(
     pptxFile: UploadFile = File(...),
     pdfFile: UploadFile = File(...),
-    selectedModel: str = Form(...),
     numberOfPages: int = Form(...),
 ):
-    # create time 20xx-xx-xx
+    importlib.reload(llms)
+    importlib.reload(pptgen)
     task_id = datetime.now().strftime("20%y-%m-%d") + "/" + str(uuid.uuid4())
     os.makedirs(pjoin(RUNS_DIR, task_id))
-    pptx_path = pjoin(RUNS_DIR, task_id, "source.pptx")
-    pdf_path = pjoin(RUNS_DIR, task_id, "source.pdf")
-    with open(pptx_path, "wb") as f:
-        f.write(await pptxFile.read())
-    with open(pdf_path, "wb") as f:
-        f.write(await pdfFile.read())
-    progress_store[task_id.replace("/", "|")] = {
-        "selectedModel": selectedModel,
-        "numberOfPages": numberOfPages,
-    }
-    executor.submit(ppt_gen, task_id.replace("/", "|"))
+    pptx_blob = await pptxFile.read()
+    pdf_blob = await pdfFile.read()
+    task = {"numberOfPages": numberOfPages, "model_idx": next(counter)}
+    for file_type, blob in [("pptx", pptx_blob), ("pdf", pdf_blob)]:
+        file_md5 = hashlib.md5(blob).hexdigest()
+        task[file_type] = file_md5
+        file_dir = pjoin(RUNS_DIR, file_type, file_md5)
+        if not os.path.exists(file_dir):
+            os.makedirs(file_dir, exist_ok=True)
+            with open(pjoin(file_dir, "source." + file_type), "wb") as f:
+                f.write(blob)
+    progress_store[task_id] = task
+    executor.submit(ppt_gen, task_id)
     return {"task_id": task_id.replace("/", "|")}
 
 
@@ -151,9 +158,9 @@ async def send_progress(websocket: WebSocket, status: str, progress: int):
 
 @app.websocket("/ws/{task_id}")
 async def websocket_endpoint(websocket: WebSocket, task_id: str):
+    task_id = task_id.replace("|", "/")
     if task_id in progress_store:
         await websocket.accept()
-        await send_progress(websocket, "websocket connected successfully", 3)
     else:
         raise HTTPException(status_code=404, detail="Task not found")
     active_connections[task_id] = websocket
@@ -167,111 +174,71 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
 
 @app.get("/api/download")
 def download(task_id: str):
-    if task_id not in result_store:
-        raise HTTPException(status_code=404, detail="Task not found")
-    file_path = result_store[task_id]
+    if not os.path.exists(pjoin(RUNS_DIR, task_id)):
+        raise HTTPException(status_code=404, detail="Task not created yet")
+    file_path = pjoin(RUNS_DIR, task_id, "final.pptx")
     if os.path.exists(file_path):
         return FileResponse(
             file_path,
             media_type="application/pptx",
             headers={"Content-Disposition": f"attachment; filename=pptagent.pptx"},
         )
-    return {"error": "File not found"}
+    raise HTTPException(status_code=404, detail="Task not finished yet")
 
 
 @app.get("/")
 def hello():
-    if len(active_connections) < 30:
+    if len(active_connections) < NUM_MODELS:
         return {"message": "Hello, World!"}
     else:
         raise HTTPException(
-            status_code=429, detail="Too many running connections, limit is 30"
+            status_code=429,
+            detail=f"Too many running connections, limit is {NUM_MODELS}",
         )
 
 
 def ppt_gen(task_id: str):
-    generation_config = Config(task_id.replace("|", "/"))
-    ppt_image_folder = pjoin(generation_config.RUN_DIR, "slide_images")
-    text_model = text_models[ord(task_id[-1]) % len(text_models)]
-    # wait for websocket connection
-    for i in range(50):
+    for _ in range(100):
         if task_id in active_connections:
             break
-        time.sleep(0.1)
-        if i == 49:
-            progress_store.pop(task_id)
-            return
+        time.sleep(0.02)
+    else:
+        progress_store.pop(task_id)
+        return
     task = progress_store.pop(task_id)
+    pptx_md5 = task["pptx"]
+    pdf_md5 = task["pdf"]
+    generation_config = Config(pjoin(RUNS_DIR, task_id))
+    pptx_config = Config(pjoin(RUNS_DIR, "pptx", pptx_md5))
     json.dump(task, open(pjoin(generation_config.RUN_DIR, "task.json"), "w"))
-    num_pages = task["numberOfPages"]
-    # model = task["selectedModel"]
-    asyncio.run(
-        send_progress(active_connections[task_id], "task initialized successfully", 5)
+
+    model_idx = task["model_idx"]
+    text_model, image_model, marker_model = (
+        text_models[model_idx],
+        image_models[model_idx],
+        marker_models[model_idx],
     )
 
     progress = ProgressManager(task_id, STAGES)
+    parsedpdf_dir = pjoin(RUNS_DIR, "pdf", pdf_md5)
+    ppt_image_folder = pjoin(pptx_config.RUN_DIR, "slide_images")
 
-    with open(pjoin(generation_config.RUN_DIR, "source.pdf"), "rb") as f:
-        pdf_content = f.read()
-    with open(pjoin(generation_config.RUN_DIR, "source.pptx"), "rb") as f:
-        pptx_content = f.read()
-    pdf_md5 = hashlib.md5(pdf_content).hexdigest()
-    pptx_md5 = hashlib.md5(pptx_content).hexdigest()
-    parsedpdf_dir = pjoin(RUNS_DIR, "cache", "PDF", pdf_md5)
-    pptx_config = Config(pjoin("cache", "PPTX", pptx_md5))
+    asyncio.run(
+        send_progress(active_connections[task_id], "task initialized successfully", 10)
+    )
+
     try:
-        presentation = progress.run_stage(
-            Presentation.from_file,
-            pjoin(generation_config.RUN_DIR, "source.pptx"),
-            pptx_config,
+        # ppt parsing
+        presentation = Presentation.from_file(
+            pjoin(pptx_config.RUN_DIR, "source.pptx"), pptx_config
         )
-        if len(presentation) < 5:
-            asyncio.run(
-                send_progress(
-                    active_connections[task_id],
-                    "PPT Parsing Error: too short, you should upload a normal presentation(>5)",
-                    100,
-                )
-            )
-        if len(glob(parsedpdf_dir + "/source/*.md")) == 0:
-            if len(PyPDF2.PdfReader(io.BytesIO(pdf_content)).pages) > 20:
-                raise Exception(
-                    "PDF Parsing Error: too long, you should upload a short PDF"
-                )
-            progress.run_stage(
-                parse_pdf,
-                pjoin(generation_config.RUN_DIR, "source.pdf"),
-                parsedpdf_dir,
-                "http://192.168.14.17:11223/convert",
-            )
-        else:
-            progress.report_progress()
-        text_content = open(glob(parsedpdf_dir + "/source/*.md")[0]).read()
-        if len(text_content) > 10_000:
-            raise Exception(
-                "PDF Parsing Error: too long, you should upload a short PDF"
-            )
-        doc_json = progress.run_stage(llms.get_refined_doc, text_content)
-        json.dump(
-            doc_json, open(pjoin(generation_config.RUN_DIR, "refined_doc.json"), "w")
-        )
+        ppt_to_images(pjoin(pptx_config.RUN_DIR, "source.pptx"), ppt_image_folder)
+        assert len(os.listdir(ppt_image_folder)) == len(
+            presentation
+        ), "Number of parsed slides and images do not match"
 
-        labler = ImageLabler(presentation, pptx_config)
-        progress.run_stage(labler.caption_images)
-        labler.apply_stats()
-
-        progress.run_stage(ppt_to_images, presentation.source_file, ppt_image_folder)
-
-        duplicates = progress.run_stage(
-            prs_dedup, presentation, ppt_image_folder, model=text_model
-        )
-        for slide in duplicates:
-            os.remove(pjoin(ppt_image_folder, f"slide_{slide.real_idx:04d}.jpg"))
         for err_idx, _ in presentation.error_history:
             os.remove(pjoin(ppt_image_folder, f"slide_{err_idx:04d}.jpg"))
-        assert len(presentation) == len(
-            [i for i in os.listdir(ppt_image_folder) if i.endswith(".jpg")]
-        )
         for i, slide in enumerate(presentation.slides, 1):
             slide.slide_idx = i
             os.rename(
@@ -279,22 +246,48 @@ def ppt_gen(task_id: str):
                 pjoin(ppt_image_folder, f"slide_{slide.slide_idx:04d}.jpg"),
             )
 
-        caption_prompt = open("prompts/image_label/caption.txt").read()
-        if not os.path.exists(pjoin(parsedpdf_dir, "caption.json")):
-            images = progress.run_stage(
-                lambda: {
-                    pjoin(parsedpdf_dir, k): [
-                        llms.caption_model(caption_prompt, [pjoin(parsedpdf_dir, k)]),
-                        PIL.Image.open(pjoin(parsedpdf_dir, k)).size,
-                    ]
-                    for k in os.listdir(parsedpdf_dir)
-                    if k.split(".")[-1] in IMAGE_EXTENSIONS
-                }
+        labler = ImageLabler(presentation, pptx_config)
+        progress.run_stage(labler.caption_images)
+
+        # pdf parsing
+        if not os.path.exists(pjoin(parsedpdf_dir, "source.md")):
+            text_content = progress.run_stage(
+                parse_pdf,
+                pjoin(RUNS_DIR, "pdf", pdf_md5, "source.pdf"),
+                parsedpdf_dir,
+                marker_model,
+                8,
             )
+        else:
+            text_content = open(pjoin(parsedpdf_dir, "source.md")).read()
+            progress.report_progress()
+
+        # doc refine and caption
+        if not os.path.exists(pjoin(parsedpdf_dir, "caption.json")):
+            caption_prompt = open("prompts/caption.txt").read()
+            images = {}
+            for k in os.listdir(parsedpdf_dir):
+                if k.split(".")[-1] in IMAGE_EXTENSIONS:
+                    try:
+                        images[k] = [
+                            llms.vision_model(
+                                caption_prompt, [pjoin(parsedpdf_dir, k)]
+                            ),
+                            PIL.Image.open(pjoin(parsedpdf_dir, k)).size,
+                        ]
+                    except Exception as e:
+                        logger.error(f"Error captioning image {k}: {e}")
             json.dump(images, open(pjoin(parsedpdf_dir, "caption.json"), "w"))
         else:
             images = json.load(open(pjoin(parsedpdf_dir, "caption.json")))
+        if not os.path.exists(pjoin(parsedpdf_dir, "refined_doc.json")):
+            doc_json = progress.run_stage(get_refined_doc, text_content)
+            json.dump(doc_json, open(pjoin(parsedpdf_dir, "refined_doc.json"), "w"))
+        else:
+            doc_json = json.load(open(pjoin(parsedpdf_dir, "refined_doc.json")))
             progress.report_progress()
+
+        # Slide Induction
         deepcopy(presentation).normalize().save(
             pjoin(generation_config.RUN_DIR, "template.pptx"), layout_only=True
         )
@@ -302,33 +295,26 @@ def ppt_gen(task_id: str):
             pjoin(generation_config.RUN_DIR, "template.pptx"),
             pjoin(generation_config.RUN_DIR, "template_images"),
         )
-        template_inducter = TemplateInducter(
+        slide_inducter = SlideInducter(
             presentation,
             ppt_image_folder,
             pjoin(generation_config.RUN_DIR, "template_images"),
             pptx_config,
+            image_model,
         )
-        functional_keys, slide_cluster = progress.run_stage(
-            template_inducter.work, most_image=1
-        )
+        slide_induction = progress.run_stage(slide_inducter.content_induct)
         presentation = presentation.normalize()
 
+        # PPT Generation
         progress.run_stage(
-            PPTAgent(
-                presentation,
-                generation_config,
-                slide_cluster,
-                images,
-                num_pages,
-                text_model,
-                doc_json,
-                functional_keys,
-                torch.stack(get_text_embedding(list(slide_cluster.keys()), text_model)),
-            ).work,
-            3,
+            pptgen.PPTCrew(text_model, error_exit=False)
+            .set_examplar(presentation, slide_induction)
+            .generate_pres,
+            generation_config,
+            images,
+            task["numberOfPages"],
+            doc_json,
         )
-        if task_id in active_connections:
-            result_store[task_id] = pjoin(generation_config.RUN_DIR, "final.pptx")
         progress.report_progress()
     except Exception as e:
         progress.fail_stage(str(e))
@@ -336,6 +322,16 @@ def ppt_gen(task_id: str):
 
 
 if __name__ == "__main__":
+    import subprocess
+
     import uvicorn
 
-    uvicorn.run(app, host="192.168.14.17", port=9297)
+    ip = (
+        subprocess.check_output(
+            "hostname -I | tr ' ' '\n' | grep '^124\\.'", shell=True
+        )
+        .decode()
+        .strip()
+    )
+    print(f"backend running on {ip}:9297")
+    uvicorn.run(app, host=ip, port=9297)

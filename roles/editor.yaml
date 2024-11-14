@@ -21,9 +21,9 @@ template: |
   Generate content for each element and output in the following format:
   {
     "element_name": {
-      "data": None  // When no relevant content
-            "content"  // Single element: string
-            ["content1", "content2"]  // Multiple elements: string array
+    "data": "actual text" or "<type>:<50-word description>" # detail here
+            or ["text1", "text2"]  # Multiple text elements
+            or ["logo1:...", "logo2:..."]  # Multiple image elements
     }
   }
 

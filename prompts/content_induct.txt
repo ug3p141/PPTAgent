@@ -6,15 +6,16 @@ Please analyze the slide elements and create a structured template schema in JSO
    - "type": Whether it's "text" or "image"
    - "data":
       * For text elements: The actual text content as string or array
-      * For image elements: Describe the image's main content and classify its type (Table/Chart/Diagram/Banner/Background/Icon/Logo/Picture) in this format - <type>: <50-word description>
+      * For image elements: Describe the image in this format: <type>: <50-word description>
 
 Example format:
 {
   "element_name": {
     "description": "purpose of this element", # do not mention any detail, just purpose
     "type": "text" or "image",
-    "data": "actual text" or "<type>:<50-word description>" # describe the detail here
-            ["content1", "content2"]  // Multiple elements
+    "data": "actual text" or "<type>:<50-word description>" # detail here
+            or ["text1", "text2"]  # Multiple text elements
+            or ["logo:...", "logo:..."]  # Multiple image elements
   }
 }
 
