@@ -8,7 +8,6 @@
           <label for="pptx-upload" class="upload-label">
             Upload PPTX
             <span v-if="pptxFile" class="uploaded-symbol">✔️</span>
-            <!-- {{ edit: Add checkmark symbol when PPTX is uploaded }} -->
           </label>
           <input type="file" id="pptx-upload" @change="handleFileUpload($event, 'pptx')"
             accept=".pptx" />
@@ -17,7 +16,6 @@
           <label for="pdf-upload" class="upload-label">
             Upload PDF
             <span v-if="pdfFile" class="uploaded-symbol">✔️</span>
-            <!-- {{ edit: Add checkmark symbol when PDF is uploaded }} -->
           </label>
           <input type="file" id="pdf-upload" @change="handleFileUpload($event, 'pdf')"
             accept=".pdf" />
@@ -38,7 +36,14 @@
         </div>
       </div>
     </div>
-    <button @click="goToGenerate" class="next-button">Next</button> <!-- Updated click handler -->
+
+    <!-- New Topic Input -->
+    <div class="topic-input">
+      <input type="text" v-model="topic" placeholder="Enter topic" />
+      <button @click="downloadPdf" class="download-button">Generate PDF</button>
+    </div>
+
+    <button @click="goToGenerate" class="next-button">Next</button>
   </div>
 </template>
 
@@ -51,8 +56,9 @@ export default {
       pdfFile: null,
       selectedModel: 'Qwen2.5-72B-Instruct',
       models: ['Qwen2.5-72B-Instruct'],
-      selectedPages: 8,
+      selectedPages: 4,
       pagesOptions: Array.from({ length: 24 }, (_, i) => i + 3),
+      topic: 'Large Language Models'
     }
   },
   methods: {
@@ -60,12 +66,12 @@ export default {
       console.log("file uploaded :", fileType)
       const file = event.target.files[0]
       if (fileType === 'pptx') {
-        this.pptxFile = file  // {{ edit: Assign single pptxFile }}
+        this.pptxFile = file
       } else if (fileType === 'pdf') {
-        this.pdfFile = file  // {{ edit: Assign single pdfFile }}
+        this.pdfFile = file
       }
     },
-    async goToGenerate() { // Renamed method from goToDoc to goToGenerate
+    async goToGenerate() {
       this.$axios.get('/')
         .then(response => {
           console.log("Backend is running", response.data);
@@ -92,11 +98,29 @@ export default {
         })
         const taskId = uploadResponse.data.task_id
         console.log("Task ID:", taskId)
-        // Navigate to Generate component with taskId
         this.$router.push({ name: 'Generate', state: { taskId: taskId } })
       } catch (error) {
         console.error("Upload error:", error)
         this.statusMessage = 'Failed to upload files.'
+      }
+    },
+    async downloadPdf() {
+      if (!this.topic) {
+        alert('Please enter a topic.');
+        return;
+      }
+      try {
+        const response = await this.$axios.get(`/api/get_pdf?topic=${encodeURIComponent(this.topic)}`, { responseType: 'blob' });
+        const url = URL.createObjectURL(new Blob([response.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', 'topic.pdf');
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } catch (error) {
+        console.error("Download error:", error);
+        alert('Failed to download PDF.');
       }
     }
   }
@@ -111,7 +135,6 @@ export default {
   justify-content: center;
   height: 100%;
   background-color: #f0f8ff;
-  /* Light background for better contrast */
   padding: 40px;
   box-sizing: border-box;
 }
@@ -120,7 +143,6 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 30px;
-  /* Increased gap between rows */
   width: 100%;
   max-width: 600px;
 }
@@ -130,7 +152,6 @@ export default {
   display: flex;
   justify-content: space-between;
   gap: 20px;
-  /* Spacing between items in the row */
 }
 
 .upload-section,
@@ -188,7 +209,8 @@ export default {
   font-size: 16px;
 }
 
-.next-button {
+.next-button,
+.download-button {
   background-color: #35495e;
   color: white;
   padding: 12px 0;
@@ -202,7 +224,8 @@ export default {
   transition: background-color 0.3s, transform 0.2s;
 }
 
-.next-button:hover {
+.next-button:hover,
+.download-button:hover {
   background-color: #2c3e50;
   transform: scale(1.05);
 }
@@ -216,15 +239,32 @@ export default {
   font-size: 18px;
 }
 
-@media (max-width: 600px) {
+.topic-input {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 20px;
+}
 
+.topic-input input {
+  padding: 10px;
+  border-radius: 5px;
+  border: 1px solid #ccc;
+  width: 100%;
+  max-width: 400px;
+  margin-bottom: 10px;
+  font-size: 16px;
+}
+
+@media (max-width: 600px) {
   .upload-buttons,
   .selectors {
     flex-direction: column;
     gap: 35px;
   }
 
-  .next-button {
+  .next-button,
+  .download-button {
     width: 100%;
   }
 }
