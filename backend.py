@@ -29,16 +29,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from FlagEmbedding import BGEM3FlagModel
 from marker.models import load_all_models
+from md2pdf.core import md2pdf
 
+import induct
 import llms
 import pptgen
-from induct import SlideInducter
 from model_utils import get_image_model, get_refined_doc, parse_pdf
 from multimodal import ImageLabler
 from presentation import Presentation
 from utils import IMAGE_EXTENSIONS, Config, pjoin, ppt_to_images
 
 # constants
+DEBUG = True if len(sys.argv) == 1 else False
 RUNS_DIR = "runs"
 STAGES = [
     "PPT Parsing",
@@ -83,6 +85,7 @@ class ProgressManager:
         self.task_id = task_id
         self.stages = stages
         self.debug = debug
+        self.socket = active_connections.get(task_id)
         self.failed = False
         self.current_stage = 0
         self.total_stages = len(stages)
@@ -104,7 +107,7 @@ class ProgressManager:
         progress = int((self.current_stage / self.total_stages) * 100)
         asyncio.run(
             send_progress(
-                active_connections[self.task_id],
+                self.socket,
                 f"Stage: {self.stages[self.current_stage - 1]}",
                 progress,
             )
@@ -113,7 +116,7 @@ class ProgressManager:
     def fail_stage(self, error_message: str):
         asyncio.run(
             send_progress(
-                active_connections[self.task_id],
+                self.socket,
                 f"{self.stages[self.current_stage]} Error: {error_message}",
                 100,
             )
@@ -132,8 +135,10 @@ async def create_task(
     pdfFile: UploadFile = File(...),
     numberOfPages: int = Form(...),
 ):
-    importlib.reload(llms)
-    importlib.reload(pptgen)
+    if DEBUG:
+        importlib.reload(induct)
+        importlib.reload(llms)
+        importlib.reload(pptgen)
     task_id = datetime.now().strftime("20%y-%m-%d") + "/" + str(uuid.uuid4())
     os.makedirs(pjoin(RUNS_DIR, task_id))
     pptx_blob = await pptxFile.read()
@@ -153,6 +158,9 @@ async def create_task(
 
 
 async def send_progress(websocket: WebSocket, status: str, progress: int):
+    if websocket is None:
+        print(f"websocket is None, status: {status}, progress: {progress}")
+        return
     await websocket.send_json({"progress": progress, "status": status})
 
 
@@ -172,8 +180,24 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
         active_connections.pop(task_id, None)
 
 
+@app.get("/api/get_pdf")
+def get_pdf(topic: str):
+    prompt = (
+        "Please generate a detailed presentation planning document about "
+        + topic
+        + " in markdown format without any other text, 1000 words."
+    )
+    pdf_dir = pjoin(RUNS_DIR, "topic", hashlib.md5(topic.encode()).hexdigest())
+    os.makedirs(pdf_dir, exist_ok=True)
+    pdf_path = pjoin(pdf_dir, "source.pdf")
+    text = llms.language_model(prompt)
+    md2pdf(pdf_path, text)
+    return FileResponse(pdf_path)
+
+
 @app.get("/api/download")
 def download(task_id: str):
+    task_id = task_id.replace("|", "/")
     if not os.path.exists(pjoin(RUNS_DIR, task_id)):
         raise HTTPException(status_code=404, detail="Task not created yet")
     file_path = pjoin(RUNS_DIR, task_id, "final.pptx")
@@ -197,7 +221,11 @@ def hello():
         )
 
 
-def ppt_gen(task_id: str):
+def ppt_gen(task_id: str, rerun=False):
+    if rerun:
+        task_id = task_id.replace("|", "/")
+        active_connections[task_id] = None
+        progress_store[task_id] = json.load(open(pjoin(RUNS_DIR, task_id, "task.json")))
     for _ in range(100):
         if task_id in active_connections:
             break
@@ -233,8 +261,8 @@ def ppt_gen(task_id: str):
             pjoin(pptx_config.RUN_DIR, "source.pptx"), pptx_config
         )
         ppt_to_images(pjoin(pptx_config.RUN_DIR, "source.pptx"), ppt_image_folder)
-        assert len(os.listdir(ppt_image_folder)) == len(
-            presentation
+        assert len(os.listdir(ppt_image_folder)) == len(presentation) + len(
+            presentation.error_history
         ), "Number of parsed slides and images do not match"
 
         for err_idx, _ in presentation.error_history:
@@ -269,7 +297,7 @@ def ppt_gen(task_id: str):
             for k in os.listdir(parsedpdf_dir):
                 if k.split(".")[-1] in IMAGE_EXTENSIONS:
                     try:
-                        images[k] = [
+                        images[pjoin(parsedpdf_dir, k)] = [
                             llms.vision_model(
                                 caption_prompt, [pjoin(parsedpdf_dir, k)]
                             ),
@@ -295,7 +323,7 @@ def ppt_gen(task_id: str):
             pjoin(generation_config.RUN_DIR, "template.pptx"),
             pjoin(generation_config.RUN_DIR, "template_images"),
         )
-        slide_inducter = SlideInducter(
+        slide_inducter = induct.SlideInducter(
             presentation,
             ppt_image_folder,
             pjoin(generation_config.RUN_DIR, "template_images"),
@@ -315,6 +343,7 @@ def ppt_gen(task_id: str):
             task["numberOfPages"],
             doc_json,
         )
+        print(task_id, "generation finished")
         progress.report_progress()
     except Exception as e:
         progress.fail_stage(str(e))
@@ -326,6 +355,9 @@ if __name__ == "__main__":
 
     import uvicorn
 
+    while len(sys.argv) == 1:
+        get_pdf("Large Language Models")
+        ppt_gen("2024-11-14|9edf8d8b-5ad4-4ebd-a9a0-71a0a0c0c84e", True)
     ip = (
         subprocess.check_output(
             "hostname -I | tr ' ' '\n' | grep '^124\\.'", shell=True
