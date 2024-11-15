@@ -6,17 +6,15 @@ from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial
-from typing import Any, Literal
 
 from pptx.dml.color import RGBColor
+from pptx.oxml import parse_xml
 from pptx.shapes.base import BaseShape
-from pptx.slide import Slide
-from pptx.text.text import _Paragraph
 from pptx.util import Pt
 
 from llms import Role
 from presentation import Picture, SlidePage
-from utils import get_font_style, runs_merge
+from utils import runs_merge
 
 
 @dataclass
@@ -27,20 +25,16 @@ class HistoryMark:
     CODE_RUN_CORRECT = "code_run_correct"
 
 
-# todo sort 一下，根据操作类型
 class CodeExecutor:
 
-    def __init__(self, coder: Role, retry_times: int):
+    def __init__(self, retry_times: int):
         self.api_history = []
         self.code_history = []
-        self.coder = coder
-        if coder is None:
-            retry_times = 0
         self.retry_times = retry_times
         self.registered_functions = API_TYPES.all_funcs()
         self.function_regex = re.compile(r"^[a-z]+_[a-z]+\(.+\)$")
 
-    def get_apis_docs(self, funcs: list[callable], show_example: bool = False):
+    def get_apis_docs(self, funcs: list[callable], show_example: bool = True):
         api_doc = []
         for func in funcs:
             sig = inspect.signature(func)
@@ -62,10 +56,9 @@ class CodeExecutor:
             api_doc.append(f"{signature}\n\t{doc}")
         return "\n".join(api_doc)
 
-    def execute_actions(self, actions: str, edit_slide: SlidePage, error_time: int = 0):
+    def execute_actions(self, actions: str, edit_slide: SlidePage):
         found_code = False
         api_calls = actions.strip().split("\n")
-        backup_state = deepcopy(edit_slide)
         self.api_history.append(
             [HistoryMark.API_CALL_ERROR, edit_slide.slide_idx, actions]
         )
@@ -88,143 +81,119 @@ class CodeExecutor:
                 eval(line, {}, {func: partial_func})
                 self.code_history[-1][0] = HistoryMark.CODE_RUN_CORRECT
             except:
-                error_time += 1
                 trace_msg = traceback.format_exc()
                 if found_code:
                     self.code_history[-1][-1] = trace_msg
-                if error_time > self.retry_times:
-                    return None
                 api_lines = (
                     "\n".join(api_calls[: line_idx - 1])
                     + f"\n--> Error Line: {line}\n"
                     + "\n".join(api_calls[line_idx:])
                 )
-                actions = self.coder(
-                    error_message=trace_msg,
-                    faulty_api_sequence=api_lines,
-                )
-                return self.execute_actions(actions, backup_state, error_time)
+                return api_lines, trace_msg
         self.api_history[-1][0] = HistoryMark.API_CALL_CORRECT
-        return edit_slide
 
 
 # supporting functions
-def element_index(slide: SlidePage, element_id: str):
-    element_id = int(element_id)
-    for i in slide.shapes:
-        if i.shape_idx == element_id:
-            return i
+def element_index(slide: SlidePage, element_id: int):
+    for shape in slide:
+        if shape.shape_idx == element_id:
+            return shape
     raise ValueError(f"Cannot find element {element_id}, is it deleted or not exist?")
 
 
-def textframe_index(slide: SlidePage, element_id: str, textframe_id: str):
-    shape = element_index(slide, element_id)
-    if not shape.text_frame.is_textframe:
-        raise ValueError(f"The element {element_id} doesn't have a text frame.")
-    for para in shape.text_frame.paragraphs:
-        for run in para.runs:
-            if run.idx == int(textframe_id):
-                return shape, para, run
-    raise ValueError(f"Incorrect textframe ID: {textframe_id}.")
+def replace_run(paragraph_id: int, run_id: int, new_text: str, shape: BaseShape):
+    para = shape.text_frame.paragraphs[paragraph_id]
+    run = runs_merge(para)[run_id]
+    run.text = new_text
 
 
-def replace_para(orig_text: str, new_text: str, shape: BaseShape):
-    for para in shape.text_frame.paragraphs:
-        for r in runs_merge(para):
-            if r.text == orig_text:
-                r.text = new_text
-                return
-    raise ValueError(f"Cannot find para {orig_text}.")
+def clone_para(paragraph_id: int, shape: BaseShape):
+    para = shape.text_frame.paragraphs[paragraph_id]
+    shape.text_frame.paragraphs[-1]._element.addnext(parse_xml(para._element.xml))
 
 
-def del_para(text: str, shape: BaseShape):
-    for para in shape.text_frame.paragraphs:
-        for run in runs_merge(para):
-            if run.text == text:
-                para._element.getparent().remove(para._element)
-                if len(runs_merge(para)) == 0:
-                    para._element.getparent().remove(para._element)
-                if len(shape.text_frame.paragraphs) == 0:
-                    shape._element.getparent().remove(shape._element)
-                return
-    raise ValueError(f"Cannot find para {text}.")
+def del_run(paragraph_id: int, run_id: int, shape: BaseShape):
+    para = shape.text_frame.paragraphs[paragraph_id]
+    run = para.runs[run_id]
+    run._r.getparent().remove(run._r)
+    if len(para.runs) == 0:
+        para._element.getparent().remove(para._element)
+
+
+def set_font(
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    font_size: int,
+    font_color: str,
+    para_id: int,
+    span_id: int,
+    text_shape: BaseShape,
+):
+    run = runs_merge(text_shape.text_frame.paragraphs[para_id])[span_id]
+    if bold is not None:
+        run.font.bold = bold
+    if italic is not None:
+        run.font.italic = italic
+    if underline is not None:
+        run.font.underline = underline
+    if font_size is not None:
+        run.font.size = Pt(font_size)
+    if font_color is not None:
+        run.font.color.rgb = RGBColor.from_string(font_color)
+
+
+def set_size(width: int, height: int, left: int, top: int, shape: BaseShape):
+    if width is not None:
+        shape.width = Pt(width)
+    if height is not None:
+        shape.height = Pt(height)
+    if left is not None:
+        shape.left = Pt(left)
+    if top is not None:
+        shape.top = Pt(top)
 
 
 # api functions
-def del_textframe(slide: SlidePage, element_id: str, textframe_id: str):
-    shape, para, run = textframe_index(slide, element_id, textframe_id)
-    shape.closures[element_id + "-" + textframe_id] = partial(del_para, run.text)
+def del_span(slide: SlidePage, div_id: int, paragraph_id: int, span_id: int):
+    shape = element_index(slide, div_id)
+    shape._closures["delete"].append(partial(del_run, paragraph_id, span_id))
 
 
-def del_picture(slide: SlidePage, element_id: str):
-    shape = element_index(slide, element_id)
+def del_image(slide: SlidePage, figure_id: int):
+    shape = element_index(slide, figure_id)
     if not isinstance(shape, Picture):
         raise ValueError("The element is not a Picture.")
     slide.shapes.remove(shape)
 
 
-def replace_text(slide: SlidePage, element_id: str, textframe_id: str, text: str):
-    shape, para, run = textframe_index(slide, element_id, textframe_id)
-    shape.closures[element_id + "-" + textframe_id] = partial(
-        replace_para, run.text, text
-    )
+def replace_text(
+    slide: SlidePage, div_id: int, paragraph_id: int, span_id: int, text: str
+):
+    shape = element_index(slide, div_id)
+    shape._closures["replace"].append(partial(replace_run, paragraph_id, span_id, text))
 
 
-def replace_image(slide: SlidePage, element_id: str, image_path: str):
+def replace_image(slide: SlidePage, figure_id: int, image_path: str):
     if not os.path.exists(image_path):
         raise ValueError(f"The image {image_path} does not exist.")
-    shape = element_index(slide, element_id)
+    shape = element_index(slide, figure_id)
     if not isinstance(shape, Picture):
         raise ValueError("The element is not a Picture.")
     shape.img_path = image_path
 
 
-def clone_textframe(slide: SlidePage, element_id: str, textframe_id: str):
-    """Clone a textframe, new textframe_id will be the textframe_id + 1."""
-    shape, para, run = textframe_index(slide, element_id, textframe_id)
-    para._element.getparent().insert(para._element.getprevious(), para._element)
-    # todo implement clone
-
-
-# 理论上来说只可能是image 或者textframe
-# ? 当且仅当一个text_frame都没有的时候，自动删除整个element
-# ? text_frame的命名方式和new_element冲突了
-
-
-# delete 应该不需要，从最后一个开始删除就好了
-def spacing_elements(
-    slide: SlidePage,
-    element_ids: list[str],
-    spacing_type: Literal["horizontal", "vertical"],
-):
-    """Arrange the spacing between elements."""
-    top = min(slide.shapes[i].top for i in element_ids)
-    left = min(slide.shapes[i].left for i in element_ids)
-    bottom = max(slide.shapes[i].bottom for i in element_ids)
-    right = max(slide.shapes[i].right for i in element_ids)
-    sum_width = sum(slide.shapes[i].width for i in element_ids)
-    sum_height = sum(slide.shapes[i].height for i in element_ids)
-    if spacing_type == "horizontal":
-        # 每两个元素之间要是相同的spacing
-        el_spacing = (right - left - sum_width) / (len(element_ids) - 1)
-        for rel_idx, shape_id in enumerate(element_ids):
-            shape = slide.shapes[shape_id]
-            shape.left = left + rel_idx * el_spacing
-    elif spacing_type == "vertical":
-        el_spacing = (bottom - top - sum_height) / (len(element_ids) - 1)
-        for rel_idx, shape_id in enumerate(element_ids):
-            shape = slide.shapes[shape_id]
-            shape.top = top + rel_idx * el_spacing
-    else:
-        raise ValueError(
-            f"Incorrect spacing type, should be `horizontal` or `vertical`."
-        )
+def clone_paragraph(slide: SlidePage, div_id: int, paragraph_id: int):
+    # The cloned paragraph will have a paragraph_id one greater than the current maximum in the parent element.
+    shape = element_index(slide, div_id)
+    shape._closures["clone"].append(partial(clone_para, paragraph_id))
 
 
 def set_font_style(
     slide: SlidePage,
-    element_id: str,
-    textframe_id: str,
+    div_id: int,
+    paragraph_id: int,
+    span_id: int,
     bold: bool = None,
     italic: bool = None,
     underline: bool = None,
@@ -236,73 +205,51 @@ def set_font_style(
     Example:
     >>> set_font_style("1_1", bold=True, font_size=24, font_color="FF0000")
     """
-    shape, para, run = textframe_index(slide, element_id, textframe_id)
-    paratext = run.text
+    if font_color.startswith("#"):
+        font_color = font_color[1:]
+    shape = element_index(slide, div_id)
 
-    def set_font(text_shape: BaseShape):
-        find = False
-        if not text_shape.has_text_frame:
-            raise ValueError(f"The element is not a text frame: {textframe_id}.")
-        for para in shape.text_frame.paragraphs:
-            if para.text == paratext:
-                find = True
-                break
-        if not find:
-            raise ValueError(f"Incorrect element id: {textframe_id}.")
-        run = runs_merge(para)
-        if bold is not None:
-            run.font.bold = bold
-        if italic is not None:
-            run.font.italic = italic
-        if underline is not None:
-            run.font.underline = underline
-        if font_size is not None:
-            run.font.size = Pt(font_size)
-        if font_color is not None:
-            run.font.color.rgb = RGBColor.from_string(font_color)
-
-    shape.closures[textframe_id] = set_font
+    shape._closures["style"].append(
+        partial(
+            set_font,
+            bold,
+            italic,
+            underline,
+            font_size,
+            font_color,
+            paragraph_id,
+            span_id,
+        )
+    )
 
 
-def set_geometry(slide: SlidePage, element_id: str, left: int = None, top: int = None):
-    shape = slide.shapes[int(element_id)]
-    shape.left = Pt(left)
-    shape.top = Pt(top)
-
-
-def set_size(slide: SlidePage, element_id: str, width: int, height: int):
-    shape = slide.shapes[int(element_id)]
-    shape.width = Pt(width)
-    shape.height = Pt(height)
-
-    def set_geometry(shape: BaseShape):
-        shape.width = width
-        shape.height = height
-
-    shape.closures[element_id] = set_geometry
+def set_element_size(
+    slide: SlidePage,
+    element_id: int,
+    width: int = None,
+    height: int = None,
+    left: int = None,
+    top: int = None,
+):
+    """
+    Set the size of a shape, the unit is pt.
+    Example:
+    >>> set_element_size("1_1", width=32, height=32)
+    >>> set_element_size("1_1", left=100, top=100)
+    """
+    shape = element_index(slide, element_id)
+    shape._closures["style"].append(partial(set_size, width, height, left, top))
 
 
 class API_TYPES(Enum):
     Agent = [
-        replace_text,
-        del_textframe,
-        replace_image,
-        del_picture,
-    ]
-    Coder = [
-        del_textframe,
-        del_picture,
-        clone_textframe,
+        del_span,
+        del_image,
+        clone_paragraph,
         replace_text,
         replace_image,
-    ]
-    Typographer = [
-        set_font_style,
-        # set_geometry,
-        spacing_elements,
     ]
 
-    # return all functions in the enum
     @classmethod
     def all_funcs(cls) -> dict[str, callable]:
         funcs = {}
@@ -313,30 +260,4 @@ class API_TYPES(Enum):
         return funcs
 
 
-# 这是基于slide 元素， pptx shape 而不是presentation的操作
-# 操作样式, 不操作文本内容, 单位是一个slide
-# 似乎还是应该以shape为基本单位而不是slide，不然可能导致不应该被变大变小的元素也被变了
-# 感觉也没事
-# run的切割问题
-class StyleOperator:
-    def __init__(self, slide: SlidePage, pptxslide: Slide):
-        self.slide = slide
-        self.pptxslide = pptxslide
-        cascading_styles: list[str, (list[_Paragraph], dict)]
-
-    def set_property(self, style_class: str, property: str, value: Any):
-        for para in self.cascading_styles[style_class][0]:
-            assert len(para.runs) == 1
-            setattr(para.runs[0].font, property, value)
-
-    # 这里的k可以结合之前 text induct的结果
-    def get_all_css(self):
-        css_list = []
-        for k, v in self.cascading_styles:
-            style_str = get_font_style(v[1])
-            css_list.append(f".{k} {{ {style_str}; }}")
-        return css_list
-
-
-if __name__ == "__main__":
-    print(CodeExecutor(None, 0).get_apis_docs(API_TYPES.Coder.value))
+# 加一个switch position 或者 insert? 或者split text into run, prev and next?
