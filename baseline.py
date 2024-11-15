@@ -1,5 +1,6 @@
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from glob import glob
 
 import jsonlines
@@ -19,8 +20,7 @@ outline_template = Template(
     Extract the most important headings present in it. Reduce the length of each heading to five words if they are lengthy.
     Example Output:
     ["Heading 1", "Heading 2", "Heading 3"]
-    Output:
-
+    Output: give your output as a list of strings in json format
     """
 )
 mapping_template = Template(
@@ -31,8 +31,9 @@ mapping_template = Template(
     {{bird_eye_view}}
     The task is to find 1-2 significantly matched keys. The matching should be done based on the similarity of the text associated with the keys with the given heading.
     Example Output:
+    thoughts...
     {"Heading 1": ["key1", "key2"], "Heading 2": ["key1", "key4"]}
-    Output:
+    Output: give your final output as a dictionary in json format, notice that all headings must be present in the output, no heading should be left out and at least one key should be present in the output for each heading
     """
 )
 generation_template = Template(
@@ -77,7 +78,6 @@ def generate_content(source_text: str, bird_eye: dict, max_bullet: int):
         ),
         return_json=True,
     )
-    assert len(mapping) == len(outline), "Mapping not found"
     slides = []
     for slide_title in outline:
         indexed_sections = []
@@ -85,7 +85,7 @@ def generate_content(source_text: str, bird_eye: dict, max_bullet: int):
             for subsection in section["subsections"]:
                 if any(
                     edit_distance(key, next(iter(subsection))) > 0.9
-                    for key in mapping[slide_title]
+                    for key in mapping.get(slide_title, [])
                 ):
                     indexed_sections.append(subsection)
         bullet_points = llms.language_model(
@@ -97,12 +97,11 @@ def generate_content(source_text: str, bird_eye: dict, max_bullet: int):
             ),
             return_json=True,
         )
-        assert len(bullet_points) != 0, f"No bullet points found for {slide_title}"
         slides.append(
             {
                 "title": slide_title,
                 "bullets": bullet_points,
-                "indexed_sections": mapping[slide_title],
+                "indexed_sections": mapping.get(slide_title, []),
             }
         )
     return slides
@@ -116,8 +115,6 @@ def generate_slides(
     model: CLIPModel,
     processor: CLIPProcessor,
 ):
-    if os.path.exists(output_file + ".json"):
-        return
     images = filter_aspect_ratio(images)
     slides = generate_content(source_text, bird_eye, 7)
     image_embeddings = model.get_image_features(
@@ -164,14 +161,23 @@ def generate_slides(
 if __name__ == "__main__":
     from tqdm.auto import tqdm
 
+    llms.language_model = llms.qwen2_5
+
     print("Generating slides on baseline with ", llms.language_model.model)
     model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14").to("cuda").eval()
     processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")
-    for pdf_folder in tqdm(glob("data/*/pdf/*")):
+    folders = list(glob("data/*/pdf/*"))
+    progress = tqdm(total=len(folders))
+
+    def process_folder(pdf_folder, model, processor):
         source_text = open(f"{pdf_folder}/source.md").read()
         bird_eye = json.load(open(f"{pdf_folder}/refined_doc.json"))
         images = json.load(open(f"{pdf_folder}/image_caption.json")).keys()
         output_file = f"{pdf_folder}/baseline_{llms.language_model.model.split('-')[0]}"
+        if os.path.exists(output_file + ".jsonl"):
+            progress.write(f"Skipping {pdf_folder}")
+            progress.update(1)
+            return
         try:
             generate_slides(
                 output_file,
@@ -181,5 +187,12 @@ if __name__ == "__main__":
                 model,
                 processor,
             )
+            progress.update(1)
         except Exception as e:
             print(f"Error in {pdf_folder}: {e}")
+
+    # for folder in folders:
+    #     process_folder(folder, model, processor)
+
+    with ThreadPoolExecutor() as executor:
+        list(executor.map(lambda f: process_folder(f, model, processor), folders))

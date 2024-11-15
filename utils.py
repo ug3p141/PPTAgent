@@ -25,7 +25,7 @@ def get_font_style(font: dict):
     font = SimpleNamespace(**font)
     styles = []
     if font.size:
-        styles.append(f"font-size: {Length(font.size).pt}pt")
+        styles.append(f"font-size: {font.size}pt")
     if font.color:
         styles.append(f"color: #{font.color}")
     if font.bold:
@@ -84,14 +84,17 @@ def tenacity_log(retry_state: RetryCallState):
     traceback.print_tb(retry_state.outcome.exception().__traceback__)
 
 
-def get_json_from_response(response: str):
+def get_json_from_response(raw_response: str):
+    response = raw_response.strip()
     l, r = response.rfind("```json"), response.rfind("```")
     try:
         if l == -1 or r == -1:
-            return json_repair.loads(response)
-        return json_repair.loads(response[l + 7 : r].strip())
-    except:
-        raise RuntimeError("Failed to parse JSON from response")
+            response = json_repair.loads(response)
+        else:
+            response = json_repair.loads(response[l + 7 : r].strip())
+        return response
+    except Exception as e:
+        raise RuntimeError("Failed to parse JSON from response", e)
 
 
 tenacity = retry(
@@ -220,6 +223,9 @@ def object_to_dict(obj, result=None, exclude=None):
                 attr_value = getattr(obj, attr)
                 if "real" in dir(attr_value):
                     attr_value = attr_value.real
+                if attr == "size" and isinstance(attr_value, int):
+                    attr_value = Length(attr_value).pt
+
                 if is_primitive(attr_value):
                     result[attr] = attr_value
         except:
@@ -227,9 +233,16 @@ def object_to_dict(obj, result=None, exclude=None):
     return result
 
 
-def merge_dict(d1: dict, d2: dict):
-    for k, v in d1.items():
-        d1[k] = v or d2[k]
+def merge_dict(d1: dict, d2: list[dict]):
+    for key in list(d1.keys()):
+        values = [d[key] for d in d2]
+        if d1[key] is not None and len(values) != 1:
+            values.append(d1[key])
+        if values[0] is None or not all(value == values[0] for value in values):
+            continue
+        d1[key] = values[0]
+        for d in d2:
+            d[key] = None
     return d1
 
 

@@ -119,22 +119,14 @@ class SlideInducter:
             ),
             return_json=True,
         )
+
         if "content" in category_cluster:
             content_slides_index, functional_cluster = (
-                set(category_cluster.pop("content")),
-                category_cluster,
-            )
-        elif "Uncategorized" in category_cluster:
-            content_slides_index, functional_cluster = (
-                set(
-                    category_cluster.pop("Uncategorized"),
-                ),
-                category_cluster["categories"],
-            )
-        elif "Uncategorized" in category_cluster.get("categories", []):
-            content_slides_index, functional_cluster = (
-                set(category_cluster["categories"].pop("Uncategorized")),
-                category_cluster["categories"],
+                set(map(int, category_cluster.pop("content"))),
+                {
+                    k: list(map(int, v))
+                    for k, v in category_cluster["functional"].items()
+                },
             )
         else:
             raise Exception(f"Unknown category cluster: {category_cluster}")
@@ -180,16 +172,16 @@ class SlideInducter:
     @tenacity
     def content_induct(self):
         self.slide_induction = self.layout_induct()
-        content_induct_prompt = open("prompts/content_induct.txt").read()
+        content_induct_prompt = Template(open("prompts/content_induct.txt").read())
         for layout_name, cluster in self.slide_induction.items():
             if "content_schema" not in cluster and "template_id" in cluster:
-                self.slide_induction[layout_name]["content_schema"] = llms.vision_model(
-                    content_induct_prompt,
-                    images=pjoin(
-                        self.ppt_image_folder,
-                        f"slide_{cluster['template_id']:04d}.jpg",
-                    ),
-                    return_json=True,
+                self.slide_induction[layout_name]["content_schema"] = (
+                    llms.language_model(
+                        content_induct_prompt.render(
+                            slide=self.prs.slides[cluster["template_id"] - 1].to_html()
+                        ),
+                        return_json=True,
+                    )
                 )
         json.dump(
             self.slide_induction,

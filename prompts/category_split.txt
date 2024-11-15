@@ -15,13 +15,13 @@ Output format requirements:
 Example output:
 ```json
 {
-    "Functional": {
-        "Opening": [1],
-        "Table of Contents": [2, 5],
-        "Section Header": [3, 6],
-        "Ending": [10]
+    "functional": {
+        "opening": [1],
+        "table of contents": [2, 5],
+        "section header": [3, 6],
+        "ending": [10]
     },
-    "Content": [4, 7, 8, 9]
+    "content": [4, 7, 8, 9]
 }
 ```
 

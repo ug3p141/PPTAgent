@@ -18,5 +18,6 @@ Example format:
             or ["logo:...", "logo:..."]  # Multiple image elements
   }
 }
-
+Input:
+{{slide}}
 Please provide a schema that could be used as a template for creating similar slides.

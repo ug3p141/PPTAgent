@@ -1,5 +1,5 @@
-from itertools import count
-from typing import Iterator
+import traceback
+from dataclasses import dataclass
 
 from pptx import Presentation as PPTXPre
 from pptx.chart.chart import Chart as PPTXChart
@@ -14,7 +14,6 @@ from pptx.shapes.placeholder import PlaceholderPicture, SlidePlaceholder
 from pptx.slide import Slide as PPTXSlide
 from pptx.table import Table as PPTXTable
 from pptx.text.text import _Paragraph, _Run
-from pptx.util import Pt
 from rich import print
 
 from utils import (
@@ -32,47 +31,71 @@ from utils import (
     runs_merge,
 )
 
-# slide, group, shape, textframe, ul, run
+# slide, (group), shape, textframe, (ul), li/p, run
 INDENT = "\t"
 
 
 # textframe: shape bounds
 # paragraph: space, alignment, level, font bullet #  这里都不允许改动
 # run: font, hyperlink, text
-class Run:
-    def __init__(self, run: _Run, counter: Iterator, para_font: dict):
-        self.idx = next(counter)
-        self.text = run.text
-        self.font = {}
-        self.font = merge_dict(object_to_dict(run.font), para_font)
-        if self.font["size"] is None:
-            self.font["size"] = Pt(18)  # default size
+@dataclass
+class StyleArg:
+    run_id: bool = True
+    paragraph_id: bool = True
+    element_id: bool = True
+    font_style: bool = True
+    area: bool = False
+    size: bool = False
+    geometry: bool = False
 
-    # ? 这里似乎不需要style因为后面会css化?
-    def to_html(self, style_kwargs, tag: str):
-        id_str = f" id='{self.idx}'" if style_kwargs.get("textframe_id", False) else ""
-        style = (
-            f" style='{get_font_style(self.font)}'"
-            if style_kwargs.get("font_style", False)
-            else ""
-        )
-        return f"<{tag}{id_str}{style}>{self.text}</{tag}>"
+
+class Run:
+    def __init__(self, run: _Run, idx: int):
+        self.idx = idx
+        self.text = run.text
+        self.font = object_to_dict(run.font)
+
+    def to_html(self, style_args: StyleArg):
+        id_str = f" id='{self.idx}'" if style_args.run_id else ""
+        font_style = get_font_style(self.font)
+        style = f" style='{font_style}'" if style_args.font_style and font_style else ""
+        return f"<span{id_str}{style}>{self.text}</span>"
+
+    def __repr__(self):
+        return f"Run-{self.idx}: {self.text}"
 
 
 class Paragraph:
-    def __init__(self, paragraph: _Paragraph, counter: Iterator, textframe_font: dict):
+    def __init__(self, paragraph: _Paragraph, idx: int):
         runs = runs_merge(paragraph)
-        self.is_paragraph = len(runs) > 0
-        para_font = merge_dict(object_to_dict(paragraph.font), textframe_font)
-        self.runs = [Run(r, counter, para_font) for r in runs]
-        self.bullet = paragraph.bullet
+        self.runs = [Run(r, idx) for idx, r in enumerate(runs)]
+        if len(runs) == 0:
+            return
 
-    def to_html(self, style_kwargs):
+        self.idx = idx
+        self.bullet = paragraph.bullet
+        self.font = merge_dict(
+            object_to_dict(paragraph.font), [run.font for run in self.runs]
+        )
+
+    def to_html(self, style_args: StyleArg):
+        tag = "li" if self.bullet else "p"
+        id_str = f" id='{self.idx}'" if style_args.paragraph_id else ""
+        font_style = get_font_style(self.font)
+        style_str = (
+            f" style='{font_style}'" if style_args.font_style and font_style else ""
+        )
         repr_list = []
-        run_tag = "li" if self.bullet else "p"
         for run in self.runs:
-            repr_list.append(run.to_html(style_kwargs, run_tag))
-        return repr_list
+            repr_list.append(run.to_html(style_args))
+        return (
+            [f"<{tag}{id_str}{style_str}>"]
+            + [INDENT + repr for repr in repr_list]
+            + [f"</{tag}>"]
+        )
+
+    def __repr__(self):
+        return f"Paragraph-{self.idx}: {self.runs}"
 
 
 class TextFrame:
@@ -80,39 +103,42 @@ class TextFrame:
         if not shape.has_text_frame:
             self.is_textframe = False
             return
-        self.is_textframe = True
+        paragraphs = [
+            Paragraph(paragraph, idx)
+            for idx, paragraph in enumerate(shape.text_frame.paragraphs)
+        ]
+        self.paragraphs = [para for para in paragraphs if len(para.runs) > 0]
+        if len(self.paragraphs) == 0:
+            self.is_textframe = False
+            return
         self.level = level
         self.text = shape.text
-        textframe_font = object_to_dict(shape.text_frame.font)
-        counter = count(1)
-        paragraphs = [
-            Paragraph(paragraph, counter, textframe_font)
-            for paragraph in shape.text_frame.paragraphs
-        ]
-        self.paragraphs = [para for para in paragraphs if para.is_paragraph]
+        self.is_textframe = True
+        self.font = merge_dict(
+            object_to_dict(shape.text_frame.font),
+            [para.font for para in self.paragraphs],
+        )
 
-    def to_html(self, style_kwargs):
+    def to_html(self, style_args: StyleArg):
         if not self.is_textframe:
             return ""
         repr_list = []
         pre_bullet = None
-        bullets = []
-        for para in self.paragraphs:
-            if (para.bullet != pre_bullet or para == self.paragraphs[-1]) and len(
-                bullets
-            ) != 0:
-                repr_list += ["<ul>"] + [INDENT + repr for repr in bullets] + ["</ul>"]
-            if para.bullet is None:
-                repr_list.extend(para.to_html(style_kwargs))
-            else:
-                bullets.extend(para.to_html(style_kwargs))
+        for para in self.paragraphs + [None]:
+            if pre_bullet is not None and (para is None or para.bullet != pre_bullet):
+                repr_list.append("</ul>")
+            if para is None:
+                continue
+            if pre_bullet != para.bullet:
+                repr_list.append(f"<ul bullet-type='{para.bullet}'>")
+            repr_list.extend(para.to_html(style_args))
             pre_bullet = para.bullet
         return "\n".join([INDENT * self.level + repr for repr in repr_list])
 
     def __repr__(self):
         if not self.is_textframe:
             return "TextFrame: null"
-        return f"TextFrame: {self.text}"
+        return f"TextFrame: {self.paragraphs}"
 
     def __len__(self):
         if not self.is_textframe:
@@ -136,7 +162,8 @@ class ShapeElement:
         self.style = style
         self.data = data
         self.text_frame = text_frame
-        self.closures = {}
+        self._closure_keys = ["clone", "delete", "replace", "style"]
+        self._closures = {key: [] for key in self._closure_keys}
         self.slide_area = slide_area
         self.level = level
 
@@ -201,8 +228,14 @@ class ShapeElement:
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}: shape {self.shape_idx} of slide {self.slide_idx}"
 
-    def to_html(self, **kwargs) -> str:
+    def to_html(self, style_args: StyleArg) -> str:
         return ""
+
+    @property
+    def closures(self):
+        for key in self._closure_keys:
+            for closure in self._closures[key]:
+                yield closure
 
     @property
     def indent(self):
@@ -244,18 +277,19 @@ class ShapeElement:
     def area(self):
         return self.width * self.height
 
-    def get_inline_style(self, style_kwargs: dict):
-        id_str = (
-            f" id='{self.shape_idx}'" if style_kwargs.get("element_id", False) else ""
-        )
+    def get_inline_style(self, style_args: StyleArg):
+        id_str = f" id='{self.shape_idx}'" if style_args.element_id else ""
         styles = []
-        if style_kwargs.get("area", False):
-            styles.append(f" data-relative-area='{self.area*100/self.slide_area:.2f}%'")
-        if style_kwargs.get("geometry", False):
-            styles.append(f"left: {self.left}pt; top: {self.top}pt;")
-        if style_kwargs.get("size", False):
+        if style_args.area:
+            styles.append(f"data-relative-area={self.area*100/self.slide_area:.2f}%;")
+        if style_args.size:
             styles.append(f"width: {self.width}pt; height: {self.height}pt;")
-
+        if style_args.geometry:
+            styles.append(f"left: {self.left}pt; top: {self.top}pt;")
+        if style_args.font_style and self.text_frame.is_textframe:
+            font_style = get_font_style(self.text_frame.font)
+            if font_style:
+                styles.append(font_style)
         if len(styles) != 0:
             return id_str + " style='" + " ".join(styles) + "'"
         return id_str
@@ -289,11 +323,11 @@ class TextBox(ShapeElement):
     ):
         return cls(slide_idx, shape_idx, style, None, text_frame, slide_area, level)
 
-    def to_html(self, **style_kwargs) -> str:
+    def to_html(self, style_args: StyleArg) -> str:
 
         return (
-            f"{self.indent}<div{self.get_inline_style(style_kwargs)}>\n"
-            + self.text_frame.to_html(style_kwargs)
+            f"{self.indent}<div{self.get_inline_style(style_args)}>\n"
+            + self.text_frame.to_html(style_args)
             + f"\n{self.indent}</div>\n"
         )
 
@@ -362,14 +396,12 @@ class Picture(ShapeElement):
     def caption(self, caption: str):
         self.data[2] = caption
 
-    def to_html(self, **style_kwargs) -> str:
-        if style_kwargs.get("image_id", False):
-            style_kwargs["element_id"] = True
+    def to_html(self, style_args: StyleArg) -> str:
         if not self.caption:
             return ""
         return (
             self.indent
-            + f"<figure{self.get_inline_style(style_kwargs)}>\n"
+            + f"<figure{self.get_inline_style(style_args)}>\n"
             + f"{self.indent+INDENT}<figcaption>{self.caption}</figcaption>\n"
             + self.indent
             + "</figure>\n"
@@ -474,7 +506,7 @@ class GroupShape(ShapeElement):
                 new_shape = slide.shapes._spTree.insert_element_before(
                     parse_xml(sub_shape.xml), "p:extLst"
                 )
-            for closure in sub_shape.closures.values():
+            for closure in sub_shape.closures:
                 closure(new_shape)
 
     def __iter__(self):
@@ -495,11 +527,11 @@ class GroupShape(ShapeElement):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}: {self.data}"
 
-    def to_html(self, **style_kwargs) -> str:
+    def to_html(self, style_args: StyleArg) -> str:
         return (
             self.indent
-            + f"<div class='{self.group_label}'{self.get_inline_style(style_kwargs)}>\n"
-            + "\n".join([shape.to_html(**style_kwargs) for shape in self.data])
+            + f"<div class='{self.group_label}'{self.get_inline_style(style_args)}>\n"
+            + "\n".join([shape.to_html(style_args) for shape in self.data])
             + "\n"
             + self.indent
             + "</div>\n"
@@ -568,10 +600,12 @@ class FreeShape(ShapeElement):
             slide_idx, shape_idx, style, data, text_frame, slide_area, level=level
         )
 
-    def to_html(self, **style_kwargs) -> str:
-        textframe = self.text_frame.to_html(style_kwargs)
+    def to_html(self, style_args: StyleArg) -> str:
+        if not self.text_frame.is_textframe:
+            return ""
+        textframe = self.text_frame.to_html(style_args)
         return (
-            f"{self.indent}<div data-shape-type='{self.data['svg_tag']}'{self.get_inline_style(style_kwargs)}>"
+            f"{self.indent}<div data-shape-type='{self.data['svg_tag']}'{self.get_inline_style(style_args)}>"
             + f"\n{textframe}"
             + f"\n{self.indent}</div>"
         )
@@ -665,7 +699,6 @@ class SlidePage:
             slide_height,
         )
 
-    # TODO 在build的时候可以根据class 建议一个 class, shapes mapping
     def build(self, slide: PPTXSlide):
         for ph in slide.placeholders:
             ph.element.getparent().remove(ph.element)
@@ -677,9 +710,12 @@ class SlidePage:
                 slide.shapes._spTree.insert_element_before(
                     parse_xml(shape.xml), "p:extLst"
                 )
-            for run in shape.text_frame:
-                run.get("closure", lambda x: x)(slide.shapes[-1])
-            shape.get("closure", lambda x: x)(slide.shapes[-1])
+            for closure in shape.closures:
+                try:
+                    closure(slide.shapes[-1])
+                except Exception as e:
+                    print(f"Warning in slide {self.slide_idx}: {e}")
+                    continue
         return slide
 
     def shape_filter(self, shape_type: type, shapes: list[ShapeElement] = None):
@@ -708,18 +744,19 @@ class SlidePage:
                 content_types.union(self.get_content_types(shape.data))
         return sorted(list(content_types))
 
-    def to_html(self, **kwargs) -> str:
+    def to_html(self, style_args: StyleArg = None) -> str:
+        if style_args is None:
+            style_args = StyleArg()
         return "".join(
             [
                 "<!DOCTYPE html>\n<html>\n",
                 (f"<title>{self.slide_title}</title>\n" if self.slide_title else ""),
                 f'<body style="width:{self.slide_width}pt; height:{self.slide_height}pt;">\n',
-                "\n".join([shape.to_html(**kwargs) for shape in self.shapes]),
+                "\n".join([shape.to_html(style_args) for shape in self.shapes]),
                 "</body>\n</html>\n",
             ]
         )
 
-    # TODO 将shapes 转换成一个class , data:shapes, requirements 的list
     def to_tree(self, template: dict):
         pass
 
@@ -813,7 +850,7 @@ class Presentation:
             except Exception as e:
                 error_history.append((slide_idx, str(e)))
                 if config.DEBUG:
-                    print(f"Warning in slide {slide_idx}: {e}")
+                    print(f"Warning in slide {slide_idx}: {traceback.format_exc()}")
 
         num_pages = len(slides)
         return cls(
@@ -859,14 +896,6 @@ class Presentation:
                     for run in para.runs:
                         run.text = "a" * len(run.text)
 
-    def to_html(self, **kwargs) -> str:
-        return "\n".join(
-            [
-                f"Slide Page {slide_idx}\n" + slide.to_html(**kwargs)
-                for slide_idx, slide in enumerate(self.slides)
-            ]
-        )
-
     def to_text(self, show_image: bool = True) -> str:
         return "\n".join(
             [
@@ -897,22 +926,15 @@ SHAPECAST: dict[int, ShapeElement] = {
 }
 
 if __name__ == "__main__":
-    from glob import glob
-
     import tiktoken
 
     encoder = tiktoken.encoding_for_model("gpt-4o")
-
-    for ppt in glob("data/*/pptx/*/source_standard.pptx"):
-        prs = Presentation.from_file(ppt, Config("/tmp"))
-        for slide in prs.slides:
-            # geometry, size, area, font_style, element_id(image_id), textframe_id
-            html = slide.to_html(
-                geometry=True,
-                size=True,
-                area=True,
-                element_id=True,
-                textframe_id=True,
-                font_style=True,
-            )
-            print("\033c", html, "total tokens:", len(encoder.encode(html)))
+    prs = Presentation.from_file("test_ppt/original.pptx", Config("/tmp"))
+    for idx, slide in enumerate(prs.slides):
+        html = slide.to_html(
+            element_id=True,
+            paragraph_id=True,
+            run_id=True,
+            font_style=True,
+        )
+        print("\033c", html, "Slide", idx, "total tokens:", len(encoder.encode(html)))

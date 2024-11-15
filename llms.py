@@ -1,16 +1,23 @@
 import asyncio
 import base64
+from dataclasses import asdict, dataclass
+from math import ceil
 
 import jsonlines
 import requests
+import tiktoken
 import yaml
 from FlagEmbedding import BGEM3FlagModel
 from jinja2 import Environment
 from oaib import Auto
 from openai import OpenAI
+from PIL import Image
+from torch import Tensor, cosine_similarity
 
 from model_utils import get_text_embedding
 from utils import get_json_from_response, pexists, pjoin, print, tenacity
+
+ENCODING = tiktoken.encoding_for_model("gpt-4o")
 
 
 def run_async(coroutine):
@@ -21,6 +28,24 @@ def run_async(coroutine):
         asyncio.set_event_loop(loop)
     job = loop.run_until_complete(coroutine)
     return job
+
+
+def calc_image_tokens(images: list[str]):
+    tokens = 0
+    for image in images:
+        with open(image, "rb") as f:
+            width, height = Image.open(f).size
+        if width > 1024 or height > 1024:
+            if width > height:
+                height = int(height * 1024 / width)
+                width = 1024
+            else:
+                width = int(width * 1024 / height)
+                height = 1024
+        h = ceil(height / 512)
+        w = ceil(width / 512)
+        tokens += 85 + 170 * h * w
+    return tokens
 
 
 class LLM:
@@ -41,6 +66,7 @@ class LLM:
         self._use_openai = use_openai
         self._use_batch = use_batch
 
+    @tenacity
     def __call__(
         self,
         content: str,
@@ -50,11 +76,13 @@ class LLM:
         delay_batch: bool = False,
         return_json: bool = False,
         return_message: bool = False,
-    ) -> str:
+    ) -> str | dict | list:
         if content.startswith("You are"):
             system_message, content = content.split("\n", 1)
         if history is None:
             history = []
+        if isinstance(images, str):
+            images = [images]
         system, message = self.format_message(content, images, system_message)
         if self._use_batch:
             result = run_async(self._run_batch(system + history + message, delay_batch))
@@ -85,7 +113,7 @@ class LLM:
         if return_json:
             response = get_json_from_response(response)
         if return_message:
-            return response, message
+            response = (response, message)
         return response
 
     def __repr__(self) -> str:
@@ -143,14 +171,39 @@ class LLM:
 
 
 # by type, by relevance, by time
+@dataclass
+class Turn:
+    id: int
+    prompt: str
+    response: str
+    message: list
+    images: list[str]
+    input_tokens: int = 0
+    output_tokens: int = 0
+    embedding: Tensor = None
+
+    def to_dict(self):
+        return {k: v for k, v in asdict(self).items() if k != "embedding"}
+
+    def calc_token(self):
+        if self.images is not None:
+            self.input_tokens += calc_image_tokens(self.images)
+        self.input_tokens += len(ENCODING.encode(self.prompt))
+        self.output_tokens = len(ENCODING.encode(self.response))
+
+    def __eq__(self, other):
+        return self is other
+
+
 class Role:
     def __init__(
         self,
         name: str,
         env: Environment,
-        text_model: BGEM3FlagModel = None,
+        record_cost: bool,
         llm: LLM = None,
         config: dict = None,
+        text_model: BGEM3FlagModel = None,
     ):
         self.name = name
         if config is None:
@@ -160,35 +213,54 @@ class Role:
             llm = globals()[config["use_model"] + "_model"]
         self.llm = llm
         self.model = llm.model
+        self.record_cost = record_cost
         self.text_model = text_model
-        self.prompt_args = set(config["jinja_args"])
-        self.system_message = config["system_prompt"]
         self.return_json = config["return_json"]
+        self.system_message = config["system_prompt"]
+        self.prompt_args = set(config["jinja_args"])
         self.template = env.from_string(config["template"])
-        self._history = []
+        self.system_tokens = len(ENCODING.encode(self.system_message))
+        self.input_tokens = 0
+        self.output_tokens = 0
+        self._history: list[Turn] = []
 
-    def append_history(self, message: list):
-        # calc similarity of request
-        if self.text_model is not None:
-            request = message[0]["content"][0]["text"]
-            embedding = get_text_embedding(request, self.text_model)
-            self._history.append((embedding, message))
-        else:
-            self._history.append(message)
+    def calc_cost(self, turns: list[Turn]):
+        for turn in turns:
+            self.input_tokens += turn.input_tokens
+            self.output_tokens += turn.output_tokens
+        self.input_tokens += self.system_tokens
+        # every reply is primed with <|start|>assistant<|message|>
+        self.output_tokens += 3
 
-    def add_validator(self, validator):
-        self.validator = validator
-
-    def get_history(self, add_history: int = 0):
-        if add_history > 0:
-            return self._history[-add_history:]
+    def get_history(self, similar: int, recent: int, prompt: str):
+        history = self._history[-recent:] if recent > 0 else []
+        if similar > 0:
+            embedding = get_text_embedding(prompt, self.text_model)
+            history.sort(key=lambda x: cosine_similarity(embedding, x.embedding))
+            for turn in history:
+                if len(history) > similar + recent:
+                    break
+                if turn not in history:
+                    history.append(turn)
+        history.sort(key=lambda x: x.id)
+        return history
 
     def save_history(self, output_dir: str):
         history_file = pjoin(output_dir, f"{self.name}.jsonl")
         if pexists(history_file) and len(self._history) == 0:
             return
         with jsonlines.open(history_file, "w") as writer:
-            writer.write_all(self._history)
+            writer.write(
+                {
+                    "input_tokens": self.input_tokens,
+                    "output_tokens": self.output_tokens,
+                }
+            )
+            for turn in self._history:
+                writer.write(turn.to_dict())
+
+    def retry(self, feedback: str):
+        pass
 
     def __repr__(self) -> str:
         return f"Role(name={self.name}, model={self.model})"
@@ -196,27 +268,51 @@ class Role:
     def __call__(
         self,
         images: list[str] = None,
-        add_history: int = 0,
+        recent: int = 0,
+        similar: int = 0,
         **jinja_args,
     ):
+        if isinstance(images, str):
+            images = [images]
         assert self.prompt_args == set(jinja_args.keys()), "Invalid arguments"
+        prompt = self.template.render(**jinja_args)
+        history = []
+        for turn in self.get_history(similar, recent, prompt):
+            history.extend(turn.message)
+
         response, message = self.llm(
-            self.template.render(**jinja_args),
+            prompt,
             system_message=self.system_message,
-            history=self.get_history(add_history),
+            history=history,
             images=images,
-            return_json=self.return_json,
             return_message=True,
         )
-        self.append_history(message)
+        turn = Turn(
+            id=len(self._history),
+            prompt=prompt,
+            response=response,
+            message=message,
+            images=images,
+        )
+        self._history.append(turn)
+        if similar > 0:
+            turn.embedding = get_text_embedding(turn.prompt, self.text_model)
+        if self.record_cost:
+            turn.calc_token()
+            self.calc_cost(history + [turn])
+        if self.return_json:
+            response = get_json_from_response(response)
         return response
 
 
-gpt4o = LLM(use_batch=True)
+gpt4o = LLM(model="gpt-4o-2024-08-06", use_batch=True)  # todo use_batch
 gpt4omini = LLM(model="gpt-4o-mini")
+# qwen2_5 = LLM(
+#     model="Qwen2.5-72B-Instruct-GPTQ-Int4", api_base="http://124.16.138.143:7812/v1"
+# )
 qwen2_5 = LLM(model="Qwen2.5-72B-Instruct", api_base="http://127.0.0.1:7999/v1")
 qwen_vl = LLM(
-    model="Qwen2-VL-72B-Instruct-GPTQ-Int4", api_base="http://124.16.138.144:7813/v1"
+    model="Qwen2-VL-72B-Instruct-GPTQ-Int4", api_base="http://127.0.0.1:8000/v1"
 )
 internvl_76 = LLM(model="InternVL2-Llama3-76B", api_base="http://127.0.0.1:8000/v1")
 internvl_multi = LLM(
@@ -224,14 +320,14 @@ internvl_multi = LLM(
     api_base="http://127.0.0.1:5000/generate",
     use_openai=False,
 )
+
 language_model = qwen2_5
 code_model = qwen2_5
-vision_model = internvl_76
-
+vision_model = gpt4o
 
 if __name__ == "__main__":
     print(
-        qwen2_5(
+        gpt4o(
             "who r u",
         )
     )

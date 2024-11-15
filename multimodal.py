@@ -20,17 +20,15 @@ class ImageLabler:
         }
         if pexists(self.stats_file):
             image_stats: dict[str, dict] = json.load(open(self.stats_file, "r"))
-            if self.image_stats.keys() == image_stats.keys():
-                self.image_stats = image_stats
-            else:
-                raise ValueError(
-                    "image stats file is not consistent with current images"
-                )
+            for name, stat in image_stats.items():
+                if name in self.image_stats:
+                    self.image_stats[name] = stat
+            self.apply_stats()
 
     def apply_stats(self):
         for slide in self.presentation.slides:
             for shape in slide.shape_filter(Picture):
-                stats = self.image_stats[shape.img_path]
+                stats = self.image_stats[pbasename(shape.img_path)]
                 shape.caption = stats["caption"]
 
     def caption_images(self):
@@ -48,6 +46,7 @@ class ImageLabler:
             indent=4,
             ensure_ascii=False,
         )
+        self.apply_stats()
         return self.image_stats
 
     def collect_images(self):

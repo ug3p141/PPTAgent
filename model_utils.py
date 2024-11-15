@@ -15,20 +15,9 @@ from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoFeatureExtractor, AutoModel
 
 import llms
-from presentation import Presentation, SlidePage
-from utils import IMAGE_EXTENSIONS, pjoin, ppt_to_images, tenacity
+from utils import IMAGE_EXTENSIONS, pjoin, tenacity
 
 device_count = torch.cuda.device_count()
-
-
-def get_slide_image(slide: SlidePage, prs: Presentation, outfile: str):
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_prs = deepcopy(prs)
-        temp_prs.slides = [slide]
-        temp_prs.save(temp_dir + "/temp.pptx")
-        ppt_to_images(temp_dir + "/temp.pptx", temp_dir)
-        assert len(os.listdir(temp_dir)) == 2
-        os.rename(pjoin(temp_dir, "slide_0001.jpg"), outfile)
 
 
 def get_text_model(device: str = None):
@@ -93,22 +82,6 @@ def get_text_embedding(text: list[str], model, batchsize: int = 32):
             )
         )
     return result
-
-
-def prs_dedup(presentation: Presentation, model, batchsize: int = 32):
-    text_embeddings = get_text_embedding(
-        [i.to_text() for i in presentation.slides], model, batchsize
-    )
-    pre_embedding = text_embeddings[0]
-    slide_idx = 1
-    duplicates = []
-    while slide_idx < len(presentation):
-        cur_embedding = text_embeddings[slide_idx]
-        if torch.cosine_similarity(pre_embedding, cur_embedding, -1) > 0.8:
-            duplicates.append(slide_idx - 1)
-        slide_idx += 1
-        pre_embedding = cur_embedding
-    return [presentation.slides.pop(i) for i in reversed(duplicates)]
 
 
 def image_embedding(image_dir: str, extractor, model, batchsize: int = 16):

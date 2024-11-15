@@ -1,6 +1,7 @@
 # conda install -c conda-forge poppler
 # binary: libreoffice
 git+https://github.com/Force1ess/python-pptx
+python-Levenshtein
 python-multipart
 jinja2
 openai

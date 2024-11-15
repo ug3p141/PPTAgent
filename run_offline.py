@@ -1,65 +1,66 @@
-"""
-This example shows how to use vLLM for running offline inference with
-multi-image input on vision language models, using the chat template defined
-by the model.
-"""
+from typing import List, NamedTuple, Optional
 
-import base64
-import sys
-from typing import List
-
-from transformers import AutoTokenizer
-
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify, request
+from PIL.Image import Image
+from qwen_vl_utils import process_vision_info
+from transformers import AutoProcessor
 from vllm import LLM, SamplingParams
 from vllm.multimodal.utils import fetch_image
 
-
 app = Flask(__name__)
+
+model_name = "/141nfs/zhenghao2022/Llama-3.2-11B-Vision-Instruct"
 llm = LLM(
-    model="/mnt/shared_home/zhenghao2022/InternVL2-Llama3-76B",
-    trust_remote_code=True,
-    max_num_seqs=1,
-    max_model_len=int(sys.argv[2]),
+    model=model_name,
+    tensor_parallel_size=4,
+    max_model_len=4096,
     limit_mm_per_prompt={"image": 3},
-    tensor_parallel_size=8,
+    gpu_memory_utilization=0.5,
 )
 
 
-tokenizer = AutoTokenizer.from_pretrained(
-    "/mnt/shared_home/zhenghao2022/InternVL2-Llama3-76B", trust_remote_code=True
-)
+class ModelRequestData(NamedTuple):
+    text: str
+    image_data: List[Image]
 
 
-def load_internvl(system: str, prompt, image_urls: List[str]):
-    placeholders = "\n".join(
-        f"Image-{i}: <image>\n" for i, _ in enumerate(image_urls, start=1)
-    )
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": f"{placeholders}\n{prompt}"},
-    ]
-
-    prompt = tokenizer.apply_chat_template(
+def preprocess_qwen2vl(messages: List[dict]) -> ModelRequestData:
+    processor = AutoProcessor.from_pretrained(model_name)
+    text = processor.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
-    stop_token_ids = [128001, 128002, 128003]
-    return llm, prompt, stop_token_ids
-
-
-def run_generate(system: str, question: str, image_urls: List[str]):
-    llm, prompt, stop_token_ids = load_internvl(system, question, image_urls)
-
-    sampling_params = SamplingParams(
-        temperature=0.0, max_tokens=4096, stop_token_ids=stop_token_ids
+    image_data, _ = process_vision_info(messages)
+    return ModelRequestData(
+        prompt=text,
+        image_data=image_data,
     )
 
-    outputs = llm.generate(
+
+def preprocess_mllama(messages: List[dict]) -> ModelRequestData:
+    image_data = []
+    for turn in messages:
+        if len(turn["content"]) > 1:
+            prompt: str = turn["content"][0]["text"]
+            assert len(turn["content"]) - 1 == prompt.count("<|image|>")
+            image_data.extend(
+                [fetch_image(url["image_url"]["url"]) for url in turn["content"][1:]]
+            )
+        return ModelRequestData(
+            prompt=prompt,
+            image_data=image_data,
+        )
+
+
+def run_generate(messages: List[dict]):
+    if "Qwen" in model_name:
+        req_data = preprocess_qwen2vl(messages)
+    else:
+        req_data = preprocess_mllama(messages)
+    outputs = req_data.llm.generate(
         {
-            "prompt": prompt,
-            "multi_modal_data": {"image": [fetch_image(url) for url in image_urls]},
+            "prompt": req_data.text,
+            "multi_modal_data": {"image": req_data.image_data},
         },
-        sampling_params=sampling_params,
         use_tqdm=False,
     )
 
@@ -74,23 +75,17 @@ def hello_world():
 @app.route("/generate", methods=["POST"])
 def generate():
     data = request.json
-    system = data.get("system", "You are an helpful assistant.")
-    prompt = data.get("prompt")
-    image_base64 = data.get("image", [])
-    response = run_generate(system, prompt, image_base64)
-    return response
+    model = data.get("model")
+    if model not in model_name:
+        return jsonify({"error": "Invalid model"}), 400
+    messages = data.get("messages")
+
+    try:
+        response = run_generate(model, messages)
+        return jsonify({"generated_text": response})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
-    with open("resource/doc2ppt_images/fig.1.png", "rb") as image:
-        base64_image = base64.b64encode(image.read()).decode("utf-8")
-    run_generate(
-        "You are an helpful assistant.",
-        "What is in the picture?",
-        [
-            f"data:image/jpeg;base64,{base64_image}",
-            f"data:image/jpeg;base64,{base64_image}",
-            f"data:image/jpeg;base64,{base64_image}",
-        ],
-    )
-    app.run(host=sys.argv[1], port=5000)
+    app.run(host="0.0.0.0", port=5000)

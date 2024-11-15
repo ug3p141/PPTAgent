@@ -21,20 +21,19 @@ template: |
   Generate content for each element and output in the following format:
   {
     "element_name": {
-    "data": "actual text" or "<type>:<50-word description>" # detail here
-            or ["text1", "text2"]  # Multiple text elements
-            or ["logo1:...", "logo2:..."]  # Multiple image elements
+    "data": ["text1", "text2"] for text elements
+            or ["type:50-word description", "..."] for image elements # eg: "logo:..."
     }
   }
 
   Requirements:
   1. Content Generation Rules:
-    - Follow default_quantity for elements, adjust only when necessary
-    - Ensure text content meets character limits
-    - For image elements, data should be the image path
+    - Follow default_quantity for elements, adjust when necessary
     - All generated content must be based on reference text or image information
-    - Type of images should be a critical factor of image selection(e.g., logo for logo, diagram for diagram)
+    - Ensure text content meets character limits
     - Generated text should use concise and impactful presentation style
+    - For image elements, data should be the image path # eg: "images/logo.png"
+    - Type of images should be a critical factor of image selection, if no relevant image(similar type or function) provided, leave it blank
 
   2. Core Elements:
     - Must extract essential content from reference text (e.g., slide_title, main_content) and maintain semantic consistency
