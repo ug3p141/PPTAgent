@@ -8,7 +8,7 @@ import requests
 import tiktoken
 import yaml
 from FlagEmbedding import BGEM3FlagModel
-from jinja2 import Environment
+from jinja2 import Environment, Template
 from oaib import Auto
 from openai import OpenAI
 from PIL import Image
@@ -219,6 +219,13 @@ class Role:
         self.system_message = config["system_prompt"]
         self.prompt_args = set(config["jinja_args"])
         self.template = env.from_string(config["template"])
+        self.retry_template = Template(
+            """The previous api calls you outputed failed, please careffuly analyze and correct errors that occur during the execution of API sequences, then output the corrected api calls.
+            previous api calls: {{api_calls}}
+            trace message: {{trace_message}}
+            Give your output in the same format as the last message:
+            """
+        )
         self.system_tokens = len(ENCODING.encode(self.system_message))
         self.input_tokens = 0
         self.output_tokens = 0
@@ -259,8 +266,12 @@ class Role:
             for turn in self._history:
                 writer.write(turn.to_dict())
 
-    def retry(self, feedback: str):
-        pass
+    def retry(self, api_calls: str, trace_message: str):
+        prompt = self.retry_template.render(
+            api_calls=api_calls, trace_message=trace_message
+        )
+        response = self.llm(prompt, return_json=True)
+        return response
 
     def __repr__(self) -> str:
         return f"Role(name={self.name}, model={self.model})"

@@ -162,7 +162,7 @@ class ShapeElement:
         self.style = style
         self.data = data
         self.text_frame = text_frame
-        self._closure_keys = ["clone", "delete", "replace", "style"]
+        self._closure_keys = ["clone", "delete", "replace"]
         self._closures = {key: [] for key in self._closure_keys}
         self.slide_area = slide_area
         self.level = level

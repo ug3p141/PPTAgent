@@ -189,58 +189,6 @@ def clone_paragraph(slide: SlidePage, div_id: int, paragraph_id: int):
     shape._closures["clone"].append(partial(clone_para, paragraph_id))
 
 
-def set_font_style(
-    slide: SlidePage,
-    div_id: int,
-    paragraph_id: int,
-    span_id: int,
-    bold: bool = None,
-    italic: bool = None,
-    underline: bool = None,
-    font_size: int = None,
-    font_color: str = None,
-):
-    """
-    Set the font style of a text frame, set the font color in Hexadecimal Color Notation.
-    Example:
-    >>> set_font_style("1_1", bold=True, font_size=24, font_color="FF0000")
-    """
-    if font_color.startswith("#"):
-        font_color = font_color[1:]
-    shape = element_index(slide, div_id)
-
-    shape._closures["style"].append(
-        partial(
-            set_font,
-            bold,
-            italic,
-            underline,
-            font_size,
-            font_color,
-            paragraph_id,
-            span_id,
-        )
-    )
-
-
-def set_element_size(
-    slide: SlidePage,
-    element_id: int,
-    width: int = None,
-    height: int = None,
-    left: int = None,
-    top: int = None,
-):
-    """
-    Set the size of a shape, the unit is pt.
-    Example:
-    >>> set_element_size("1_1", width=32, height=32)
-    >>> set_element_size("1_1", left=100, top=100)
-    """
-    shape = element_index(slide, element_id)
-    shape._closures["style"].append(partial(set_size, width, height, left, top))
-
-
 class API_TYPES(Enum):
     Agent = [
         del_span,
