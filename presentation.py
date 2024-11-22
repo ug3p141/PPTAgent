@@ -1,5 +1,6 @@
 import traceback
 from dataclasses import dataclass
+from typing import Callable, Literal
 
 from pptx import Presentation as PPTXPre
 from pptx.chart.chart import Chart as PPTXChart
@@ -47,6 +48,22 @@ class StyleArg:
     area: bool = False
     size: bool = False
     geometry: bool = False
+    show_image: bool = True
+
+
+@dataclass
+class Closure:
+    closure: Callable
+    paragraph_id: int
+    span_id: int = -1
+
+    def apply(self, shape: BaseShape):
+        self.closure(shape)
+
+    def __gt__(self, other):
+        if self.paragraph_id != other.paragraph_id:
+            return self.paragraph_id > other.paragraph_id
+        return self.span_id > other.span_id
 
 
 class Run:
@@ -69,9 +86,6 @@ class Paragraph:
     def __init__(self, paragraph: _Paragraph, idx: int):
         runs = runs_merge(paragraph)
         self.runs = [Run(r, idx) for idx, r in enumerate(runs)]
-        if len(runs) == 0:
-            return
-
         self.idx = idx
         self.bullet = paragraph.bullet
         self.font = merge_dict(
@@ -79,6 +93,8 @@ class Paragraph:
         )
 
     def to_html(self, style_args: StyleArg):
+        if len(self.runs) == 0:
+            return []
         tag = "li" if self.bullet else "p"
         id_str = f" id='{self.idx}'" if style_args.paragraph_id else ""
         font_style = get_font_style(self.font)
@@ -103,11 +119,10 @@ class TextFrame:
         if not shape.has_text_frame:
             self.is_textframe = False
             return
-        paragraphs = [
+        self.paragraphs = [
             Paragraph(paragraph, idx)
             for idx, paragraph in enumerate(shape.text_frame.paragraphs)
         ]
-        self.paragraphs = [para for para in paragraphs if len(para.runs) > 0]
         if len(self.paragraphs) == 0:
             self.is_textframe = False
             return
@@ -163,7 +178,9 @@ class ShapeElement:
         self.data = data
         self.text_frame = text_frame
         self._closure_keys = ["clone", "delete", "replace"]
-        self._closures = {key: [] for key in self._closure_keys}
+        self._closures: dict[str, list[Closure]] = {
+            key: [] for key in self._closure_keys
+        }
         self.slide_area = slide_area
         self.level = level
 
@@ -214,16 +231,10 @@ class ShapeElement:
         # ? obj.shape = shape
         return obj
 
-    def build(self, slide, shape):
-        apply_fill(shape, self.style["fill"])
-        if self.style["line"] is not None:
-            apply_fill(shape.line, self.style["line"]["fill"])
-            dict_to_object(self.style["line"], shape.line, exclude=["fill"])
-
-        dict_to_object(self.style["shape_bounds"], shape)
-        if "rotation" in dir(shape):
-            shape.rotation = self.style["rotation"]
-        return shape
+    def build(self, slide: PPTXSlide):
+        slide.shapes._spTree.insert_element_before(parse_xml(self.xml), "p:extLst")
+        for closure in self.closures:
+            closure.apply(slide.shapes[-1])
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}: shape {self.shape_idx} of slide {self.slide_idx}"
@@ -234,7 +245,7 @@ class ShapeElement:
     @property
     def closures(self):
         for key in self._closure_keys:
-            for closure in self._closures[key]:
+            for closure in sorted(self._closures[key], reverse=True):
                 yield closure
 
     @property
@@ -378,7 +389,15 @@ class Picture(ShapeElement):
         )
         shape.name = self.data[1]
         dict_to_object(self.style["img_style"], shape.image)
-        return super().build(slide, shape)
+        apply_fill(shape, self.style["fill"])
+        if self.style["line"] is not None:
+            apply_fill(shape.line, self.style["line"]["fill"])
+            dict_to_object(self.style["line"], shape.line, exclude=["fill"])
+
+        dict_to_object(self.style["shape_bounds"], shape)
+        if "rotation" in dir(shape):
+            shape.rotation = self.style["rotation"]
+        return shape
 
     @property
     def img_path(self):
@@ -397,8 +416,12 @@ class Picture(ShapeElement):
         self.data[2] = caption
 
     def to_html(self, style_args: StyleArg) -> str:
-        if not self.caption:
+        if not style_args.show_image:
             return ""
+        if not self.caption:
+            raise ValueError(
+                f"caption not found for picture {self.shape_idx} of slide {self.slide_idx}"
+            )
         return (
             self.indent
             + f"<figure{self.get_inline_style(style_args)}>\n"
@@ -499,15 +522,9 @@ class GroupShape(ShapeElement):
         )
 
     def build(self, slide: PPTXSlide):
-        for sub_shape in self.data:
-            if isinstance(sub_shape, (Picture, GroupShape)):
-                new_shape = sub_shape.build(slide)
-            else:
-                new_shape = slide.shapes._spTree.insert_element_before(
-                    parse_xml(sub_shape.xml), "p:extLst"
-                )
-            for closure in sub_shape.closures:
-                closure(new_shape)
+        for shape in self.data:
+            shape.build(slide)
+        return slide
 
     def __iter__(self):
         for shape in self.data:
@@ -704,18 +721,7 @@ class SlidePage:
             ph.element.getparent().remove(ph.element)
 
         for shape in self.shapes:
-            if isinstance(shape, (Picture, GroupShape)):
-                shape.build(slide)
-            else:
-                slide.shapes._spTree.insert_element_before(
-                    parse_xml(shape.xml), "p:extLst"
-                )
-            for closure in shape.closures:
-                try:
-                    closure(slide.shapes[-1])
-                except Exception as e:
-                    print(f"Warning in slide {self.slide_idx}: {e}")
-                    continue
+            shape.build(slide)
         return slide
 
     def shape_filter(self, shape_type: type, shapes: list[ShapeElement] = None):
@@ -896,11 +902,15 @@ class Presentation:
                     for run in para.runs:
                         run.text = "a" * len(run.text)
 
-    def to_text(self, show_image: bool = True) -> str:
-        return "\n".join(
+    def to_text(self, show_image: bool = False) -> str:
+        return "\n----\n".join(
             [
-                f"Slide Page {slide_idx}\n" + slide.to_text(show_image)
-                for slide_idx, slide in enumerate(self.slides)
+                (
+                    f"Slide {slide.slide_idx} of {len(self.prs.slides)}\n"
+                    + (f"Title:{slide.slide_title}\n" if slide.slide_title else "")
+                    + slide.to_text(show_image)
+                )
+                for slide in self.slides
             ]
         )
 

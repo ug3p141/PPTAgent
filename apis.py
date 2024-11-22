@@ -7,13 +7,13 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import partial
 
+import PIL
 from pptx.dml.color import RGBColor
 from pptx.oxml import parse_xml
 from pptx.shapes.base import BaseShape
 from pptx.util import Pt
 
-from llms import Role
-from presentation import Picture, SlidePage
+from presentation import Closure, Picture, SlidePage
 from utils import runs_merge
 
 
@@ -32,7 +32,7 @@ class CodeExecutor:
         self.code_history = []
         self.retry_times = retry_times
         self.registered_functions = API_TYPES.all_funcs()
-        self.function_regex = re.compile(r"^[a-z]+_[a-z]+\(.+\)$")
+        self.function_regex = re.compile(r"^[a-z]+_[a-z]+\(.+\)")
 
     def get_apis_docs(self, funcs: list[callable], show_example: bool = True):
         api_doc = []
@@ -66,10 +66,10 @@ class CodeExecutor:
             try:
                 if line_idx == len(api_calls) - 1 and not found_code:
                     raise ValueError(
-                        "No code block found in the output, wrap your code with ```python```"
+                        "No code block found in the output, please output the api calls without any prefix."
                     )
                 if line.startswith("def"):
-                    raise ValueError("The function definition should not be output.")
+                    raise ValueError("The function definition were not allowed.")
                 if not self.function_regex.match(line):
                     continue
                 found_code = True
@@ -87,7 +87,7 @@ class CodeExecutor:
                 api_lines = (
                     "\n".join(api_calls[: line_idx - 1])
                     + f"\n--> Error Line: {line}\n"
-                    + "\n".join(api_calls[line_idx:])
+                    + "\n".join(api_calls[line_idx + 1 :])
                 )
                 return api_lines, trace_msg
         self.api_history[-1][0] = HistoryMark.API_CALL_CORRECT
@@ -157,7 +157,15 @@ def set_size(width: int, height: int, left: int, top: int, shape: BaseShape):
 # api functions
 def del_span(slide: SlidePage, div_id: int, paragraph_id: int, span_id: int):
     shape = element_index(slide, div_id)
-    shape._closures["delete"].append(partial(del_run, paragraph_id, span_id))
+    try:
+        shape.text_frame.paragraphs[paragraph_id].runs.pop(span_id)
+    except:
+        raise ValueError(
+            f"Cannot find the span {span_id} in the paragraph {paragraph_id} of the element {div_id}, may refer to an unexisted span."
+        )
+    shape._closures["delete"].append(
+        Closure(partial(del_run, paragraph_id, span_id), paragraph_id, span_id)
+    )
 
 
 def del_image(slide: SlidePage, figure_id: int):
@@ -167,17 +175,36 @@ def del_image(slide: SlidePage, figure_id: int):
     slide.shapes.remove(shape)
 
 
-def replace_text(
+def replace_span(
     slide: SlidePage, div_id: int, paragraph_id: int, span_id: int, text: str
 ):
     shape = element_index(slide, div_id)
-    shape._closures["replace"].append(partial(replace_run, paragraph_id, span_id, text))
+    try:
+        shape.text_frame.paragraphs[paragraph_id].runs[span_id].text = text
+    except:
+        raise ValueError(
+            f"Cannot find the span {span_id} in the paragraph {paragraph_id} of the element {div_id}, may refer to an unexisted span."
+        )
+    shape._closures["replace"].append(
+        Closure(
+            partial(replace_run, paragraph_id, span_id, text),
+            paragraph_id,
+            span_id,
+        )
+    )
 
 
 def replace_image(slide: SlidePage, figure_id: int, image_path: str):
     if not os.path.exists(image_path):
         raise ValueError(f"The image {image_path} does not exist.")
     shape = element_index(slide, figure_id)
+    img_size = PIL.Image.open(image_path).size
+    r = min(shape.width / img_size[0], shape.height / img_size[1])
+    new_width = int(img_size[0] * r)
+    new_height = int(img_size[1] * r)
+    shape.width = Pt(new_width)
+    shape.height = Pt(new_height)
+
     if not isinstance(shape, Picture):
         raise ValueError("The element is not a Picture.")
     shape.img_path = image_path
@@ -186,7 +213,69 @@ def replace_image(slide: SlidePage, figure_id: int, image_path: str):
 def clone_paragraph(slide: SlidePage, div_id: int, paragraph_id: int):
     # The cloned paragraph will have a paragraph_id one greater than the current maximum in the parent element.
     shape = element_index(slide, div_id)
-    shape._closures["clone"].append(partial(clone_para, paragraph_id))
+    try:
+        shape.text_frame.paragraphs.append(
+            deepcopy(shape.text_frame.paragraphs[paragraph_id])
+        )
+    except:
+        raise ValueError(
+            f"Cannot find the paragraph {paragraph_id} of the element {div_id}."
+        )
+    shape._closures["clone"].append(
+        Closure(partial(clone_para, paragraph_id), paragraph_id)
+    )
+
+
+def set_font_style(
+    slide: SlidePage,
+    div_id: int,
+    paragraph_id: int,
+    span_id: int,
+    bold: bool = None,
+    italic: bool = None,
+    underline: bool = None,
+    font_size: int = None,
+    font_color: str = None,
+):
+    """
+    Set the font style of a text frame, set the font color in Hexadecimal Color Notation.
+    Example:
+    >>> set_font_style("1_1", bold=True, font_size=24, font_color="FF0000")
+    """
+    if font_color.startswith("#"):
+        font_color = font_color[1:]
+    shape = element_index(slide, div_id)
+
+    shape._closures["style"].append(
+        partial(
+            set_font,
+            bold,
+            italic,
+            underline,
+            font_size,
+            font_color,
+            paragraph_id,
+            span_id,
+        )
+    )
+
+
+def set_element_size(
+    slide: SlidePage,
+    element_id: int,
+    width: int = None,
+    height: int = None,
+    left: int = None,
+    top: int = None,
+):
+    """
+    Set the size of a shape, the unit is pt.
+    Example:
+    >>> set_element_size("1_1", width=32, height=32)
+    >>> set_element_size("1_1", left=100, top=100)
+    """
+    shape = element_index(slide, element_id)
+    shape._closures["style"].append(partial(set_size, width, height, left, top))
 
 
 class API_TYPES(Enum):
@@ -194,8 +283,13 @@ class API_TYPES(Enum):
         del_span,
         del_image,
         clone_paragraph,
-        replace_text,
+        replace_span,
         replace_image,
+    ]
+
+    Typographer = [
+        set_font_style,
+        set_element_size,
     ]
 
     @classmethod

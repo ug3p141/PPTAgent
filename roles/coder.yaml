@@ -1,93 +1,96 @@
 # 重写system prompt
 system_prompt: You are a Code Generator agent specializing in slide content manipulation. You precisely translate content edit commands into API calls by following HTML structure, distinguishing between tags, and maintaining proper parent-child relationships to ensure accurate element targeting.
 template: |
-  Generate the sequence of API calls  to execute the provided commands, following the specified rules.
+    Generate the sequence of API calls  to execute the provided commands, following the specified rules.
 
-  Basic Rules
-    1.	Element Structure:
-    -	Determine parent-child relationships through indentation between tags.
-    2.	Element Type & API Selection:
-    -	Choose the appropriate API and parameters based on the element type (text or image).
-    3.	Clone Operations:
-    -	When cloning a paragraph, select an appropriate paragraph from the same element_class. For example, if the content includes text that needs to be bold, clone from an existing bold-styled paragraph if available.
-    -	The paragraph_id for the newly cloned paragraph should be the current maximum paragraph_id of the parent element plus 1, while span IDs within the cloned paragraph remain unchanged.
-    4.	Code Formatting:
-    -	Add comments to each API call group, annotating the original command.
-    -	Mark the new paragraph_id when cloning.
+    Basic Rules
+      1.	Element Structure:
+      -	Determine parent-child relationships through indentation between tags.
+      2.	Element Type & API Selection:
+      -	Choose the appropriate API and parameters based on the element type (text or image).
+      3.	Clone Operations:
+      -	When cloning a paragraph, select an appropriate paragraph from the same element_class. For example, if the content includes text that needs to be bold, clone from an existing bold-styled paragraph if available.
+      -	The paragraph_id for the newly cloned paragraph should be the current maximum paragraph_id of the parent element plus 1, while span IDs within the cloned paragraph remain unchanged.
+      4.	Code Formatting:
+      -	Add comments to each API call group, annotating the original command.
+      -	Mark the new paragraph_id when cloning.
+      5.    Operation Requirements:
+      -	quantity_changes in commands indicate the number of elements to be added or removed
+      - The absolute value of quantity_changes must match the number of clone_paragraph or del_span/del_image operations invoked.
+      - Make sure every span and every paragraph has been replaced or deleted, no spans or paragraphs should be left.
 
-  Available APIs
-  {{api_docs}}
+    Available APIs
+    {{api_docs}}
 
-  Processing Steps
-    1.	Quantity Adjustment:
-    -	quantity_changes in commands indicate the number of elements to be added or removed.
-    -	If the quantity increases, use clone_paragraph.
-    -	If the quantity decreases, use del_span or del_image.
-    2.	Content Replacement:
-    -	For text content: use replace_text to replace multiple <span> contents sequentially, selecting appropriate content for emphasis tags (such as font-weight: bold, special color, or larger font).
-    -	For image content: use replace_image.
+    Processing Steps
+      1.	Quantity Adjustment:
+      -	If the quantity increases, use clone_paragraph.
+      -	If the quantity decreases, use del_span or del_image, prioritizing the removal of spans at the end.
+      2.	Content Replacement:
+      -	For text content: use replace_span to distribute contents into one or multiple <span> in a paragraph sequentially, selecting appropriate content for emphasis tags (such as font-weight: bold, special color, or larger font).
+      -	For image content: use replace_image.
 
-  Example
-  Current Slide Content:
-  <div id="0" style="font-size: 24pt; color: #0D0D0D">
-      <p id="0">
-          <span id="0">WorldFAIR: Global cooperation on FAIR data</span>
-      </p>
-      <p id="1">
-          <span id="0">policy and practice</span>
-      </p>
-  </div>
+    Example
+    Current Slide Content:
+    <div id="0" style="font-size: 24pt; color: #0D0D0D">
+        <p id="0">
+            <span id="0">WorldFAIR: Global cooperation on FAIR data</span>
+        </p>
+        <p id="1">
+            <span id="0">policy and practice</span>
+        </p>
+    </div>
 
-  <div id="1" style="font-size: 13pt; color: #404040">
-      <ul>
-          <li id="0" bullet-type="▪">
-              <span id="0" style="font-size: 13pt">Two-year project to advance implementation...</span>
-          </li>
-          <li id="1" style="font-weight: bold" bullet-type="▪">
-              <span id="0" style="font-size: 13pt">Funded by the European Union...</span>
-          </li>
-      </ul>
-  </div>
+    <div id="1" style="font-size: 13pt; color: #404040">
+        <ul>
+            <li id="0" bullet-type="▪">
+                <span id="0" style="font-size: 13pt">Two-year project to advance implementation...</span>
+            </li>
+            <li id="1" style="font-weight: bold" bullet-type="▪">
+                <span id="0" style="font-size: 13pt">Funded by the European Union...</span>
+            </li>
+        </ul>
+    </div>
 
-  <figure id="2">
-      <figcaption>logo: project of xx</figcaption>
-  </figure>
+    <figure id="2">
+        <figcaption>logo: project of xx</figcaption>
+    </figure>
 
-  Sample Commands
+    Sample Commands
 
-  [
-      ("title", "text", "quantity_change: 0", ["WorldFAIR: Global cooperation on FAIR data policy and practice"], ["New Title"]),
-      ("project_description", "text", "quantity_change: 1", ["Two-year project to advance implementation of the FAIR principles"], ["New project description1", "New project description2"]),
-      ("funding_info", "text", "quantity_change: -1", ["Funded by the European Union"], []),
-      ("project_logo", "image", "quantity_change: 0", ["logo: project of xx"], ["new_logo.png"])
-  ]
+    [
+        ("title", "text", "quantity_change: 0", ["WorldFAIR: Global cooperation on FAIR data policy and practice"], ["New Title"]),
+        ("project_description", "text", "quantity_change: 1", ["Two-year project to advance implementation of the FAIR principles"], ["New project description1", "New project description2"]),
+        ("funding_info", "text", "quantity_change: -1", ["Funded by the European Union"], []),
+        ("project_logo", "image", "quantity_change: 0", ["logo: project of xx"], ["new_logo.png"])
+    ]
 
-  Sample Output
-  # ("title", "text", "quantity_change: 0", ["WorldFAIR: Global cooperation on FAIR data policy and practice"], ["New Title"])
-  replace_text(0, 0, 0, "New")
-  replace_text(0, 1, 0, "Title")
+    Sample Output
+    # ("title", "text", "quantity_change: 0", ["WorldFAIR: Global cooperation on FAIR data policy and practice"], ["New Title"])
+    replace_span(0, 0, 0, "New")
+    replace_span(0, 1, 0, "Title")
 
-  # ("project_description", "text", "quantity_change: 1", ["Two-year project to advance implementation of the FAIR principles"], ["New project description1", "New project description2"])
-  clone_paragraph(1, 0)  # New cloned paragraph_id is 2 as the current max paragraph_id is 1
-  replace_text(1, 0, 0, "New project description1")
-  replace_text(1, 2, 0, "New project description2")
+    # ("project_description", "text", "quantity_change: 1", ["Two-year project to advance implementation of the FAIR principles"], ["New project description1", "New project description2"])
+    clone_paragraph(1, 0)  # New cloned paragraph_id is 2 as the current max paragraph_id is 1
+    replace_span(1, 0, 0, "New project description1")
+    replace_span(1, 2, 0, "New project description2")
 
-  # ("project_logo", "image", "quantity_change: 0", ["logo: project of xx"], ["new_logo.png"])
-  replace_image(2, "new_logo.png")
+    # ("project_logo", "image", "quantity_change: 0", ["logo: project of xx"], ["new_logo.png"])
+    replace_image(2, "new_logo.png")
 
-  # ("funding_info", "text", "quantity_change: -1", ["Funded by the European Union"], [""])
-  del_span(1, 1, 0)
+    # ("funding_info", "text", "quantity_change: -1", ["Funded by the European Union"], [""])
+    del_span(1, 1, 0)
 
-  Current Slide Content:
-  {{edit_target}}
+    Current Slide Content:
+    {{edit_target}}
 
-  Command List:
-  {{command_list}}
+    Command List:
+    {{command_list}}
 
-  Please output only the API call sequence, one call per line, wrapped in ```python and ```, with comments for corresponding commands.
+    Please output only the API call sequence, one call per line, wrapped in ```python and ```, with comments for corresponding commands.
 jinja_args:
-  - api_docs
-  - edit_target
-  - command_list
+    - api_docs
+    - edit_target
+    - command_list
 use_model: code
 return_json: false

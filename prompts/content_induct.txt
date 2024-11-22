@@ -5,7 +5,7 @@ Please analyze the slide elements and create a structured template schema in JSO
    - "description": A clear description of the element's purpose, do not mention any detail
    - "type": Whether it's "text" or "image"
    - "data":
-      * For text elements: The actual text content as string or array
+      * For text elements: The actual text content as string or array in paragraph level(<p> or <li>), merge inline text segments(<span>) into a paragraph
       * For image elements: Describe the image in this format: <type>: <50-word description>
 
 Example format:

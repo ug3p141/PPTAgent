@@ -2,16 +2,21 @@ import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from glob import glob
+from typing import Literal
 
+import func_argparse
 import jsonlines
-import Levenshtein
 from jinja2 import Template
 from PIL import Image
 from pptx import Presentation
 from torch import cosine_similarity
+from tqdm import tqdm
 from transformers import CLIPModel, CLIPProcessor
 
 import llms
+from eval import eval_general, eval_ppt
+from presentation import Presentation
+from utils import Config, edit_distance, ppt_to_images
 
 outline_template = Template(
     """
@@ -56,8 +61,13 @@ def filter_aspect_ratio(image: list[str]):
     return filtered_images
 
 
-def edit_distance(text1: str, text2: str):
-    return 1 - Levenshtein.distance(text1, text2) / max(len(text1), len(text2))
+def get_indexed_sections(bird_eye: dict, indexs: list[str]):
+    indexed_sections = []
+    for section in bird_eye["sections"]:
+        for subsection in section["subsections"]:
+            if any(edit_distance(key, next(iter(subsection))) > 0.9 for key in indexs):
+                indexed_sections.append(subsection)
+    return indexed_sections
 
 
 def generate_content(source_text: str, bird_eye: dict, max_bullet: int):
@@ -80,18 +90,10 @@ def generate_content(source_text: str, bird_eye: dict, max_bullet: int):
     )
     slides = []
     for slide_title in outline:
-        indexed_sections = []
-        for section in bird_eye["sections"]:
-            for subsection in section["subsections"]:
-                if any(
-                    edit_distance(key, next(iter(subsection))) > 0.9
-                    for key in mapping.get(slide_title, [])
-                ):
-                    indexed_sections.append(subsection)
         bullet_points = llms.language_model(
             generation_template.render(
                 slide_heading=slide_title,
-                text=indexed_sections,
+                text=get_indexed_sections(bird_eye, mapping.get(slide_title, [])),
                 previous_slide=slides,
                 max_bullet=max_bullet,
             ),
@@ -158,12 +160,14 @@ def generate_slides(
     pptx.save(output_file + ".pptx")
 
 
-if __name__ == "__main__":
-    from tqdm.auto import tqdm
-
-    llms.language_model = llms.qwen2_5
+def generate(model: Literal["Qwen2.5", "gpt"]):
+    if model == "Qwen2.5":
+        llms.language_model = llms.qwen2_5
+    elif model == "gpt":
+        llms.language_model = llms.gpt4o
 
     print("Generating slides on baseline with ", llms.language_model.model)
+
     model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14").to("cuda").eval()
     processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")
     folders = list(glob("data/*/pdf/*"))
@@ -196,3 +200,31 @@ if __name__ == "__main__":
 
     with ThreadPoolExecutor() as executor:
         list(executor.map(lambda f: process_folder(f, model, processor), folders))
+
+
+def evaluate(model: Literal["Qwen2.5", "gpt"]):
+    config = Config("/tmp")
+    pptx_files = glob(f"data/*/pdf/*/baseline_{model}.pptx")[:1]
+    presentations = [
+        Presentation.from_file(pptx_file, config) for pptx_file in pptx_files
+    ]
+    slide_image_folders = [
+        pptx_file.replace(".pptx", "_slide_images") for pptx_file in pptx_files
+    ]
+    for prs_idx, pptx_file in enumerate(tqdm(pptx_files)):
+        if not os.path.exists(slide_image_folders[prs_idx]):
+            ppt_to_images(pptx_file, slide_image_folders[prs_idx])
+
+    stats = eval_general(presentations)
+    stats |= eval_ppt(presentations, slide_image_folders)
+
+    print(stats)
+
+
+if __name__ == "__main__":
+    eval_ppt(
+        [Presentation.from_file("./test_ppt/original.pptx", Config("/tmp"))],
+        ["./test_ppt/slide_images"],
+    )
+    evaluate("gpt")
+    func_argparse.main([generate, evaluate])

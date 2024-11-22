@@ -23,7 +23,6 @@ class ImageLabler:
             for name, stat in image_stats.items():
                 if name in self.image_stats:
                     self.image_stats[name] = stat
-            self.apply_stats()
 
     def apply_stats(self):
         for slide in self.presentation.slides:

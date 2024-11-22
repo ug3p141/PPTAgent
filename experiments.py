@@ -1,40 +1,29 @@
 import json
+import re
 from functools import partial
 from glob import glob
-from typing import Type
+from typing import Literal, Type
 
 import func_argparse
 import torch
-from FlagEmbedding import BGEM3FlagModel
 
 import llms
-from crawler import topics
-from eval import get_text_embedding
-from model_utils import get_text_models
+from model_utils import get_text_model
 from multimodal import ImageLabler
 from pptgen import PPTAgent, PPTCrew, PPTGen
 from preprocess import process_filetype
 from presentation import Presentation
 from utils import Config, pbasename, pexists, pjoin
 
+# language_model vision_model code_model
 eval_models = {
     "PPTAgent": [
-        (
-            {"planner": llms.qwen2_5, "agent": llms.qwen2_5, "coder": llms.qwen2_5},
-            llms.gpt4o,
-        ),
-        (
-            {"planner": llms.qwen2_5, "agent": llms.qwen2_5, "coder": llms.qwen2_5},
-            llms.qwen_vl,
-        ),
-        ({"planner": llms.gpt4o, "agent": llms.gpt4o, "coder": llms.gpt4o}, llms.gpt4o),
+        (llms.qwen2_5, llms.qwen2_5, llms.gpt4o),
+        (llms.qwen2_5, llms.qwen2_5, llms.qwen_vl),
     ],
     "PPTCrew": [
-        ({"planner": llms.gpt4o, "agent": llms.gpt4o, "coder": llms.gpt4o}, llms.gpt4o),
-        (
-            {"planner": llms.qwen2_5, "agent": llms.qwen2_5, "coder": llms.qwen2_5},
-            llms.qwen_vl,
-        ),
+        (llms.qwen2_5, llms.qwen2_5, llms.qwen_vl),
+        (llms.gpt4o, llms.gpt4o, llms.gpt4o),
     ],
 }
 GENCLASS = {
@@ -43,55 +32,48 @@ GENCLASS = {
 }
 
 
-def get_setting(class_name: str, roles: dict[str, llms.LLM]):
+def get_setting(class_name: str, setting_id: int):
+    language_model, code_model, vision_model = eval_models[class_name][setting_id]
+    llms.language_model = language_model
+    llms.code_model = code_model
+    llms.vision_model = vision_model
     role_string = "+".join(
-        f"{role}_{llm.model.split('-')[0]}" for role, llm in roles.items()
+        re.search(r"^(.*?)-\d{2}", llm.model).group(1)
+        for llm in [language_model, code_model, vision_model]
     )
     return class_name + "-" + role_string
 
 
+# 所有template要重新prepare一遍，除了qwen2.5+qwen_vl
 def do_generate(
     genclass: Type[PPTGen],
-    roles: dict[str, llms.LLM],
-    text_models: list[BGEM3FlagModel],
-    layout_source: str,
     setting: str,
+    debug: bool,
     ppt_folder: str,
     thread_id: int,
 ):
-    text_model = text_models[thread_id % len(text_models)]
-    app_config = Config(rundir=ppt_folder)
+    app_config = Config(rundir=ppt_folder, debug=debug)
+    text_model = get_text_model(f"cuda:{thread_id % torch.cuda.device_count()}")
     presentation = Presentation.from_file(
         pjoin(ppt_folder, "source_standard.pptx"),
         app_config,
     )
-    ImageLabler(presentation, app_config)
-    cluster_file = pjoin(
-        ppt_folder,
-        layout_source,
-        "template_induct",
-        "slides_cluster.json",
+    ImageLabler(presentation, app_config).caption_images()
+    model_identifier = "+".join(
+        (
+            llms.language_model.model.split("-")[0],
+            llms.vision_model.model.split("-")[0],
+        )
     )
-    if not pexists(cluster_file):
-        return
-    slide_cluster = json.load(open(cluster_file))
-    functional_keys, slide_cluster = (
-        set(slide_cluster.pop("functional_keys")),
-        slide_cluster,
+    induct_cache = pjoin(
+        app_config.RUN_DIR, "template_induct", model_identifier, "induct_cache.json"
     )
-    layout_embeddings = torch.stack(
-        get_text_embedding(list(slide_cluster.keys()), text_model)
-    )
-    pptgen = genclass(roles, text_model).set_examplar(
-        presentation,
-        slide_cluster,
-        functional_keys,
-        layout_embeddings,
-    )
+    if not pexists(induct_cache):
+        raise Exception(f"induct_cache not found: {induct_cache}")
+    slide_induction = json.load(open(induct_cache))
+    pptgen: PPTCrew = genclass(text_model).set_examplar(presentation, slide_induction)
     topic = ppt_folder.split("/")[1]
-    for pdf_folder in glob(f"data/*/pdf/*"):
-        if pdf_folder.split("/")[1] == topic:
-            continue
+    for pdf_folder in glob(f"data/{topic}/pdf/*"):
         app_config.set_rundir(pjoin(ppt_folder, setting, pbasename(pdf_folder)))
         if pexists(pjoin(app_config.RUN_DIR, "history")):
             print("skip", ppt_folder, pdf_folder, "already generated")
@@ -103,20 +85,23 @@ def do_generate(
             open(pjoin(pdf_folder, "refined_doc.json"), "r"),
         )
         pptgen.generate_pres(app_config, images, 12, doc_json)
-        pptgen.save_history()
 
 
-def generate_pres(agent_class: str, setting_id: int, thread_num: int = 16):
-    text_models = get_text_models(thread_num)
-    roles, layout_llm = eval_models[agent_class][setting_id]
-    setting = get_setting(agent_class, roles)
+def generate_pres(
+    agent_class: str = "PPTCrew",
+    setting_id: int = 0,
+    setting_name: str = None,
+    thread_num: int = 16,
+    debug: bool = False,
+):
+    s = get_setting(agent_class, setting_id)
+    print("generating slides using:", s)
+    setting = setting_name or s
     generate = partial(
         do_generate,
         GENCLASS[agent_class],
-        roles,
-        text_models,
-        layout_llm.model,
         setting,
+        debug,
     )
     process_filetype("pptx", generate, thread_num)
 

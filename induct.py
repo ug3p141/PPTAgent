@@ -22,25 +22,27 @@ class SlideInducter:
     ):
         self.prs = prs
         self.config = config
-        self.slide_induction = defaultdict(lambda: defaultdict(list))
         self.ppt_image_folder = ppt_image_folder
         self.template_image_folder = template_image_folder
+        assert (
+            len(os.listdir(template_image_folder))
+            == len(prs)
+            == len(os.listdir(ppt_image_folder))
+        )
         self.image_models = image_models
-        self.output_dir = pjoin(config.RUN_DIR)
+        self.slide_induction = defaultdict(lambda: defaultdict(list))
         model_identifier = "+".join(
             (
                 llms.language_model.model.split("-")[0],
                 llms.vision_model.model.split("-")[0],
             )
         )
-        self.induct_cache = pjoin(
-            self.output_dir, f"induct_cache-{model_identifier}.json"
-        )
+        self.output_dir = pjoin(config.RUN_DIR, "template_induct", model_identifier)
+        self.split_cache = pjoin(self.output_dir, f"split_cache.json")
+        self.induct_cache = pjoin(self.output_dir, f"induct_cache.json")
         os.makedirs(self.output_dir, exist_ok=True)
 
-    def layout_induct(
-        self,
-    ):
+    def layout_induct(self):
         if pexists(self.induct_cache):
             return json.load(open(self.induct_cache))
         content_slides_index, functional_cluster = self.category_split()
@@ -67,26 +69,12 @@ class SlideInducter:
         self.layout_split(content_slides_index)
         if self.config.DEBUG:
             for layout_name, cluster in self.slide_induction.items():
-                os.makedirs(
-                    pjoin(
-                        self.output_dir,
-                        "cluster_slides",
-                        layout_name,
-                    ),
-                    exist_ok=True,
-                )
+                cluster_dir = pjoin(self.output_dir, "cluster_slides", layout_name)
+                os.makedirs(cluster_dir, exist_ok=True)
                 for slide_idx in cluster["slides"]:
                     shutil.copy(
-                        pjoin(
-                            self.ppt_image_folder,
-                            f"slide_{slide_idx:04d}.jpg",
-                        ),
-                        pjoin(
-                            self.output_dir,
-                            "cluster_slides",
-                            layout_name,
-                            f"slide_{slide_idx:04d}.jpg",
-                        ),
+                        pjoin(self.ppt_image_folder, f"slide_{slide_idx:04d}.jpg"),
+                        pjoin(cluster_dir, f"slide_{slide_idx:04d}.jpg"),
                     )
         self.slide_induction["functional_keys"] = functional_keys
         json.dump(
@@ -98,25 +86,12 @@ class SlideInducter:
         return self.slide_induction
 
     def category_split(self):
+        if pexists(self.split_cache):
+            split = json.load(open(self.split_cache))
+            return set(split["content_slides_index"]), split["functional_cluster"]
         category_split_template = Template(open("prompts/category_split.txt").read())
         category_cluster = llms.language_model(
-            category_split_template.render(
-                slides="\n----\n".join(
-                    [
-                        (
-                            f"Slide {slide.slide_idx} of {len(self.prs.slides)}\n"
-                            + (
-                                f"Title:{slide.slide_title}\n"
-                                if slide.slide_title
-                                else ""
-                            )
-                            + f"Layout: {slide.slide_layout_name}\n"
-                            + slide.to_text()
-                        )
-                        for slide in self.prs.slides
-                    ]
-                ),
-            ),
+            category_split_template.render(slides=self.prs.to_text()),
             return_json=True,
         )
 
@@ -130,6 +105,15 @@ class SlideInducter:
             )
         else:
             raise Exception(f"Unknown category cluster: {category_cluster}")
+        json.dump(
+            {
+                "content_slides_index": list(content_slides_index),
+                "functional_cluster": functional_cluster,
+            },
+            open(self.split_cache, "w"),
+            indent=4,
+            ensure_ascii=False,
+        )
         return content_slides_index, functional_cluster
 
     def layout_split(self, content_slides_index: set[int]):
@@ -175,14 +159,14 @@ class SlideInducter:
         content_induct_prompt = Template(open("prompts/content_induct.txt").read())
         for layout_name, cluster in self.slide_induction.items():
             if "content_schema" not in cluster and "template_id" in cluster:
-                self.slide_induction[layout_name]["content_schema"] = (
-                    llms.language_model(
-                        content_induct_prompt.render(
-                            slide=self.prs.slides[cluster["template_id"] - 1].to_html()
-                        ),
-                        return_json=True,
-                    )
+                schema = llms.language_model(
+                    content_induct_prompt.render(
+                        slide=self.prs.slides[cluster["template_id"] - 1].to_html()
+                    ),
+                    return_json=True,
                 )
+                assert not any(len(v["data"]) == 0 for v in schema.values())
+                self.slide_induction[layout_name]["content_schema"] = schema
         json.dump(
             self.slide_induction,
             open(self.induct_cache, "w"),

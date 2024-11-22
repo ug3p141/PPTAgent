@@ -7,18 +7,44 @@ from time import time
 from types import SimpleNamespace
 
 import json_repair
+import Levenshtein
 from lxml import etree
 from pdf2image import convert_from_path
+from pptx.dml.color import RGBColor
 from pptx.dml.fill import _NoFill, _NoneFill
+from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml import parse_xml
 from pptx.shapes.base import BaseShape
 from pptx.shapes.group import GroupShape
 from pptx.text.text import _Paragraph, _Run
-from pptx.util import Length
+from pptx.util import Length, Pt
 from rich import print
 from tenacity import RetryCallState, retry, stop_after_attempt, wait_fixed
 
 IMAGE_EXTENSIONS = {"bmp", "jpg", "jpeg", "pgm", "png", "ppm", "tif", "tiff", "webp"}
+
+BLACK = RGBColor(0, 0, 0)
+YELLOW = RGBColor(255, 255, 0)
+BORDER_LEN = Pt(2)
+LABEL_LEN = Pt(24)
+FONT_LEN = Pt(20)
+
+
+def prepare_shape_label(shape: BaseShape, shape_idx: int):
+    shape.line.color.rgb = BLACK
+    shape.line.width = BORDER_LEN
+    left = shape.left - BORDER_LEN
+    top = shape.top + shape.height + BORDER_LEN - LABEL_LEN
+    textbox = shape._parent.add_textbox(left, top, LABEL_LEN, LABEL_LEN)
+    textbox.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+    textbox.fill.solid()
+    textbox.fill.fore_color.rgb = YELLOW
+
+    p = textbox.text_frame.paragraphs[0]
+    p.text = str(shape_idx)
+    p.alignment = PP_ALIGN.CENTER
+    p.font.size = FONT_LEN
+    p.font.bold = True
 
 
 def get_font_style(font: dict):
@@ -66,16 +92,19 @@ def older_than(filepath, seconds: int = 10):
     return seconds < (current_time - file_creation_time)
 
 
+def edit_distance(text1: str, text2: str):
+    return 1 - Levenshtein.distance(text1, text2) / max(len(text1), len(text2))
+
+
 def get_slide_content(doc_json: dict, slide_title: str, slide: dict):
     slide_desc = slide.get("description", "")
     slide_content = f"Title: {slide_title}\nSlide Description: {slide_desc}\n"
-    if len(slide.get("subsection_keys", [])) != 0:
-        slide_content += "Slide Reference Text: "
-        for key in slide["subsection_keys"]:
-            for section in doc_json["sections"]:
-                for subsection in section.get("subsections", []):
-                    if key in subsection:
-                        slide_content += f"SubSection {key}: {subsection[key]}\n"
+    for key in slide.get("subsection_keys", []):
+        slide_content += "Slide Reference: "
+        for section in doc_json["sections"]:
+            for subsection in section.get("subsections", []):
+                if edit_distance(key, subsection["title"]) > 0.9:
+                    slide_content += f"# {key} \n{subsection['content']}\n"
     return slide_content
 
 
@@ -234,6 +263,8 @@ def object_to_dict(obj, result=None, exclude=None):
 
 
 def merge_dict(d1: dict, d2: list[dict]):
+    if len(d2) == 0:
+        return d1
     for key in list(d1.keys()):
         values = [d[key] for d in d2]
         if d1[key] is not None and len(values) != 1:

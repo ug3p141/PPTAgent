@@ -177,7 +177,7 @@ class Turn:
     prompt: str
     response: str
     message: list
-    images: list[str]
+    images: list[str] = None
     input_tokens: int = 0
     output_tokens: int = 0
     embedding: Tensor = None
@@ -220,16 +220,19 @@ class Role:
         self.prompt_args = set(config["jinja_args"])
         self.template = env.from_string(config["template"])
         self.retry_template = Template(
-            """The previous api calls you outputed failed, please careffuly analyze and correct errors that occur during the execution of API sequences, then output the corrected api calls.
-            previous api calls: {{api_calls}}
-            trace message: {{trace_message}}
-            Give your output in the same format as the last message:
+            """
+            The previous output is invalid, please carefully analyze the traceback and feedback information, correct errors happened before.
+            feedback:
+            {{feedback}}
+            traceback:
+            {{traceback}}
+            Give your output in the same format as the previous output:
             """
         )
         self.system_tokens = len(ENCODING.encode(self.system_message))
         self.input_tokens = 0
         self.output_tokens = 0
-        self._history: list[Turn] = []
+        self.history: list[Turn] = []
 
     def calc_cost(self, turns: list[Turn]):
         for turn in turns:
@@ -240,7 +243,7 @@ class Role:
         self.output_tokens += 3
 
     def get_history(self, similar: int, recent: int, prompt: str):
-        history = self._history[-recent:] if recent > 0 else []
+        history = self.history[-recent:] if recent > 0 else []
         if similar > 0:
             embedding = get_text_embedding(prompt, self.text_model)
             history.sort(key=lambda x: cosine_similarity(embedding, x.embedding))
@@ -254,7 +257,7 @@ class Role:
 
     def save_history(self, output_dir: str):
         history_file = pjoin(output_dir, f"{self.name}.jsonl")
-        if pexists(history_file) and len(self._history) == 0:
+        if pexists(history_file) and len(self.history) == 0:
             return
         with jsonlines.open(history_file, "w") as writer:
             writer.write(
@@ -263,15 +266,27 @@ class Role:
                     "output_tokens": self.output_tokens,
                 }
             )
-            for turn in self._history:
+            for turn in self.history:
                 writer.write(turn.to_dict())
 
-    def retry(self, api_calls: str, trace_message: str):
-        prompt = self.retry_template.render(
-            api_calls=api_calls, trace_message=trace_message
+    def retry(self, feedback: str, traceback: str, error_idx: int):
+        assert error_idx > 0, "error_idx must be greater than 0"
+        prompt = self.retry_template.render(feedback=feedback, traceback=traceback)
+        history = []
+        for turn in self.history[-error_idx:]:
+            history.extend(turn.message)
+        response, message = self.llm(
+            prompt,
+            history=history,
+            return_message=True,
         )
-        response = self.llm(prompt, return_json=True)
-        return response
+        turn = Turn(
+            id=len(self.history),
+            prompt=prompt,
+            response=response,
+            message=message,
+        )
+        return self.__post_process__(response, self.history[-error_idx:], turn)
 
     def __repr__(self) -> str:
         return f"Role(name={self.name}, model={self.model})"
@@ -287,25 +302,31 @@ class Role:
             images = [images]
         assert self.prompt_args == set(jinja_args.keys()), "Invalid arguments"
         prompt = self.template.render(**jinja_args)
-        history = []
-        for turn in self.get_history(similar, recent, prompt):
-            history.extend(turn.message)
+        history = self.get_history(similar, recent, prompt)
+        history_msg = []
+        for turn in history:
+            history_msg.extend(turn.message)
 
         response, message = self.llm(
             prompt,
             system_message=self.system_message,
-            history=history,
+            history=history_msg,
             images=images,
             return_message=True,
         )
         turn = Turn(
-            id=len(self._history),
+            id=len(self.history),
             prompt=prompt,
             response=response,
             message=message,
             images=images,
         )
-        self._history.append(turn)
+        return self.__post_process__(response, history, turn, similar)
+
+    def __post_process__(
+        self, response: str, history: list[Turn], turn: Turn, similar: int = 0
+    ):
+        self.history.append(turn)
         if similar > 0:
             turn.embedding = get_text_embedding(turn.prompt, self.text_model)
         if self.record_cost:
@@ -317,23 +338,14 @@ class Role:
 
 
 gpt4o = LLM(model="gpt-4o-2024-08-06", use_batch=True)  # todo use_batch
-gpt4omini = LLM(model="gpt-4o-mini")
-# qwen2_5 = LLM(
-#     model="Qwen2.5-72B-Instruct-GPTQ-Int4", api_base="http://124.16.138.143:7812/v1"
-# )
-qwen2_5 = LLM(model="Qwen2.5-72B-Instruct", api_base="http://127.0.0.1:7999/v1")
-qwen_vl = LLM(
-    model="Qwen2-VL-72B-Instruct-GPTQ-Int4", api_base="http://127.0.0.1:8000/v1"
+qwen2_5 = LLM(model="Qwen2.5-72B-Instruct", api_base="http://127.0.0.1:8000/v1")
+qwen_coder = LLM(
+    model="Qwen2.5-Coder-32B-Instruct", api_base="http://124.16.138.143:8008/v1"
 )
-internvl_76 = LLM(model="InternVL2-Llama3-76B", api_base="http://127.0.0.1:8000/v1")
-internvl_multi = LLM(
-    model="InternVL2-Llama3-76B",
-    api_base="http://127.0.0.1:5000/generate",
-    use_openai=False,
-)
+qwen_vl = LLM(model="Qwen2-VL-72B-Instruct", api_base="http://124.16.138.144:7999/v1")
 
-language_model = qwen2_5
-code_model = qwen2_5
+language_model = gpt4o
+code_model = gpt4o
 vision_model = gpt4o
 
 if __name__ == "__main__":
