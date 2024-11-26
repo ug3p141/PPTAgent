@@ -2,14 +2,8 @@ system_prompt: You are a Visual Layout Optimizer agent specializing in slide pre
 template: |
   Analyze the provided slide image and generate CSS modifications to optimize its visual layout.
 
-  Slide Image:
-  {{slide_image}}
-
-  Available CSS APIs:
+  Available APIs:
   {{api_docs}}
-
-  Current CSS:
-  {{current_css}}
 
   Analyze and improve the following aspects:
   1. Element Spacing:
@@ -37,7 +31,6 @@ template: |
 
   Note: Focus on spatial and size adjustments only - do not modify colors, fonts, or decorative elements.
 jinja_args:
-  - slide_image
   - api_docs
   - current_css
 use_model: vision

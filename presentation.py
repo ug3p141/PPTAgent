@@ -54,7 +54,7 @@ class StyleArg:
 @dataclass
 class Closure:
     closure: Callable
-    paragraph_id: int
+    paragraph_id: int = -1
     span_id: int = -1
 
     def apply(self, shape: BaseShape):
@@ -87,6 +87,7 @@ class Paragraph:
         runs = runs_merge(paragraph)
         self.runs = [Run(r, idx) for idx, r in enumerate(runs)]
         self.idx = idx
+        self.real_idx = idx
         self.bullet = paragraph.bullet
         self.font = merge_dict(
             object_to_dict(paragraph.font), [run.font for run in self.runs]
@@ -123,6 +124,13 @@ class TextFrame:
             Paragraph(paragraph, idx)
             for idx, paragraph in enumerate(shape.text_frame.paragraphs)
         ]
+        para_offset = 0
+        for para in self.paragraphs:
+            if len(para.runs) == 0:
+                para_offset += 1
+                para.idx = -1
+            else:
+                para.idx = para.idx - para_offset
         if len(self.paragraphs) == 0:
             self.is_textframe = False
             return
@@ -177,7 +185,7 @@ class ShapeElement:
         self.style = style
         self.data = data
         self.text_frame = text_frame
-        self._closure_keys = ["clone", "delete", "replace"]
+        self._closure_keys = ["clone", "delete", "replace", "style"]
         self._closures: dict[str, list[Closure]] = {
             key: [] for key in self._closure_keys
         }
@@ -234,7 +242,10 @@ class ShapeElement:
     def build(self, slide: PPTXSlide):
         slide.shapes._spTree.insert_element_before(parse_xml(self.xml), "p:extLst")
         for closure in self.closures:
-            closure.apply(slide.shapes[-1])
+            try:
+                closure.apply(slide.shapes[-1])
+            except:
+                raise ValueError("Failed to apply closures to slides")
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}: shape {self.shape_idx} of slide {self.slide_idx}"
@@ -424,10 +435,7 @@ class Picture(ShapeElement):
             )
         return (
             self.indent
-            + f"<figure{self.get_inline_style(style_args)}>\n"
-            + f"{self.indent+INDENT}<figcaption>{self.caption}</figcaption>\n"
-            + self.indent
-            + "</figure>\n"
+            + f"<img {self.get_inline_style(style_args)} alt='{self.caption}'/>"
         )
 
 
@@ -618,9 +626,9 @@ class FreeShape(ShapeElement):
         )
 
     def to_html(self, style_args: StyleArg) -> str:
-        if not self.text_frame.is_textframe:
-            return ""
         textframe = self.text_frame.to_html(style_args)
+        if not textframe:
+            return ""
         return (
             f"{self.indent}<div data-shape-type='{self.data['svg_tag']}'{self.get_inline_style(style_args)}>"
             + f"\n{textframe}"

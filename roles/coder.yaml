@@ -1,37 +1,37 @@
 # 重写system prompt
 system_prompt: You are a Code Generator agent specializing in slide content manipulation. You precisely translate content edit commands into API calls by following HTML structure, distinguishing between tags, and maintaining proper parent-child relationships to ensure accurate element targeting.
 template: |
-    Generate the sequence of API calls  to execute the provided commands, following the specified rules.
+    API Call Sequence Instructions
 
-    Basic Rules
-      1.	Element Structure:
-      -	Determine parent-child relationships through indentation between tags.
-      2.	Element Type & API Selection:
-      -	Choose the appropriate API and parameters based on the element type (text or image).
-      3.	Clone Operations:
-      -	When cloning a paragraph, select an appropriate paragraph from the same element_class. For example, if the content includes text that needs to be bold, clone from an existing bold-styled paragraph if available.
-      -	The paragraph_id for the newly cloned paragraph should be the current maximum paragraph_id of the parent element plus 1, while span IDs within the cloned paragraph remain unchanged.
-      4.	Code Formatting:
-      -	Add comments to each API call group, annotating the original command.
-      -	Mark the new paragraph_id when cloning.
-      5.    Operation Requirements:
-      -	quantity_changes in commands indicate the number of elements to be added or removed
-      - The absolute value of quantity_changes must match the number of clone_paragraph or del_span/del_image operations invoked.
-      - Make sure every span and every paragraph has been replaced or deleted, no spans or paragraphs should be left.
+    Generate the sequence of API calls based on the provided commands, ensuring compliance with the specified rules and precise execution.
+    You must determine the parent-child relationships of elements based on indentation and ensure that all <span> and <img> elements are processed, leaving no unhandled content.
+
+    Each command follows this format: (element_class, type, quantity_change: int, old_data, new_data).
+
+    Steps
+
+        1.	Quantity Adjustment:
+        -	quantity_change Rules:
+        -	If quantity_change = 0, do not perform clone_paragraph or del_span operations. Only replace the content.
+        -	If quantity_change > 0, use clone_paragraph to add the corresponding number of paragraphs:
+        -	When cloning, prioritize paragraphs from the same element_class that already have special styles (e.g., bold, color) if available.
+        -	The paragraph_id for newly cloned paragraphs should be the current maximum paragraph_id of the parent element plus 1, while retaining the span_id within the cloned paragraph unchanged.
+        -	If quantity_change < 0, use del_span or del_image to reduce the corresponding number of elements. Always ensure to remove span elements from the end of the paragraph first.
+        Restriction:
+        -	Each command’s API call can only use one type of operation: either clone_paragraph or del_span/del_image, but not both.
+        2.	Content Replacement:
+        -	Text Content: Use replace_span to sequentially distribute new content into one or more <span> elements within a paragraph. Select appropriate tags for emphasized content (e.g., bold, special color, larger font).
+        -	Image Content: Use replace_image to replace image resources.
+        3.	Output Format:
+        -	Add comments to each API call group, explaining the intent of the original command and the associated element_class.
+        -	For cloning operations, annotate the paragraph_id of the newly created paragraphs.
 
     Available APIs
+
     {{api_docs}}
 
-    Processing Steps
-      1.	Quantity Adjustment:
-      -	If the quantity increases, use clone_paragraph.
-      -	If the quantity decreases, use del_span or del_image, prioritizing the removal of spans at the end.
-      2.	Content Replacement:
-      -	For text content: use replace_span to distribute contents into one or multiple <span> in a paragraph sequentially, selecting appropriate content for emphasis tags (such as font-weight: bold, special color, or larger font).
-      -	For image content: use replace_image.
+    Example Input:
 
-    Example
-    Current Slide Content:
     <div id="0" style="font-size: 24pt; color: #0D0D0D">
         <p id="0">
             <span id="0">WorldFAIR: Global cooperation on FAIR data</span>
@@ -52,11 +52,7 @@ template: |
         </ul>
     </div>
 
-    <figure id="2">
-        <figcaption>logo: project of xx</figcaption>
-    </figure>
-
-    Sample Commands
+    <img id="2" alt="logo: project of xx">
 
     [
         ("title", "text", "quantity_change: 0", ["WorldFAIR: Global cooperation on FAIR data policy and practice"], ["New Title"]),
@@ -65,7 +61,7 @@ template: |
         ("project_logo", "image", "quantity_change: 0", ["logo: project of xx"], ["new_logo.png"])
     ]
 
-    Sample Output
+    Example Output
     # ("title", "text", "quantity_change: 0", ["WorldFAIR: Global cooperation on FAIR data policy and practice"], ["New Title"])
     replace_span(0, 0, 0, "New")
     replace_span(0, 1, 0, "Title")

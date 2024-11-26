@@ -1,10 +1,11 @@
 import json
 
 import PIL.Image
+from rich import print
 
 import llms
 from presentation import Picture, Presentation
-from utils import Config, pbasename, pexists, pjoin, print
+from utils import Config, pbasename, pexists, pjoin
 
 
 class ImageLabler:
@@ -37,8 +38,7 @@ class ImageLabler:
                 stats["caption"] = llms.vision_model(
                     caption_prompt, pjoin(self.config.IMAGE_DIR, image)
                 )
-                if self.config.DEBUG:
-                    print(image, ": ", stats["caption"])
+                print("captioned", image, ": ", stats["caption"])
         json.dump(
             self.image_stats,
             open(self.stats_file, "w"),

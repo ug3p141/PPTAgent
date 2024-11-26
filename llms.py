@@ -220,13 +220,12 @@ class Role:
         self.prompt_args = set(config["jinja_args"])
         self.template = env.from_string(config["template"])
         self.retry_template = Template(
-            """
-            The previous output is invalid, please carefully analyze the traceback and feedback information, correct errors happened before.
+            """The previous output is invalid, please carefully analyze the traceback and feedback information, correct errors happened before.
             feedback:
             {{feedback}}
             traceback:
             {{traceback}}
-            Give your output in the same format as the previous output:
+            Give your corrected output in the same format without including the previous output:
             """
         )
         self.system_tokens = len(ENCODING.encode(self.system_message))
@@ -337,16 +336,16 @@ class Role:
         return response
 
 
-gpt4o = LLM(model="gpt-4o-2024-08-06", use_batch=True)  # todo use_batch
+gpt4o = LLM(model="gpt-4o-2024-08-06", use_batch=True)
 qwen2_5 = LLM(model="Qwen2.5-72B-Instruct", api_base="http://127.0.0.1:8000/v1")
 qwen_coder = LLM(
     model="Qwen2.5-Coder-32B-Instruct", api_base="http://124.16.138.143:8008/v1"
 )
-qwen_vl = LLM(model="Qwen2-VL-72B-Instruct", api_base="http://124.16.138.144:7999/v1")
+qwen_vl = LLM(model="Qwen2-VL-72B-Instruct", api_base="http://124.16.138.147:7999/v1")
 
 language_model = gpt4o
 code_model = gpt4o
-vision_model = gpt4o
+vision_model = qwen_vl
 
 if __name__ == "__main__":
     print(

@@ -85,12 +85,14 @@ def eval_ppt(
 def eval_experiment(
     agent_class: str,
     setting_id: int,
+    setting_name: str,
     thread_num: int = 10,
-    general_eval: bool = False,
-    ppt_eval: bool = False,
-    fid_eval: bool = False,
+    general_eval: bool = True,
+    ppt_eval: bool = True,
+    fid_eval: bool = True,
 ):
-    setting = get_setting(agent_class, setting_id)
+    s = get_setting(agent_class, setting_id)
+    setting = setting_name or s
     eval_stats = defaultdict(list)
     eval_file = pjoin("data", "eval", setting + ".json")
     if pexists(eval_file):
@@ -109,23 +111,14 @@ def eval_experiment(
 
     if ppt_eval and "ppteval" not in eval_stats:
         slide_image_folders = glob(f"data/*/pptx/*/final_images/{setting}/*")
-        slides_reference = [[] for _ in range(len(success_folders))]
 
         doc_jsons = {}
         for pdf_folder in glob("data/*/pdf/*"):
             doc_jsons[pdf_folder.split("/")[-1]] = json.load(
                 open(pjoin(pdf_folder, "refined_doc.json"), "r")
             )
-        for prs_idx, result_folder in enumerate(success_folders):
-            doc_json = doc_jsons[result_folder.split("/")[-1]]
-            outline = json.load(
-                open(pjoin(result_folder, "presentation_outline.json"), "r")
-            )
-            for slide_title, slide in outline.items():
-                slide_content = get_slide_content(doc_json, slide_title, slide)
-                slides_reference[prs_idx].append(slide_content)
 
-        eval_stats |= eval_ppt(presentations, slides_reference, slide_image_folders)
+        eval_stats |= eval_ppt(presentations, slide_image_folders)
 
     with ThreadPoolExecutor(thread_num) as executor:
         if fid_eval and "fid" not in eval_stats:
@@ -184,7 +177,6 @@ def dataset_stat():
 
 def pptx2images():
     while True:
-        print("keep scanning for new pptx")
         for pptx in glob("data/*/pptx/*/*/*/final.pptx"):
             older_than(pptx)
             setting = pptx.split("/")[-3]
@@ -198,6 +190,7 @@ def pptx2images():
             except:
                 print("pptx to images failed")
         sleep(60)
+        print("keep scanning for new pptx")
 
 
 if __name__ == "__main__":

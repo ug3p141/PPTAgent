@@ -3,17 +3,17 @@ Please analyze the slide elements and create a structured template schema in JSO
 1. Identify key content elements (both text and images) that make up the slide
 2. For each element, specify:
    - "description": A clear description of the element's purpose, do not mention any detail
-   - "type": Whether it's "text" or "image"
+   - "type": "text" or "image" determined that according the tag of element: “image” is assigned for <img> tags
    - "data":
-      * For text elements: The actual text content as string or array in paragraph level(<p> or <li>), merge inline text segments(<span>) into a paragraph
-      * For image elements: Describe the image in this format: <type>: <50-word description>
+      * For text elements: The actual text content as string or array in paragraph level(<p> or <li>), merge inline text segments(<span>)
+      * For image elements: Use the `alt` attribute of the <img> tag as the data of the image
 
 Example format:
 {
   "element_name": {
     "description": "purpose of this element", # do not mention any detail, just purpose
     "type": "text" or "image",
-    "data": "actual text" or "<type>:<50-word description>" # detail here
+    "data": "actual text" or "<type>:<50-word description>" # detail here, cannot be empty or null
             or ["text1", "text2"]  # Multiple text elements
             or ["logo:...", "logo:..."]  # Multiple image elements
   }

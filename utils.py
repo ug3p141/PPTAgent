@@ -30,7 +30,7 @@ LABEL_LEN = Pt(24)
 FONT_LEN = Pt(20)
 
 
-def prepare_shape_label(shape: BaseShape, shape_idx: int):
+def prepare_shape_label(shape_idx: int, shape: BaseShape):
     shape.line.color.rgb = BLACK
     shape.line.width = BORDER_LEN
     left = shape.left - BORDER_LEN

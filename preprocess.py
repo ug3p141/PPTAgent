@@ -168,22 +168,22 @@ def prepare_induction(induct_id: int):
     def do_induct(llm: list[llms.LLM], ppt_folder: str, rank: int):
         llms.language_model = llm[0]
         llms.vision_model = llm[1]
-        image_model = get_image_model(f"cuda:{rank % device_count}")
-        if not pexists(ppt_folder + "/image_stats.json"):
-            return
-        ppt_image_folder = pjoin(ppt_folder, "slide_images")
         config = Config(rundir=ppt_folder)
+        ppt_image_folder = pjoin(ppt_folder, "slide_images")
+        template_image_folder = pjoin(ppt_folder, "template_images")
+        image_model = get_image_model(f"cuda:{rank % device_count}")
         presentation = Presentation.from_file(
             pjoin(ppt_folder, "source_standard.pptx"), config
         )
         ImageLabler(presentation, config).caption_images()
-        template_image_folder = pjoin(ppt_folder, "template_images")
         slide_inducter = SlideInducter(
             presentation, ppt_image_folder, template_image_folder, config, image_model
         )
         slide_inducter.content_induct()
 
-    for folder in tqdm(glob.glob("data/*/pptx/*"), desc="prepare induction"):
+    for idx, folder in enumerate(
+        tqdm(sorted(glob.glob("data/*/pptx/*")), desc="prepare induction")
+    ):
         do_induct(induct_llms[induct_id], folder, 0)
 
 

@@ -18,7 +18,7 @@ from rich import print
 from apis import API_TYPES, CodeExecutor
 from llms import Role
 from model_utils import get_text_embedding
-from presentation import Presentation, SlidePage, StyleArg
+from presentation import Closure, Presentation, SlidePage, StyleArg
 from utils import (
     Config,
     get_slide_content,
@@ -103,8 +103,6 @@ class PPTGen(ABC):
             if slide is not None:
                 generated_slides.append(slide)
                 continue
-            if self.config.DEBUG:
-                traceback.print_exc()
             if self.error_exit:
                 succ_flag = False
                 break
@@ -207,28 +205,26 @@ class PPTGen(ABC):
 
     def _generate_slide(self, slide_data, code_executor: CodeExecutor) -> SlidePage:
         slide_idx, (slide_title, slide) = slide_data
-        image_info = "No Images"
+        images_info = "No Images"
         if any(
             [
                 i in slide["layout"]
                 for i in ["picture", "chart", "table", "diagram", "freeform"]
             ]
         ):
-            image_info = self.image_information
+            images_info = self.image_information
         slide_content = f"Slide-{slide_idx+1} " + get_slide_content(
             self.doc_json, slide_title, slide
         )
-        template = deepcopy(self.slide_induction[slide["layout"]])
         try:
             return self.synergize(
-                template,
+                deepcopy(self.slide_induction[slide["layout"]]),
                 slide_content,
                 code_executor,
-                image_info,
+                images_info,
             )
         except Exception as e:
-            if self.config.DEBUG:
-                print(f"generate slide {slide_idx} failed: {e}")
+            print(f"generate slide {slide_idx} failed: {e}")
             return None
 
 
@@ -277,53 +273,53 @@ class PPTCrew(PPTGen):
             images_info=images_info,
         )
         command_list = self._generate_commands(editor_output, content_schema, old_data)
+
         edit_actions = self.staffs["coder"](
             api_docs=code_executor.get_apis_docs(API_TYPES.Agent.value),
             edit_target=self.presentation.slides[template["template_id"] - 1].to_html(),
             command_list="\n".join([str(i) for i in command_list]),
         )
         for error_idx in range(self.retry_times):
-            slide: SlidePage = deepcopy(
+            edited_slide: SlidePage = deepcopy(
                 self.presentation.slides[template["template_id"] - 1]
             )
-            feedback = code_executor.execute_actions(edit_actions, slide)
+            feedback = code_executor.execute_actions(edit_actions, edited_slide)
             if feedback is None:
                 break
             if error_idx == self.retry_times - 1:
-                raise Exception("Failed to generate slide, tried too many times")
+                raise Exception(
+                    f"Failed to generate slide, tried too many times\ntraceback: {feedback[1]}"
+                )
             edit_actions = self.staffs["coder"].retry(*feedback, error_idx + 1)
+        # edited_image = self._prepare_slide_image(edited_slide)
 
-        if "typographer" in self.staffs:
-            typography_actions = self.staffs["typographer"](
-                api_docs=code_executor.get_apis_docs(API_TYPES.Typographer.value),
-                edit_target=slide.to_html(StyleArg(geometry=True, size=True)),
-                slide_image=self._prepare_slide_image(slide),
-            )
-            for error_idx in range(self.retry_times):
-                edited_slide = deepcopy(slide)
-                feedback = code_executor.execute_actions(
-                    typography_actions, edited_slide
-                )
-                if feedback is None:
-                    return edited_slide
-                if error_idx == self.retry_times - 1:
-                    return slide
-                edit_actions = self.staffs["typographer"].retry(
-                    *feedback, error_idx + 1
-                )
+        # if "typographer" in self.staffs:
+        #     typography_actions = self.staffs["typographer"](
+        #         api_docs=code_executor.get_apis_docs(API_TYPES.Typographer.value),
+        #         edit_target=edited_slide.to_html(StyleArg(geometry=True, size=True)),
+        #         slide_image=edited_image,
+        #     )
+        #     for error_idx in range(self.retry_times):
+        #         styled_slide = deepcopy(edited_slide)
+        #         feedback = code_executor.execute_actions(typography_actions, styled_slide)
+        #         if feedback is None:
+        #             return styled_slide
+        #         if error_idx == self.retry_times - 1:
+        #             return edited_slide
+        #         typography_actions = self.staffs["typographer"].retry(*feedback, error_idx + 1)
 
-        return slide
+        return edited_slide
 
     def _prepare_slide_image(self, slide: SlidePage):
         temp_dir = tempfile.TemporaryDirectory()
         self.empty_prs.clear_slides()
-        slide = self.empty_prs.prs.slides[0]
+        slide = self.empty_prs.slides[0]
         for shape in slide:
-            shape.closures["style"].append(
-                partial(prepare_shape_label, shape.shape_idx)
+            shape._closures["style"].append(
+                Closure(partial(prepare_shape_label, shape.shape_idx))
             )
         self.empty_prs.build_slide(slide)
-        self.empty_prs.save(temp_dir.name + "/temp.pptx")
+        self.empty_prs.prs.save(temp_dir.name + "/temp.pptx")
         ppt_to_images(temp_dir.name + "/temp.pptx", temp_dir.name)
         assert len(os.listdir(temp_dir.name)) == 2
         return temp_dir.name + "/slide_0001.jpg"
@@ -347,14 +343,33 @@ class PPTCrew(PPTGen):
             content_schema[el_name]["default_quantity"] = 1
             if isinstance(old_data[el_name], list):
                 content_schema[el_name]["default_quantity"] = len(old_data[el_name])
+        assert len(old_data) > 0, "No old data generated"
         return old_data
 
     def _generate_commands(
-        self, editor_output: dict, content_schema: dict, old_data: dict
+        self, editor_output: dict, content_schema: dict, old_data: dict, retry: int = 0
     ):
         command_list = []
+        # 这里可以加一个长度control
         for el_info in editor_output.values():
-            assert "data" in el_info, "data not found in editor_output"
+            if "data" not in el_info:
+                if retry < self.retry_times:
+                    new_output = self.staffs["editor"].retry(
+                        """please give your output as a dict like
+                        {
+                            "element1": {
+                                "data": ["text1", "text2"] for text elements
+                                or ["/path/to/image", "..."] for image elements
+                            },
+                        }""",
+                        "key `data` not found in your output, please give your output as a dict like the example",
+                        retry + 1,
+                    )
+                    return self._generate_commands(
+                        new_output, content_schema, old_data, retry + 1
+                    )
+                else:
+                    raise ValueError(f"data not found in editor_output: {el_info}")
 
         for el_name, old_content in old_data.items():
             # 教会它不要生成不该生成的
@@ -365,11 +380,10 @@ class PPTCrew(PPTGen):
             if not isinstance(new_content, list):
                 new_content = [new_content]
 
-            if content_schema[el_name]["type"] == "image":
-                for i in range(len(new_content)):
-                    if not pexists(new_content[i]):
-                        new_content[i] = None
             new_content = [i for i in new_content if i]
+
+            if content_schema[el_name]["type"] == "image":
+                new_content = [i for i in new_content if pexists(i)]
 
             quantity_change = len(new_content) - len(old_content)
             command_list.append(
@@ -382,4 +396,5 @@ class PPTCrew(PPTGen):
                 )
             )
 
+        assert len(command_list) > 0, "No commands generated"
         return command_list

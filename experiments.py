@@ -76,7 +76,6 @@ def do_generate(
     for pdf_folder in glob(f"data/{topic}/pdf/*"):
         app_config.set_rundir(pjoin(ppt_folder, setting, pbasename(pdf_folder)))
         if pexists(pjoin(app_config.RUN_DIR, "history")):
-            print("skip", ppt_folder, pdf_folder, "already generated")
             continue
         images = json.load(
             open(pjoin(pdf_folder, "image_caption.json"), "r"),

@@ -158,14 +158,20 @@ class SlideInducter:
         self.slide_induction = self.layout_induct()
         content_induct_prompt = Template(open("prompts/content_induct.txt").read())
         for layout_name, cluster in self.slide_induction.items():
-            if "content_schema" not in cluster and "template_id" in cluster:
+            if "template_id" in cluster and "content_schema" not in cluster:
                 schema = llms.language_model(
                     content_induct_prompt.render(
                         slide=self.prs.slides[cluster["template_id"] - 1].to_html()
                     ),
                     return_json=True,
                 )
-                assert not any(len(v["data"]) == 0 for v in schema.values())
+                for k in list(schema.keys()):
+                    if "data" not in schema[k]:
+                        raise ValueError(f"Unknown content schema: {schema[k]}")
+                    if len(schema[k]["data"]) == 0:
+                        print(f"Empty content schema: {schema[k]}")
+                        schema.pop(k)
+                assert len(schema) > 0, "No content schema generated"
                 self.slide_induction[layout_name]["content_schema"] = schema
         json.dump(
             self.slide_induction,
