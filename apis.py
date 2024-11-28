@@ -22,8 +22,8 @@ from utils import runs_merge
 class HistoryMark:
     API_CALL_ERROR = "api_call_error"
     API_CALL_CORRECT = "api_call_correct"
-    COMMAND_CORRECT = "command_correct"
-    COMMAND_ERROR = "command_error"
+    COMMENT_CORRECT = "comment_correct"
+    COMMENT_ERROR = "comment_error"
     CODE_RUN_ERROR = "code_run_error"
     CODE_RUN_CORRECT = "code_run_correct"
 
@@ -36,8 +36,7 @@ class CodeExecutor:
         self.code_history = []
         self.retry_times = retry_times
         self.registered_functions = API_TYPES.all_funcs()
-        self.command_regex = re.compile(r"^#.+(text|image).+quantity_change.+$")
-        self.function_regex = re.compile(r"^[a-z]+_[a-z]+\(.+\)")
+        self.function_regex = re.compile(r"^[a-z]+_[a-z_]+\(.+\)")
 
     def get_apis_docs(self, funcs: list[callable], show_example: bool = True):
         api_doc = []
@@ -61,7 +60,7 @@ class CodeExecutor:
             if doc is not None:
                 signature += f"\n\t{doc}"
             api_doc.append(signature)
-        return "\n".join(api_doc)
+        return "\n\n".join(api_doc)
 
     def execute_actions(self, actions: str, edit_slide: SlidePage):
         found_code = False
@@ -72,15 +71,15 @@ class CodeExecutor:
         for line_idx, line in enumerate(api_calls):
             try:
                 if line_idx == len(api_calls) - 1 and not found_code:
-                    raise PermissionError(
+                    raise ValueError(
                         "No code block found in the output, please output the api calls without any prefix."
                     )
                 if line.startswith("def"):
                     raise PermissionError("The function definition were not allowed.")
-                if self.command_regex.match(line):
+                if line.startswith("#"):
                     if len(self.command_history) != 0:
-                        self.command_history[-1][0] = HistoryMark.COMMAND_CORRECT
-                    self.command_history.append([HistoryMark.COMMAND_ERROR, line, None])
+                        self.command_history[-1][0] = HistoryMark.COMMENT_CORRECT
+                    self.command_history.append([HistoryMark.COMMENT_ERROR, line, None])
                     continue
                 if not self.function_regex.match(line):
                     continue
@@ -115,7 +114,8 @@ class CodeExecutor:
                     + "\n".join(api_calls[line_idx + 1 :])
                 )
                 return api_lines, trace_msg
-        self.command_history[-1][0] = HistoryMark.COMMAND_CORRECT
+        if len(self.command_history) != 0:
+            self.command_history[-1][0] = HistoryMark.COMMENT_CORRECT
         self.api_history[-1][0] = HistoryMark.API_CALL_CORRECT
 
 
@@ -156,38 +156,52 @@ VERTICAL_ALIGN = {
     "center": MSO_ANCHOR.MIDDLE,
     "bottom": MSO_ANCHOR.BOTTOM,
 }
+DEFAULT_FONT_SIZE = Pt(12)
 
 
 def set_font(
     bold: bool,
-    font_size_delta: int,
-    text_shape: BaseShape,
-    horizontal_align: Literal["left", "center", "right"] = None,
-    vertical_align: Literal["top", "center", "bottom"] = None,
+    font_size_delta: int | None,
+    text_shape: BaseShape | None,
+    horizontal_align: Literal["left", "center", "right", None],
+    vertical_align: Literal["top", "center", "bottom", None],
 ):
     horizontal_align = HORIZONTAL_ALIGN.get(horizontal_align, None)
     vertical_align = VERTICAL_ALIGN.get(vertical_align, None)
+    if bold is not None:
+        text_shape.text_frame.font.bold = bold
+
+    textframe_font_size = text_shape.text_frame.font.size or Pt(12)
+
     for paragraph in text_shape.text_frame.paragraphs:
+        if horizontal_align is not None:
+            paragraph.alignment = horizontal_align
+        if vertical_align is not None:
+            paragraph.vertical_anchor = vertical_align
+        if font_size_delta is None:
+            continue
+        para_font_size = (paragraph.font.size or textframe_font_size) + font_size_delta
         for run in paragraph.runs:
-            if bold is not None:
-                run.font.bold = bold
-            if font_size_delta is not None:
-                run.font.size = Pt(run.font.size.pt + font_size_delta)
-            if horizontal_align is not None:
-                paragraph.alignment = horizontal_align
-            if vertical_align is not None:
-                paragraph.vertical_anchor = vertical_align
+            if run.font.size is not None:
+                run.font.size = run.font.size + font_size_delta
+        paragraph.font.size = para_font_size
 
 
-def set_size(width: int, height: int, left: int, top: int, shape: BaseShape):
-    if width is not None:
-        shape.width = Pt(width)
-    if height is not None:
-        shape.height = Pt(height)
-    if left is not None:
-        shape.left = Pt(left)
-    if top is not None:
-        shape.top = Pt(top)
+def set_size(
+    left_delta: int,
+    right_delta: int,
+    top_delta: int,
+    bottom_delta: int,
+    shape: BaseShape,
+):
+    if left_delta is not None:
+        shape.left = Pt(shape.left.pt + left_delta)
+    if right_delta is not None:
+        shape.width = Pt(shape.width.pt + right_delta)
+    if bottom_delta is not None:
+        shape.height = Pt(shape.height.pt + bottom_delta)
+    if top_delta is not None:
+        shape.top = Pt(shape.top.pt + top_delta)
 
 
 # api functions
@@ -246,8 +260,8 @@ def replace_span(
             run.text = text
             shape._closures["replace"].append(
                 Closure(
-                    partial(replace_run, paragraph_id, span_id, text),
-                    paragraph_id,
+                    partial(replace_run, para.real_idx, span_id, text),
+                    para.real_idx,
                     span_id,
                 )
             )
@@ -292,8 +306,8 @@ def clone_paragraph(slide: SlidePage, div_id: int, paragraph_id: int):
         shape.text_frame.paragraphs[-1].real_idx = len(shape.text_frame.paragraphs) - 1
         shape._closures["clone"].append(
             Closure(
-                partial(clone_para, paragraph_id),
-                shape.text_frame.paragraphs[-1].real_idx,
+                partial(clone_para, para.real_idx),
+                para.real_idx,
             )
         )
         return
@@ -317,19 +331,20 @@ def set_font_style(
     """
     Set the font style of an element.
     Args:
-        bold: Whether to set the font to bold.
         font_size_delta: The delta of the font size, the unit is pt, positive for larger, negative for smaller. The range is [-8, 8].
         horizontal_align: The horizontal alignment of the text, can be "left", "center" or "right".
         vertical_align: The vertical alignment of the text, can be "top", "center" or "bottom".
     Example:
-    >>> set_font_style("1_1", bold=True, font_size_delta=44)
-    >>> set_font_style("1_1", horizontal_align="center")
-    >>> set_font_style("1_1", vertical_align="bottom")
+    >>> set_font_style("1", bold=True, font_size_delta=4)
+    >>> set_font_style("2", horizontal_align="center")
+    >>> set_font_style("3", vertical_align="bottom")
     """
-    shape = element_index(slide, element_id)
     assert (
-        abs(font_size_delta) < 8
+        font_size_delta is None or abs(font_size_delta) < 8
     ), "The font size delta is too large, please check the font size delta."
+    if font_size_delta is not None:
+        font_size_delta = Pt(font_size_delta)
+    shape = element_index(slide, element_id)
     assert (
         shape.text_frame.is_textframe
     ), "The element does not have a text frame, please check the element id and type of element."
@@ -346,23 +361,38 @@ def set_font_style(
     )
 
 
+# 可以换成% 来调整
 def set_element_layout(
     slide: SlidePage,
     element_id: int,
-    width: int = None,
-    height: int = None,
-    left: int = None,
-    top: int = None,
+    left_delta: int = None,
+    right_delta: int = None,
+    top_delta: int = None,
+    bottom_delta: int = None,
 ):
     """
-    Set the size or geometry of a shape, the unit is pt.
+    Adjust the size or position of a shape using percentages of the page dimensions, the range of delta is [-30, 30].
     Example:
-    >>> set_element_size("1_1", width=32, height=32)
-    >>> set_element_size("1_1", left=100, top=100)
+    >>> set_element_layout(1, left_delta=5, right_delta=5)  # Move left and right by 5% of page width
+    >>> set_element_layout(2, top_delta=10, bottom_delta=10)  # Move top and bottom by 10% of page height
     """
+    slide_width, slide_height = slide.slide_width, slide.slide_height
+    for width_delta in [left_delta, right_delta]:
+        assert (
+            width_delta is None or abs(width_delta) < 30
+        ), "The width delta is too large, please check the width delta."
+        if width_delta is not None:
+            width_delta = (width_delta / 100) * slide_width
+    for height_delta in [top_delta, bottom_delta]:
+        assert (
+            height_delta is None or abs(height_delta) < 30
+        ), "The height delta is too large, please check the height delta."
+        if height_delta is not None:
+            height_delta = (height_delta / 100) * slide_height
+
     shape = element_index(slide, element_id)
     shape._closures["style"].append(
-        Closure(partial(set_size, width, height, left, top))
+        Closure(partial(set_size, left_delta, right_delta, top_delta, bottom_delta))
     )
 
 

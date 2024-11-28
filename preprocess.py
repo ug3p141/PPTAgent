@@ -8,24 +8,23 @@ import sys
 import traceback
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
-from time import sleep, time
 
 import torch
 from FlagEmbedding import BGEM3FlagModel
+from jinja2 import Template
 from tqdm import tqdm
 
 import llms
 from induct import SlideInducter
 from model_utils import (
     get_image_model,
-    get_refined_doc,
     image_embedding,
     images_cosine_similarity,
     parse_pdf,
     prs_dedup,
 )
 from multimodal import ImageLabler
-from presentation import Presentation
+from presentation import Picture, Presentation, SlidePage
 from utils import Config, older_than, pexists, pjoin, ppt_to_images
 
 markdown_clean_pattern = re.compile(r"!\[.*?\]\((.*?)\)")
@@ -110,7 +109,10 @@ def prepare_pdf_folder(pdf_folder: str, rank: int):
     if not pexists(pjoin(pdf_folder, "refined_doc.json")):
         text_content = open(pjoin(pdf_folder, "source.md")).read()
         text_content = markdown_clean_pattern.sub("", text_content)
-        doc_json = get_refined_doc(text_content)
+        template = Template(open("prompts/document_refine.txt").read())
+        doc_json = llms.language_model(
+            template.render(markdown_document=text_content), return_json=True
+        )
         json.dump(
             doc_json,
             open(pjoin(pdf_folder, "refined_doc.json"), "w"),
@@ -119,20 +121,31 @@ def prepare_pdf_folder(pdf_folder: str, rank: int):
         )
 
 
+def filter_slide(slide: SlidePage):
+    if len(slide.shapes) > 10:
+        return True
+    pictures = list(slide.shape_filter(Picture))
+    if slide.real_idx != 0 and len(pictures) > 2:
+        return True
+
+
 def prepare_ppt_folder(ppt_folder: str, text_model):
-    if os.path.exists(ppt_folder + "/image_stats.json") or not older_than(
+    if pexists(ppt_folder + "/source.pptx") or not older_than(
         ppt_folder + "/original.pptx"
     ):
         return
     config = Config(rundir=ppt_folder, debug=False)
     presentation = Presentation.from_file(ppt_folder + "/original.pptx", config=config)
-    ppt_image_folder = pjoin(config.RUN_DIR, "slide_images")
-    ppt_to_images(presentation.source_file, ppt_image_folder)
-    duplicates = prs_dedup(presentation, text_model)
-    if len(duplicates) > len(presentation) / 2:
-        rm_folder(ppt_folder)
-        return
-    for slide in duplicates:
+    ppt_to_images(presentation.source_file, pjoin(ppt_folder, "original_slides"))
+    ppt_image_folder = pjoin(ppt_folder, "source_slides")
+    shutil.copytree(pjoin(ppt_folder, "original_slides"), ppt_image_folder)
+
+    removed_slides = prs_dedup(presentation, text_model)
+    for slide in [slide for slide in presentation.slides if filter_slide(slide)]:
+        removed_slides.append(slide)
+        presentation.slides.remove(slide)
+
+    for slide in removed_slides:
         os.remove(pjoin(ppt_image_folder, f"slide_{slide.real_idx:04d}.jpg"))
     for err_idx, _ in presentation.error_history:
         os.remove(pjoin(ppt_image_folder, f"slide_{err_idx:04d}.jpg"))
@@ -146,15 +159,14 @@ def prepare_ppt_folder(ppt_folder: str, text_model):
             pjoin(ppt_image_folder, f"slide_{slide.slide_idx:04d}.jpg"),
         )
 
-    presentation.save(pjoin(ppt_folder, "source_standard.pptx"))
-    normed_prs = presentation.normalize()
-    normed_prs.save(pjoin(ppt_folder, "template.pptx"), layout_only=True)
+    ImageLabler(presentation, config).caption_images()
+    presentation.save(pjoin(ppt_folder, "source.pptx"))
+    presentation.save(pjoin(ppt_folder, "template.pptx"), layout_only=True)
     ppt_to_images(
         pjoin(ppt_folder, "template.pptx"),
         pjoin(ppt_folder, "template_images"),
     )
     os.remove(pjoin(ppt_folder, "template.pptx"))
-    ImageLabler(presentation, config).caption_images()
 
 
 def prepare_induction(induct_id: int):
@@ -169,12 +181,10 @@ def prepare_induction(induct_id: int):
         llms.language_model = llm[0]
         llms.vision_model = llm[1]
         config = Config(rundir=ppt_folder)
-        ppt_image_folder = pjoin(ppt_folder, "slide_images")
+        ppt_image_folder = pjoin(ppt_folder, "source_slides")
         template_image_folder = pjoin(ppt_folder, "template_images")
         image_model = get_image_model(f"cuda:{rank % device_count}")
-        presentation = Presentation.from_file(
-            pjoin(ppt_folder, "source_standard.pptx"), config
-        )
+        presentation = Presentation.from_file(pjoin(ppt_folder, "source.pptx"), config)
         ImageLabler(presentation, config).caption_images()
         slide_inducter = SlideInducter(
             presentation, ppt_image_folder, template_image_folder, config, image_model

@@ -16,14 +16,11 @@ class ImageLabler:
         self.stats_file = pjoin(config.RUN_DIR, "image_stats.json")
         self.config = config
         self.collect_images()
-        self.image_stats["pic_placeholder.png"] = {
-            "caption": "it's a placeholder",
-        }
         if pexists(self.stats_file):
             image_stats: dict[str, dict] = json.load(open(self.stats_file, "r"))
             for name, stat in image_stats.items():
-                if name in self.image_stats:
-                    self.image_stats[name] = stat
+                if pbasename(name) in self.image_stats:
+                    self.image_stats[pbasename(name)] = stat
 
     def apply_stats(self):
         for slide in self.presentation.slides:

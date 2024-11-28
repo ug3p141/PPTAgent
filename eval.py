@@ -41,7 +41,7 @@ def eval_fid(source_folders: list[str], setting: str, rank_id: int):
     model = fid.InceptionV3([fid.InceptionV3.BLOCK_INDEX_BY_DIM[64]]).to(device)
     fid_scores = []
     for ppt_folder in source_folders:
-        source_folder = pjoin(ppt_folder, "slide_images")
+        source_folder = pjoin(ppt_folder, "source_slides")
         m1, s1 = fid.compute_statistics_of_path(source_folder, model, 128, 64, device)
         for result_folder in glob(pjoin(ppt_folder, f"final_images/{setting}/*")):
             if len(os.listdir(result_folder)) < 5:  # skip if less than 5 images
@@ -194,6 +194,10 @@ def pptx2images():
 
 
 if __name__ == "__main__":
+    for folder in os.listdir("human_eval"):
+        test_folders = sorted(glob(f"human_eval/{folder}/*"))
+
+        eval_ppt()
     func_argparse.main(
         dataset_stat,
         eval_experiment,

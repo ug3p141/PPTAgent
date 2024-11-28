@@ -13,14 +13,15 @@ from PIL import Image
 from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoFeatureExtractor, AutoModel
 
-import llms
 from presentation import Presentation
 from utils import IMAGE_EXTENSIONS, pjoin, tenacity
 
 device_count = torch.cuda.device_count()
 
 
-def prs_dedup(presentation: Presentation, model, batchsize: int = 32):
+def prs_dedup(
+    presentation: Presentation, model, batchsize: int = 32, limit: float = 0.8
+):
     text_embeddings = get_text_embedding(
         [i.to_text() for i in presentation.slides], model, batchsize
     )
@@ -29,7 +30,7 @@ def prs_dedup(presentation: Presentation, model, batchsize: int = 32):
     duplicates = []
     while slide_idx < len(presentation):
         cur_embedding = text_embeddings[slide_idx]
-        if torch.cosine_similarity(pre_embedding, cur_embedding, -1) > 0.8:
+        if torch.cosine_similarity(pre_embedding, cur_embedding, -1) > limit:
             duplicates.append(slide_idx - 1)
         slide_idx += 1
         pre_embedding = cur_embedding
@@ -79,12 +80,6 @@ def parse_pdf(
         f.write(json.dumps(metadata, indent=4))
 
     return full_text
-
-
-def get_refined_doc(text_content: str):
-    template = Template(open("prompts/document_refine.txt").read())
-    prompt = template.render(markdown_document=text_content)
-    return llms.language_model(prompt, return_json=True)
 
 
 def get_text_embedding(text: list[str], model, batchsize: int = 32):

@@ -12,6 +12,7 @@ from lxml import etree
 from pdf2image import convert_from_path
 from pptx.dml.color import RGBColor
 from pptx.dml.fill import _NoFill, _NoneFill
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml import parse_xml
 from pptx.shapes.base import BaseShape
@@ -25,7 +26,9 @@ IMAGE_EXTENSIONS = {"bmp", "jpg", "jpeg", "pgm", "png", "ppm", "tif", "tiff", "w
 
 BLACK = RGBColor(0, 0, 0)
 YELLOW = RGBColor(255, 255, 0)
+BLUE = RGBColor(0, 0, 255)
 BORDER_LEN = Pt(2)
+BORDER_OFFSET = Pt(2)
 LABEL_LEN = Pt(24)
 FONT_LEN = Pt(20)
 
@@ -33,12 +36,14 @@ FONT_LEN = Pt(20)
 def prepare_shape_label(shape_idx: int, shape: BaseShape):
     shape.line.color.rgb = BLACK
     shape.line.width = BORDER_LEN
-    left = shape.left - BORDER_LEN
-    top = shape.top + shape.height + BORDER_LEN - LABEL_LEN
+    left = shape.left - BORDER_LEN + BORDER_OFFSET
+    top = shape.top + shape.height + BORDER_LEN - LABEL_LEN - BORDER_OFFSET * 2
     textbox = shape._parent.add_textbox(left, top, LABEL_LEN, LABEL_LEN)
     textbox.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
     textbox.fill.solid()
-    textbox.fill.fore_color.rgb = YELLOW
+    textbox.fill.fore_color.rgb = (
+        YELLOW if shape.shape_type != MSO_SHAPE_TYPE.PICTURE else BLUE
+    )
 
     p = textbox.text_frame.paragraphs[0]
     p.text = str(shape_idx)
@@ -127,12 +132,14 @@ def get_json_from_response(raw_response: str):
 
 
 tenacity = retry(
-    wait=wait_fixed(3), stop=stop_after_attempt(3), after=tenacity_log, reraise=True
+    wait=wait_fixed(3), stop=stop_after_attempt(5), after=tenacity_log, reraise=True
 )
 
 
 @tenacity
 def ppt_to_images(file: str, output_dir: str):
+    assert pexists(file), f"File {file} does not exist"
+    assert not pexists(output_dir), f"Directory {output_dir} already exists"
     os.makedirs(output_dir, exist_ok=True)
     with tempfile.TemporaryDirectory() as temp_dir:
         command_list = [

@@ -48,11 +48,8 @@ class SlideInducter:
         content_slides_index, functional_cluster = self.category_split()
         for layout_name, cluster in functional_cluster.items():
             for slide_idx in cluster:
-                content_types = self.prs.slides[slide_idx - 1].get_content_types()
-                content_type_name = (
-                    f":({'+'.join(content_types)})" if content_types else ":plain text"
-                )
-                self.slide_induction[layout_name + content_type_name]["slides"].append(
+                content_type = self.prs.slides[slide_idx - 1].get_content_type()
+                self.slide_induction[layout_name + ":" + content_type]["slides"].append(
                     slide_idx
                 )
         for layout_name, cluster in self.slide_induction.items():
@@ -123,14 +120,11 @@ class SlideInducter:
         content_split = defaultdict(list)
         for slide_idx in content_slides_index:
             slide = self.prs.slides[slide_idx - 1]
-            content_types = slide.get_content_types()
+            content_type = slide.get_content_type()
             layout_name = slide.slide_layout_name
-            content_type_name = (
-                f":({'+'.join(content_types)})" if content_types else ":plain text"
-            )
-            content_split[(layout_name, content_type_name)].append(slide_idx)
+            content_split[(layout_name, content_type)].append(slide_idx)
 
-        for (layout_name, content_type_name), slides in content_split.items():
+        for (layout_name, content_type), slides in content_split.items():
             sub_embeddings = [
                 embeddings[f"slide_{slide_idx:04d}.jpg"] for slide_idx in slides
             ]
@@ -148,7 +142,8 @@ class SlideInducter:
                         ),
                         pjoin(self.ppt_image_folder, f"slide_{template_id:04d}.jpg"),
                     )
-                    + content_type_name
+                    + ":"
+                    + content_type
                 )
                 self.slide_induction[cluster_name]["template_id"] = template_id
                 self.slide_induction[cluster_name]["slides"] = slide_indexs

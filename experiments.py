@@ -55,7 +55,7 @@ def do_generate(
     app_config = Config(rundir=ppt_folder, debug=debug)
     text_model = get_text_model(f"cuda:{thread_id % torch.cuda.device_count()}")
     presentation = Presentation.from_file(
-        pjoin(ppt_folder, "source_standard.pptx"),
+        pjoin(ppt_folder, "source.pptx"),
         app_config,
     )
     ImageLabler(presentation, app_config).caption_images()

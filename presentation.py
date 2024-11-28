@@ -36,8 +36,8 @@ from utils import (
 INDENT = "\t"
 
 
-# textframe: shape bounds
-# paragraph: space, alignment, level, font bullet #  这里都不允许改动
+# textframe: shape bounds font
+# paragraph: space, alignment, level, font bullet
 # run: font, hyperlink, text
 @dataclass
 class StyleArg:
@@ -185,7 +185,7 @@ class ShapeElement:
         self.style = style
         self.data = data
         self.text_frame = text_frame
-        self._closure_keys = ["clone", "delete", "replace", "style"]
+        self._closure_keys = ["clone", "replace", "delete", "style"]
         self._closures: dict[str, list[Closure]] = {
             key: [] for key in self._closure_keys
         }
@@ -241,11 +241,6 @@ class ShapeElement:
 
     def build(self, slide: PPTXSlide):
         slide.shapes._spTree.insert_element_before(parse_xml(self.xml), "p:extLst")
-        for closure in self.closures:
-            try:
-                closure.apply(slide.shapes[-1])
-            except:
-                raise ValueError("Failed to apply closures to slides")
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}: shape {self.shape_idx} of slide {self.slide_idx}"
@@ -485,17 +480,8 @@ class Placeholder(ShapeElement):
                 slide_area,
                 level,
             )
-        elif shape.has_chart or shape.has_table:
-            data = GraphicalShape.from_shape(
-                slide_idx,
-                shape_idx,
-                shape,
-                style,
-                text_frame,
-                config,
-                slide_area,
-                level,
-            )
+        else:
+            raise ValueError(f"unsupported placeholder {shape.placeholder_type}")
         return data
 
 
@@ -561,47 +547,6 @@ class GroupShape(ShapeElement):
             + self.indent
             + "</div>\n"
         )
-
-
-class GraphicalShape(ShapeElement):
-    @classmethod
-    def from_shape(
-        cls,
-        slide_idx: int,
-        shape_idx: int,
-        shape: PPTXChart | PPTXTable,
-        style: dict,
-        text_frame: TextFrame,
-        config: Config,
-        slide_area: float,
-        level: int,
-    ):
-        return cls(
-            slide_idx, shape_idx, style, None, text_frame, slide_area, level=level
-        )
-
-    @property
-    def orig_shape(self):
-        return self.style["shape_type"].strip()
-
-    def normalize(self):
-        shape = Picture(
-            self.slide_idx,
-            self.shape_idx,
-            {"img_style": {}} | self.style,
-            [
-                "resource/pic_placeholder.png",
-                self.orig_shape,
-                f"{self.orig_shape}_{self.shape_idx}",
-            ],
-            self.text_frame,
-            self.slide_area,
-            level=self.level,
-        )
-        shape.style["fill"] = None
-        shape.style["line"] = None
-        shape.text_frame.is_textframe = False
-        return shape
 
 
 class FreeShape(ShapeElement):
@@ -730,6 +675,11 @@ class SlidePage:
 
         for shape in self.shapes:
             shape.build(slide)
+            for closure in shape.closures:
+                try:
+                    closure.apply(slide.shapes[-1])
+                except:
+                    raise ValueError("Failed to apply closures to slides")
         return slide
 
     def shape_filter(self, shape_type: type, shapes: list[ShapeElement] = None):
@@ -741,22 +691,10 @@ class SlidePage:
             elif isinstance(shape, GroupShape):
                 yield from self.shape_filter(shape_type, shape.data)
 
-    def get_content_types(self, shapes: list[ShapeElement] = None):
-        content_types = set()
-        if shapes is None:
-            shapes = self.shapes
-        for shape in shapes:
-            if isinstance(shape, GraphicalShape):
-                content_types.add(shape.orig_shape)
-            elif isinstance(shape, Picture):
-                if not shape.img_path == "resource/pic_placeholder.png":
-                    content_types.add("picture")
-                else:
-
-                    content_types.add(shape.caption)
-            elif isinstance(shape, GroupShape):
-                content_types.union(self.get_content_types(shape.data))
-        return sorted(list(content_types))
+    def get_content_type(self):
+        if len(list(self.shape_filter(Picture))) > 0:
+            return "picture"
+        return "text"
 
     def to_html(self, style_args: StyleArg = None) -> str:
         if style_args is None:
@@ -771,9 +709,6 @@ class SlidePage:
             ]
         )
 
-    def to_tree(self, template: dict):
-        pass
-
     def to_text(self, show_image: bool = True) -> str:
         return "\n".join(
             [
@@ -787,15 +722,6 @@ class SlidePage:
                 if show_image
             ]
         )
-
-    def normalize(self, shapes: list[ShapeElement] = None):
-        if shapes is None:
-            shapes = self.shapes
-        for shape_idx, shape in enumerate(shapes):
-            if isinstance(shape, GraphicalShape):
-                shapes[shape_idx] = shape.normalize()
-            elif isinstance(shape, GroupShape):
-                self.normalize(shape.data)
 
     @property
     def text_length(self):
@@ -841,9 +767,10 @@ class Presentation:
         error_history = []
         slide_idx = 0
         layouts = [layout.name for layout in prs.slide_layouts]
+        num_pages = len(prs.slides)
         for slide in prs.slides:
             if slide._element.get("show") == "0":
-                continue
+                continue  # will not be printed to pdf
 
             slide_idx += 1
             try:
@@ -866,7 +793,6 @@ class Presentation:
                 if config.DEBUG:
                     print(f"Warning in slide {slide_idx}: {traceback.format_exc()}")
 
-        num_pages = len(slides)
         return cls(
             slides, error_history, slide_width, slide_height, file_path, num_pages
         )
@@ -893,13 +819,11 @@ class Presentation:
             del self.prs.slides._sldIdLst[0]
 
     def clear_images(self, shapes: list[ShapeElement]):
-        for idx, shape in enumerate(shapes):
+        for shape in shapes:
             if isinstance(shape, GroupShape):
                 self.clear_images(shape.data)
             elif isinstance(shape, Picture):
                 shape.img_path = "resource/pic_placeholder.png"
-            elif isinstance(shape, GraphicalShape):
-                shapes[idx] = shape.normalize()
 
     def clear_text(self, shapes: list[BaseShape]):
         for shape in shapes:
@@ -922,11 +846,6 @@ class Presentation:
             ]
         )
 
-    def normalize(self):
-        for slide in self.slides:
-            slide.normalize()
-        return self
-
     def __len__(self):
         return len(self.slides)
 
@@ -937,22 +856,5 @@ SHAPECAST: dict[int, ShapeElement] = {
     MSO_SHAPE_TYPE.PICTURE: Picture,
     MSO_SHAPE_TYPE.GROUP: GroupShape,
     MSO_SHAPE_TYPE.TEXT_BOX: TextBox,
-    MSO_SHAPE_TYPE.CHART: GraphicalShape,
-    MSO_SHAPE_TYPE.TABLE: GraphicalShape,
-    MSO_SHAPE_TYPE.DIAGRAM: GraphicalShape,
     MSO_SHAPE_TYPE.LINE: Connector,
 }
-
-if __name__ == "__main__":
-    import tiktoken
-
-    encoder = tiktoken.encoding_for_model("gpt-4o")
-    prs = Presentation.from_file("test_ppt/original.pptx", Config("/tmp"))
-    for idx, slide in enumerate(prs.slides):
-        html = slide.to_html(
-            element_id=True,
-            paragraph_id=True,
-            run_id=True,
-            font_style=True,
-        )
-        print("\033c", html, "Slide", idx, "total tokens:", len(encoder.encode(html)))
