@@ -611,6 +611,7 @@ class SlidePage:
         shapes: list[ShapeElement],
         slide_idx: int,
         real_idx: int,
+        background_xml: str,
         slide_notes: str,
         slide_layout_name: str,
         slide_title: str,
@@ -620,6 +621,7 @@ class SlidePage:
         self.shapes = shapes
         self.slide_idx = slide_idx
         self.real_idx = real_idx
+        self.background_xml = background_xml
         self.slide_notes = slide_notes
         self.slide_layout_name = slide_layout_name
         self.slide_title = slide_title
@@ -651,6 +653,7 @@ class SlidePage:
             for i, shape in enumerate(slide.shapes)
             if shape.visible
         ]
+        background_xml = extract_fill(slide.background)
         slide_layout_name = slide.slide_layout.name if slide.slide_layout else None
         slide_title = slide.shapes.title.text if slide.shapes.title else None
         slide_notes = (
@@ -662,6 +665,7 @@ class SlidePage:
             shapes,
             slide_idx,
             real_idx,
+            background_xml,
             slide_notes,
             slide_layout_name,
             slide_title,
@@ -672,6 +676,8 @@ class SlidePage:
     def build(self, slide: PPTXSlide):
         for ph in slide.placeholders:
             ph.element.getparent().remove(ph.element)
+
+        apply_fill(slide.background, self.background_xml)
 
         for shape in self.shapes:
             shape.build(slide)

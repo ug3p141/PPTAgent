@@ -9,7 +9,6 @@ data
 runs
 resource
 node_modules
-zenodo-cc-pptx
 *txt
 frontend/.yarn
 frontend/.pnp.loader.mjs

@@ -3,7 +3,7 @@ import shutil
 import subprocess
 import tempfile
 import traceback
-from time import time
+from time import sleep, time
 from types import SimpleNamespace
 
 import json_repair
@@ -89,8 +89,13 @@ def runs_merge(paragraph: _Paragraph):
     return new_runs
 
 
-def older_than(filepath, seconds: int = 10):
+def older_than(filepath, seconds: int = 10, wait: bool = False):
     if not os.path.exists(filepath):
+        while wait:
+            sleep(1)
+            if os.path.exists(filepath):
+                sleep(60)
+                return True
         return False
     file_creation_time = os.path.getctime(filepath)
     current_time = time()
@@ -137,9 +142,10 @@ tenacity = retry(
 
 
 @tenacity
-def ppt_to_images(file: str, output_dir: str):
+def ppt_to_images(file: str, output_dir: str, warning: bool = False):
     assert pexists(file), f"File {file} does not exist"
-    assert not pexists(output_dir), f"Directory {output_dir} already exists"
+    if pexists(output_dir) and warning:
+        print(f"ppt2images: {output_dir} already exists")
     os.makedirs(output_dir, exist_ok=True)
     with tempfile.TemporaryDirectory() as temp_dir:
         command_list = [
@@ -168,18 +174,20 @@ def ppt_to_images(file: str, output_dir: str):
 def extract_fill(shape: BaseShape):
     if "fill" not in dir(shape):
         return None
-    fill_dict = {
-        "fill_xml": shape.fill._xPr.xml,
-    } | {k: v for k, v in object_to_dict(shape.fill).items() if "color" in k}
-    if not isinstance(shape.fill._fill, (_NoneFill, _NoFill)):
-        fill_dict["type"] = shape.fill.type.name.lower()
-    return fill_dict
+    else:
+        return shape.fill._xPr.xml
+    # fill_dict = {
+    #     "fill_xml": shape.fill._xPr.xml,
+    # } | {k: v for k, v in object_to_dict(shape.fill).items() if "color" in k}
+    # if not isinstance(shape.fill._fill, (_NoneFill, _NoFill)):
+    #     fill_dict["type"] = shape.fill.type.name.lower()
+    # return fill_dict
 
 
-def apply_fill(shape: BaseShape, fill: dict):
-    if fill is None:
+def apply_fill(shape: BaseShape, fill_xml: str):
+    if fill_xml is None:
         return
-    new_element = etree.fromstring(fill["fill_xml"])
+    new_element = etree.fromstring(fill_xml)
     shape.fill._xPr.getparent().replace(shape.fill._xPr, new_element)
 
 

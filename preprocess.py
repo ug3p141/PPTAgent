@@ -17,8 +17,8 @@ from tqdm import tqdm
 import llms
 from induct import SlideInducter
 from model_utils import (
+    get_image_embedding,
     get_image_model,
-    image_embedding,
     images_cosine_similarity,
     parse_pdf,
     prs_dedup,
@@ -85,7 +85,7 @@ def prepare_pdf_folder(pdf_folder: str, rank: int):
     if not pexists(pjoin(pdf_folder, "source.md")):
         return
     if not pexists(pjoin(pdf_folder, "image_caption.json")):
-        images_embeddings = image_embedding(pdf_folder, *image_model)
+        images_embeddings = get_image_embedding(pdf_folder, *image_model)
         images = [pjoin(pdf_folder, image) for image in images_embeddings]
         if len(images_embeddings) == 0:
             rm_folder(pdf_folder)
@@ -129,15 +129,38 @@ def filter_slide(slide: SlidePage):
         return True
 
 
-def prepare_ppt_folder(ppt_folder: str, text_model):
+def check_consistency(slides: list[SlidePage], ppt_folder: str, image_model):
+    original_embeddings = get_image_embedding(
+        pjoin(ppt_folder, "original_slides"), *image_model
+    )
+    rebuild_embeddings = get_image_embedding(
+        pjoin(ppt_folder, "source_slides"), *image_model
+    )
+    for slide in slides:
+        if (
+            torch.cosine_similarity(
+                original_embeddings[f"slide_{slide.real_idx:04d}.jpg"],
+                rebuild_embeddings[f"slide_{slide.slide_idx:04d}.jpg"],
+                dim=-1,
+            )
+            < 0.9
+        ):
+            raise ValueError(f"slide {slide.real_idx} in {ppt_folder} is inconsistent")
+    return True
+
+
+# 计算rebuild 的embedding是否一致
+def prepare_ppt_folder(ppt_folder: str, text_model: BGEM3FlagModel, image_model):
     if pexists(ppt_folder + "/source.pptx") or not older_than(
         ppt_folder + "/original.pptx"
     ):
         return
     config = Config(rundir=ppt_folder, debug=False)
     presentation = Presentation.from_file(ppt_folder + "/original.pptx", config=config)
-    ppt_to_images(presentation.source_file, pjoin(ppt_folder, "original_slides"))
+    if not os.path.exists(pjoin(ppt_folder, "original_slides")):
+        ppt_to_images(presentation.source_file, pjoin(ppt_folder, "original_slides"))
     ppt_image_folder = pjoin(ppt_folder, "source_slides")
+    shutil.rmtree(ppt_image_folder, ignore_errors=True)
     shutil.copytree(pjoin(ppt_folder, "original_slides"), ppt_image_folder)
 
     removed_slides = prs_dedup(presentation, text_model)
@@ -159,6 +182,7 @@ def prepare_ppt_folder(ppt_folder: str, text_model):
             pjoin(ppt_image_folder, f"slide_{slide.slide_idx:04d}.jpg"),
         )
 
+    check_consistency(presentation.slides, ppt_folder, image_model)
     ImageLabler(presentation, config).caption_images()
     presentation.save(pjoin(ppt_folder, "source.pptx"))
     presentation.save(pjoin(ppt_folder, "template.pptx"), layout_only=True)
@@ -178,6 +202,8 @@ def prepare_induction(induct_id: int):
     ]
 
     def do_induct(llm: list[llms.LLM], ppt_folder: str, rank: int):
+        if not older_than(pjoin(ppt_folder, "source.pptx"), wait=True):
+            return
         llms.language_model = llm[0]
         llms.vision_model = llm[1]
         config = Config(rundir=ppt_folder)
@@ -191,17 +217,16 @@ def prepare_induction(induct_id: int):
         )
         slide_inducter.content_induct()
 
-    for idx, folder in enumerate(
-        tqdm(sorted(glob.glob("data/*/pptx/*")), desc="prepare induction")
-    ):
+    for folder in tqdm(sorted(glob.glob("data/*/pptx/*")), desc="prepare induction"):
         do_induct(induct_llms[induct_id], folder, 0)
 
 
 if __name__ == "__main__":
     if sys.argv[1] == "prepare_ppt":
         text_model = BGEM3FlagModel("BAAI/bge-m3", use_fp16=True, device=2)
+        image_model = get_image_model(3)
         for ppt_folder in tqdm(glob.glob("data/*/pptx/*"), desc="prepare ppt"):
-            prepare_ppt_folder(ppt_folder, text_model)
+            prepare_ppt_folder(ppt_folder, text_model, image_model)
     elif sys.argv[1] == "prepare_induction":
         prepare_induction(int(sys.argv[2]))
     elif sys.argv[1] == "parse_pdf":

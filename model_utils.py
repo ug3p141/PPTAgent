@@ -95,7 +95,7 @@ def get_text_embedding(text: list[str], model, batchsize: int = 32):
     return result
 
 
-def image_embedding(image_dir: str, extractor, model, batchsize: int = 16):
+def get_image_embedding(image_dir: str, extractor, model, batchsize: int = 16):
     transform = T.Compose(
         [
             T.Resize(int((256 / 224) * extractor.size["height"])),

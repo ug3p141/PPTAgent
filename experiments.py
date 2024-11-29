@@ -13,7 +13,7 @@ from multimodal import ImageLabler
 from pptgen import PPTAgent, PPTCrew, PPTGen
 from preprocess import process_filetype
 from presentation import Presentation
-from utils import Config, pbasename, pexists, pjoin
+from utils import Config, older_than, pbasename, pexists, pjoin
 
 # language_model vision_model code_model
 eval_models = {
@@ -68,8 +68,9 @@ def do_generate(
     induct_cache = pjoin(
         app_config.RUN_DIR, "template_induct", model_identifier, "induct_cache.json"
     )
-    if not pexists(induct_cache):
-        raise Exception(f"induct_cache not found: {induct_cache}")
+    if not older_than(induct_cache, wait=True):
+        print(f"induct_cache not found: {induct_cache}")
+        return
     slide_induction = json.load(open(induct_cache))
     pptgen: PPTCrew = genclass(text_model).set_examplar(presentation, slide_induction)
     topic = ppt_folder.split("/")[1]

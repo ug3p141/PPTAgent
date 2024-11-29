@@ -6,7 +6,7 @@ from collections import defaultdict
 from jinja2 import Template
 
 import llms
-from model_utils import get_cluster, image_embedding, images_cosine_similarity
+from model_utils import get_cluster, get_image_embedding, images_cosine_similarity
 from presentation import Presentation
 from utils import Config, pexists, pjoin, tenacity
 
@@ -114,7 +114,7 @@ class SlideInducter:
         return content_slides_index, functional_cluster
 
     def layout_split(self, content_slides_index: set[int]):
-        embeddings = image_embedding(self.template_image_folder, *self.image_models)
+        embeddings = get_image_embedding(self.template_image_folder, *self.image_models)
         assert len(embeddings) == len(self.prs)
         template = Template(open("prompts/ask_category.txt").read())
         content_split = defaultdict(list)

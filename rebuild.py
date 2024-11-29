@@ -1,0 +1,72 @@
+# rebuild the pptx from saved code steps.jsonl
+import os
+import shutil
+import sys
+from copy import deepcopy
+from glob import glob
+
+import func_argparse
+import jsonlines
+import tqdm
+
+from apis import CodeExecutor, HistoryMark
+from presentation import Presentation
+from utils import Config, pjoin, ppt_to_images
+
+config = Config("/tmp")
+retry_time = 3
+code_executor = CodeExecutor(0)
+
+
+def rebuild_pptx(agent_steps: str, prs: Presentation):
+    slides = []
+    r = 0
+    for mark, slide_idx, actions in jsonlines.open(agent_steps):
+        if mark != HistoryMark.API_CALL_CORRECT:
+            r = 0
+            continue
+        else:
+            r += 1
+            if r == retry_time:
+                raise ValueError(f"error in {agent_steps}")
+        slides.append(deepcopy(prs.slides[slide_idx - 1]))  # slide_idx starts from 1
+        feedback = code_executor.execute_actions(actions, slides[-1])
+        assert feedback is None, feedback
+    return slides
+
+
+def rebuild_all(
+    setting: str = "*", topic: str = "*", out_filename: str = "rebuild.pptx"
+):
+    for folder in tqdm.tqdm(glob(f"data/{topic}/pptx/*")):
+        prs = Presentation.from_file(pjoin(folder, "source.pptx"), config)
+        pptx_container = deepcopy(prs)
+        for agent_steps in glob(pjoin(folder, setting, "*", "agent_steps.jsonl")):
+            dst = pjoin(os.path.dirname(agent_steps), out_filename)
+            if os.path.exists(dst):
+                continue
+            try:
+                pptx_container.slides = rebuild_pptx(agent_steps, prs)
+                pptx_container.save(dst)
+            except Exception as e:
+                continue
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 1:
+        func_argparse.main(rebuild_all)
+
+    shutil.rmtree("./test", ignore_errors=True)
+    os.makedirs("./test", exist_ok=True)
+
+    source_folder = "data/culture/pptx/ChemBio-in-the-HUB-public/"
+    setting = "ablation_typographer"
+    pdf = "20190810_BearTrap_Grave01"
+
+    prs = Presentation.from_file(pjoin(source_folder, "source.pptx"), config)
+    container = deepcopy(prs)
+    container.slides = rebuild_pptx(
+        pjoin(source_folder, setting, pdf, "agent_steps.jsonl"), prs
+    )
+    container.save("./test/final.pptx")
+    ppt_to_images("./test/final.pptx", "./test")

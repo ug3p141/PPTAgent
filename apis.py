@@ -268,7 +268,7 @@ def replace_span(
             return
     raise IndexError(
         f"Cannot find the span {span_id} in the paragraph {paragraph_id} of the element {div_id},"
-        "Please:"
+        "Please: "
         "1. check if you refer to a non-existed span."
         "2. check if you already deleted it, ensure to remove span elements from the end of the paragraph first"
         "3. consider merging adjacent replace_span operations."
