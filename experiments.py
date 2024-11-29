@@ -2,38 +2,50 @@ import json
 import re
 from functools import partial
 from glob import glob
-from typing import Literal, Type
+from typing import Type
 
 import func_argparse
 import torch
 
 import llms
+from ablation import (
+    PPTCrew_wo_Decoupling,
+    PPTCrew_wo_HTML,
+    PPTCrew_wo_LayoutInduction,
+    PPTCrew_wo_SchemaInduction,
+)
 from model_utils import get_text_model
 from multimodal import ImageLabler
-from pptgen import PPTAgent, PPTCrew, PPTGen
+from pptgen import PPTCrew
 from preprocess import process_filetype
 from presentation import Presentation
 from utils import Config, older_than, pbasename, pexists, pjoin
 
 # language_model vision_model code_model
-eval_models = {
-    "PPTAgent": [
-        (llms.qwen2_5, llms.qwen2_5, llms.gpt4o),
-        (llms.qwen2_5, llms.qwen2_5, llms.qwen_vl),
-    ],
-    "PPTCrew": [
-        (llms.qwen2_5, llms.qwen2_5, llms.qwen_vl),
-        (llms.gpt4o, llms.gpt4o, llms.gpt4o),
-    ],
-}
-GENCLASS = {
-    "PPTAgent": PPTAgent,
-    "PPTCrew": PPTCrew,
+EVAL_MODELS = [
+    (llms.qwen2_5, llms.qwen2_5, llms.qwen_vl),
+    (llms.gpt4o, llms.gpt4o, llms.gpt4o),
+    (llms.qwen2_5, llms.qwen_coder, llms.qwen_vl),
+]
+
+# ablation
+# 0: w/o layout induction: random layout
+# 1: w/o schema induction: 只提供old data 的值，别的都不提供
+# 2. w/o decoupling: pptagent
+# 3: w/o html: use pptc
+
+AGENT_CLASS = {
+    -1: PPTCrew,
+    0: PPTCrew_wo_LayoutInduction,
+    1: PPTCrew_wo_SchemaInduction,
+    2: PPTCrew_wo_Decoupling,
+    3: PPTCrew_wo_HTML,
 }
 
 
-def get_setting(class_name: str, setting_id: int):
-    language_model, code_model, vision_model = eval_models[class_name][setting_id]
+def get_setting(setting_id: int, ablation_id: int):
+    language_model, code_model, vision_model = EVAL_MODELS[setting_id]
+    agent_class = AGENT_CLASS.get(ablation_id)
     llms.language_model = language_model
     llms.code_model = code_model
     llms.vision_model = vision_model
@@ -41,12 +53,12 @@ def get_setting(class_name: str, setting_id: int):
         re.search(r"^(.*?)-\d{2}", llm.model).group(1)
         for llm in [language_model, code_model, vision_model]
     )
-    return class_name + "-" + role_string
+    return agent_class, agent_class.__name__ + "-" + role_string
 
 
 # 所有template要重新prepare一遍，除了qwen2.5+qwen_vl
 def do_generate(
-    genclass: Type[PPTGen],
+    genclass: Type[PPTCrew],
     setting: str,
     debug: bool,
     ppt_folder: str,
@@ -88,18 +100,18 @@ def do_generate(
 
 
 def generate_pres(
-    agent_class: str = "PPTCrew",
     setting_id: int = 0,
+    ablation_id: int = -1,
     setting_name: str = None,
     thread_num: int = 16,
     debug: bool = False,
 ):
-    s = get_setting(agent_class, setting_id)
+    agent_class, s = get_setting(setting_id, ablation_id)
     print("generating slides using:", s)
     setting = setting_name or s
     generate = partial(
         do_generate,
-        GENCLASS[agent_class],
+        agent_class,
         setting,
         debug,
     )

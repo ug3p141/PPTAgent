@@ -18,7 +18,7 @@ template: |
         -	The paragraph_id for newly cloned paragraphs should be the current maximum paragraph_id of the parent element plus 1, while retaining the span_id within the cloned paragraph unchanged.
         -	If quantity_change < 0, use del_span or del_image to reduce the corresponding number of elements. Always ensure to remove span elements from the end of the paragraph first.
         Restriction:
-        -	Each command’s API call can only use one type of operation: either clone_paragraph or del_span/del_image, but not both.
+        -	Each command’s API call can only use either clone_paragraph or del_span/del_image according to the `quantity_change`, but not both.
         2.	Content Replacement:
         -	Text Content: Use replace_span to sequentially distribute new content into one or more <span> elements within a paragraph. Select appropriate tags for emphasized content (e.g., bold, special color, larger font).
         -	Image Content: Use replace_image to replace image resources.

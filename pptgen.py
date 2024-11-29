@@ -116,6 +116,8 @@ class PPTGen(ABC):
         for role in self.staffs.values():
             role.save_history(pjoin(self.config.RUN_DIR, "history"))
             role.history = []
+        if len(code_executor.code_history) == 0:
+            return
         with jsonlines.open(
             pjoin(self.config.RUN_DIR, "code_steps.jsonl"), "w"
         ) as writer:
@@ -228,30 +230,6 @@ class PPTGen(ABC):
             return None
 
 
-class PPTAgent(PPTGen):
-    roles: list[str] = ["agent"]
-
-    def synergize(
-        self,
-        template: dict,
-        slide_content: str,
-        code_executor: CodeExecutor,
-        image_info: str,
-    ) -> SlidePage:
-        slide = deepcopy(self.presentation.slides[template["template_id"] - 1])
-        actions = self.staffs["agent"](
-            api_documentation=code_executor.get_apis_docs(API_TYPES.Agent.value),
-            edit_target=slide.html,
-            content=self.simple_outline + self.metadata + slide_content,
-            image_information=image_info,
-        )
-        code_executor.execute_actions(
-            actions=actions,
-            edit_slide=slide,
-        )
-        return slide
-
-
 class PPTCrew(PPTGen):
     roles: list[str] = ["editor", "coder"]  # , "typographer"]
 
@@ -293,29 +271,31 @@ class PPTCrew(PPTGen):
                 )
             edit_actions = self.staffs["coder"].retry(*feedback, error_idx + 1)
         edited_image = self._build_slide(edited_slide, temp_dir.name)
+        return self.style_adjusting(edited_slide, edited_image, code_executor)
 
-        if "typographer" in self.staffs:
-            assert pexists(edited_image), "Edited image not found"
-            typography_actions = self.staffs["typographer"](
-                api_docs=code_executor.get_apis_docs(API_TYPES.Typographer.value),
-                images=edited_image,
+    def style_adjusting(
+        self, edited_slide: SlidePage, edited_image: str, code_executor: CodeExecutor
+    ):
+        if "typographer" not in self.staffs:
+            return edited_slide
+
+        assert pexists(edited_image), "Edited image not found"
+        typography_actions = self.staffs["typographer"](
+            api_docs=code_executor.get_apis_docs(API_TYPES.Typographer.value),
+            images=edited_image,
+        )
+        for error_idx in range(self.retry_times):
+            styled_slide = deepcopy(edited_slide)
+            feedback = code_executor.execute_actions(typography_actions, styled_slide)
+            if feedback is None:
+                return styled_slide
+            if error_idx == self.retry_times - 1:
+                raise Exception(
+                    f"Failed to generate slide, tried too many times at styling\ntraceback: {feedback[1]}"
+                )
+            typography_actions = self.staffs["typographer"].retry(
+                *feedback, error_idx + 1
             )
-            for error_idx in range(self.retry_times):
-                styled_slide = deepcopy(edited_slide)
-                feedback = code_executor.execute_actions(
-                    typography_actions, styled_slide
-                )
-                if feedback is None:
-                    return styled_slide
-                if error_idx == self.retry_times - 1:
-                    raise Exception(
-                        f"Failed to generate slide, tried too many times at styling\ntraceback: {feedback[1]}"
-                    )
-                typography_actions = self.staffs["typographer"].retry(
-                    *feedback, error_idx + 1
-                )
-
-        return edited_slide
 
     def _build_slide(self, slide: SlidePage, temp_dir: str):
         self.empty_prs.clear_slides()

@@ -1,5 +1,7 @@
 import json
 import os
+import shutil
+import sys
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from glob import glob
@@ -177,12 +179,19 @@ def dataset_stat():
 
 def pptx2images():
     while True:
-        for pptx in glob("data/*/pptx/*/*/*/final.pptx"):
-            older_than(pptx)
-            setting = pptx.split("/")[-3]
-            pdf = pptx.split("/")[-2]
-            ppt_folder = "/".join(pptx.split("/")[:-3])
+        for folder in glob("data/*/pptx/*/*/*/history"):
+            folder = os.path.dirname(folder)
+            pptx = pjoin(folder, "final.pptx")
+            ppt_folder, setting, pdf = folder.rsplit("/", 2)
             dst = pjoin(ppt_folder, "final_images", setting, pdf)
+
+            if not pexists(pptx):
+                if pexists(dst):
+                    print(f"remove {dst}")
+                    shutil.rmtree(dst)
+                continue
+
+            older_than(pptx)
             if pexists(dst):
                 continue
             try:
@@ -194,12 +203,13 @@ def pptx2images():
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        func_argparse.main(
+            dataset_stat,
+            eval_experiment,
+            pptx2images,
+        )
     for folder in os.listdir("human_eval"):
         test_folders = sorted(glob(f"human_eval/{folder}/*"))
 
         eval_ppt()
-    func_argparse.main(
-        dataset_stat,
-        eval_experiment,
-        pptx2images,
-    )

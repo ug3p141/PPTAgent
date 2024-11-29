@@ -14,21 +14,17 @@ from presentation import Presentation
 from utils import Config, pjoin, ppt_to_images
 
 config = Config("/tmp")
-retry_time = 3
 code_executor = CodeExecutor(0)
 
 
 def rebuild_pptx(agent_steps: str, prs: Presentation):
     slides = []
-    r = 0
-    for mark, slide_idx, actions in jsonlines.open(agent_steps):
+    steps = jsonlines.open(agent_steps)
+    if len(steps) == 0 or steps[-1][0] != HistoryMark.API_CALL_CORRECT:
+        raise ValueError(f"Jump {agent_steps} as last step is failed")
+    for mark, slide_idx, actions in steps:
         if mark != HistoryMark.API_CALL_CORRECT:
-            r = 0
             continue
-        else:
-            r += 1
-            if r == retry_time:
-                raise ValueError(f"error in {agent_steps}")
         slides.append(deepcopy(prs.slides[slide_idx - 1]))  # slide_idx starts from 1
         feedback = code_executor.execute_actions(actions, slides[-1])
         assert feedback is None, feedback

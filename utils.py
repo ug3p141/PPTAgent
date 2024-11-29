@@ -33,6 +33,11 @@ LABEL_LEN = Pt(24)
 FONT_LEN = Pt(20)
 
 
+def get_font_pptcstyle(font: dict):
+    font = SimpleNamespace(**font)
+    return f"Font Style: bold={font.bold}, italic={font.italic}, underline={font.underline}, size={font.size}pt, color={font.color}, font style={font.name}\n"
+
+
 def prepare_shape_label(shape_idx: int, shape: BaseShape):
     shape.line.color.rgb = BLACK
     shape.line.width = BORDER_LEN

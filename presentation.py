@@ -1,5 +1,6 @@
 import traceback
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Callable, Literal
 
 from pptx import Presentation as PPTXPre
@@ -23,6 +24,7 @@ from utils import (
     apply_fill,
     dict_to_object,
     extract_fill,
+    get_font_pptcstyle,
     get_font_style,
     merge_dict,
     object_to_dict,
@@ -168,6 +170,21 @@ class TextFrame:
             return 0
         return len(self.text)
 
+    def to_pptc(self, father_idx: int) -> str:
+        if not self.is_textframe:
+            return ""
+        s = f"[Text id={father_idx}]"
+        for para in self.paragraphs:
+            s += f"\n"
+            s += f"[Paragraph id={para.idx}]"
+            s += get_font_pptcstyle(para.font)
+            for run in para.runs:
+                s += f"\n"
+                s += f"[Run id={run.idx}]"
+                s += get_font_pptcstyle(run.font)
+                s += run.text + "\n"
+        return s
+
 
 class ShapeElement:
     def __init__(
@@ -250,9 +267,11 @@ class ShapeElement:
 
     @property
     def closures(self):
-        for key in self._closure_keys:
-            for closure in sorted(self._closures[key], reverse=True):
-                yield closure
+        closures = []
+        closures.extend(sorted(self._closures["clone"]))
+        closures.extend(self._closures["replace"] + self._closures["style"])
+        closures.extend(sorted(self._closures["delete"], reverse=True))
+        return closures
 
     @property
     def indent(self):
@@ -293,6 +312,32 @@ class ShapeElement:
     @property
     def area(self):
         return self.width * self.height
+
+    @property
+    def pptc_text_info(self):
+        if isinstance(self, Picture):
+            return self.caption
+        return self.text_frame.to_pptc(self.shape_idx)
+
+    @property
+    def pptc_space_info(self):
+        return f"Visual Positions: left={self.left}pt, top={self.top}pt\n"
+
+    @property
+    def pptc_size_info(self):
+        return f"Size: height={self.height}pt, width={self.width}pt\n"
+
+    @property
+    def pptc_description(self):
+        return f"[{self.__class__.__name__} id={self.shape_idx}]\n"
+
+    def to_pptc(self):
+        s = ""
+        s += self.pptc_description
+        s += self.pptc_size_info
+        s += self.pptc_space_info
+        s += self.pptc_text_info
+        return s
 
     def get_inline_style(self, style_args: StyleArg):
         id_str = f" id='{self.shape_idx}'" if style_args.element_id else ""
@@ -520,6 +565,9 @@ class GroupShape(ShapeElement):
             shape.build(slide)
         return slide
 
+    def to_pptc(self):
+        return "\n".join([shape.to_pptc() for shape in self.data])
+
     def __iter__(self):
         for shape in self.data:
             if isinstance(shape, GroupShape):
@@ -714,6 +762,9 @@ class SlidePage:
                 "</body>\n</html>\n",
             ]
         )
+
+    def to_pptc(self):
+        return "\n".join([shape.to_pptc() for shape in self.shapes])
 
     def to_text(self, show_image: bool = True) -> str:
         return "\n".join(
