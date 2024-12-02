@@ -33,6 +33,8 @@ EVAL_MODELS = [
 # 1: w/o schema induction: 只提供old data 的值，别的都不提供
 # 2. w/o decoupling: pptagent
 # 3: w/o html: use pptc
+# 4: w/o typographer: pptagent
+# 5. w/o comman generation? 给他新旧的值的对比
 
 AGENT_CLASS = {
     -1: PPTCrew,
@@ -49,11 +51,14 @@ def get_setting(setting_id: int, ablation_id: int):
     llms.language_model = language_model
     llms.code_model = code_model
     llms.vision_model = vision_model
-    role_string = "+".join(
-        re.search(r"^(.*?)-\d{2}", llm.model).group(1)
-        for llm in [language_model, code_model, vision_model]
-    )
-    return agent_class, agent_class.__name__ + "-" + role_string
+    if ablation_id == -1:
+        setting_name = "PPTCrew-" + "+".join(
+            re.search(r"^(.*?)-\d{2}", llm.model).group(1)
+            for llm in [language_model, code_model, vision_model]
+        )
+    else:
+        setting_name = agent_class.__name__
+    return agent_class, setting_name
 
 
 # 所有template要重新prepare一遍，除了qwen2.5+qwen_vl

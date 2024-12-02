@@ -18,7 +18,7 @@ from rich import print
 from apis import API_TYPES, CodeExecutor
 from llms import Role
 from model_utils import get_text_embedding
-from presentation import Closure, Presentation, SlidePage, StyleArg
+from presentation import Closure, Presentation, SlidePage
 from utils import (
     Config,
     get_slide_content,
@@ -227,11 +227,11 @@ class PPTGen(ABC):
             )
         except Exception as e:
             print(f"generate slide {slide_idx} failed: {e}")
-            return None
+            print(self.config.RUN_DIR)
 
 
 class PPTCrew(PPTGen):
-    roles: list[str] = ["editor", "coder"]  # , "typographer"]
+    roles: list[str] = ["editor", "coder", "typographer"]
 
     # 还是把它加上
     def synergize(
@@ -286,7 +286,9 @@ class PPTCrew(PPTGen):
         )
         for error_idx in range(self.retry_times):
             styled_slide = deepcopy(edited_slide)
-            feedback = code_executor.execute_actions(typography_actions, styled_slide)
+            feedback = code_executor.execute_actions(
+                typography_actions, styled_slide, found_code=True
+            )
             if feedback is None:
                 return styled_slide
             if error_idx == self.retry_times - 1:

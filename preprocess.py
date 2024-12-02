@@ -122,10 +122,13 @@ def prepare_pdf_folder(pdf_folder: str, rank: int):
 
 
 def filter_slide(slide: SlidePage):
-    if len(slide.shapes) > 10:
+    num_pictures = len(list(slide.shape_filter(Picture)))
+    num_shapes = len(slide.shapes)
+    if num_shapes > 10:
         return True
-    pictures = list(slide.shape_filter(Picture))
-    if slide.real_idx != 0 and len(pictures) > 2:
+    if num_shapes - num_pictures < 2:
+        return True
+    if slide.real_idx != 0 and num_pictures > 2:
         return True
 
 
@@ -193,7 +196,7 @@ def prepare_ppt_folder(ppt_folder: str, text_model: BGEM3FlagModel, image_model)
     os.remove(pjoin(ppt_folder, "template.pptx"))
 
 
-def prepare_induction(induct_id: int):
+def prepare_induction(induct_id: int, wait: bool = False):
     induct_llms = [
         (llms.qwen2_5, llms.qwen_vl),
         (llms.qwen2_5, llms.gpt4o),
@@ -202,7 +205,7 @@ def prepare_induction(induct_id: int):
     ]
 
     def do_induct(llm: list[llms.LLM], ppt_folder: str, rank: int):
-        if not older_than(pjoin(ppt_folder, "source.pptx"), wait=True):
+        if not older_than(pjoin(ppt_folder, "source.pptx"), wait=wait):
             return
         llms.language_model = llm[0]
         llms.vision_model = llm[1]

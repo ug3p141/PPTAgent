@@ -162,7 +162,7 @@ class SlideInducter:
                 )
                 for k in list(schema.keys()):
                     if "data" not in schema[k]:
-                        raise ValueError(f"Unknown content schema: {schema[k]}")
+                        raise ValueError(f"Cannot find `data` in {k}\n{schema[k]}")
                     if len(schema[k]["data"]) == 0:
                         print(f"Empty content schema: {schema[k]}")
                         schema.pop(k)

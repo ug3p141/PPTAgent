@@ -62,8 +62,9 @@ class CodeExecutor:
             api_doc.append(signature)
         return "\n\n".join(api_doc)
 
-    def execute_actions(self, actions: str, edit_slide: SlidePage):
-        found_code = False
+    def execute_actions(
+        self, actions: str, edit_slide: SlidePage, found_code: bool = False
+    ):
         api_calls = actions.strip().split("\n")
         self.api_history.append(
             [HistoryMark.API_CALL_ERROR, edit_slide.slide_idx, actions]
@@ -106,7 +107,7 @@ class CodeExecutor:
                 self.code_history[-1][0] = HistoryMark.CODE_RUN_CORRECT
             except:
                 trace_msg = traceback.format_exc()
-                if found_code:
+                if len(self.code_history) != 0:
                     self.code_history[-1][-1] = trace_msg
                 api_lines = (
                     "\n".join(api_calls[: line_idx - 1])
@@ -162,9 +163,9 @@ DEFAULT_FONT_SIZE = Pt(12)
 def set_font(
     bold: bool,
     font_size_delta: int | None,
-    text_shape: BaseShape | None,
     horizontal_align: Literal["left", "center", "right", None],
     vertical_align: Literal["top", "center", "bottom", None],
+    text_shape: BaseShape | None,
 ):
     horizontal_align = HORIZONTAL_ALIGN.get(horizontal_align, None)
     vertical_align = VERTICAL_ALIGN.get(vertical_align, None)
@@ -316,10 +317,6 @@ def clone_paragraph(slide: SlidePage, div_id: int, paragraph_id: int):
     )
 
 
-# 现在我们先一起调整目标部分：
-# 1. 使用set_element_layout 避免元素重叠和大面积空白
-# 2. 使用set_font 的font_size_delta缩放字体，以保证文本内容与元素的边界匹配
-# 3.
 def set_font_style(
     slide: SlidePage,
     element_id: int,
@@ -335,10 +332,12 @@ def set_font_style(
         horizontal_align: The horizontal alignment of the text, can be "left", "center" or "right".
         vertical_align: The vertical alignment of the text, can be "top", "center" or "bottom".
     Example:
-    >>> set_font_style("1", bold=True, font_size_delta=4)
-    >>> set_font_style("2", horizontal_align="center")
-    >>> set_font_style("3", vertical_align="bottom")
+    >>> set_font_style(1, bold=True, font_size_delta=4)
+    >>> set_font_style(2, horizontal_align="center")
+    >>> set_font_style(3, vertical_align="bottom")
     """
+    if isinstance(element_id, str):
+        element_id = int(element_id)
     assert (
         font_size_delta is None or abs(font_size_delta) < 8
     ), "The font size delta is too large, please check the font size delta."
@@ -375,6 +374,8 @@ def set_element_layout(
     >>> set_element_layout(1, left_delta=5, right_delta=5)  # Move left and right by 5% of page width
     >>> set_element_layout(2, top_delta=10, bottom_delta=10)  # Move top and bottom by 10% of page height
     """
+    if isinstance(element_id, str):
+        element_id = int(element_id)
     slide_width, slide_height = slide.slide_width, slide.slide_height
     for width_delta in [left_delta, right_delta]:
         assert (

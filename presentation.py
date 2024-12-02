@@ -257,7 +257,9 @@ class ShapeElement:
         return obj
 
     def build(self, slide: PPTXSlide):
-        slide.shapes._spTree.insert_element_before(parse_xml(self.xml), "p:extLst")
+        return slide.shapes._shape_factory(
+            slide.shapes._spTree.insert_element_before(parse_xml(self.xml), "p:extLst")
+        )
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}: shape {self.shape_idx} of slide {self.slide_idx}"
@@ -728,10 +730,10 @@ class SlidePage:
         apply_fill(slide.background, self.background_xml)
 
         for shape in self.shapes:
-            shape.build(slide)
+            build_shape = shape.build(slide)
             for closure in shape.closures:
                 try:
-                    closure.apply(slide.shapes[-1])
+                    closure.apply(build_shape)
                 except:
                     raise ValueError("Failed to apply closures to slides")
         return slide

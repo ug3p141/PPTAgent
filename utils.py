@@ -55,6 +55,8 @@ def prepare_shape_label(shape_idx: int, shape: BaseShape):
     p.alignment = PP_ALIGN.CENTER
     p.font.size = FONT_LEN
     p.font.bold = True
+    p.font.fill.solid()
+    p.font.fill.fore_color.rgb = BLACK
 
 
 def get_font_style(font: dict):
@@ -99,6 +101,7 @@ def older_than(filepath, seconds: int = 10, wait: bool = False):
         while wait:
             sleep(1)
             if os.path.exists(filepath):
+                print("waiting for:", filepath)
                 sleep(60)
                 return True
         return False
@@ -173,7 +176,7 @@ def ppt_to_images(file: str, output_dir: str, warning: bool = False):
                 img.save(pjoin(output_dir, f"slide_{i+1:04d}.jpg"))
             return
 
-        raise RuntimeError("No PDF file was created in the temporary directory")
+        raise RuntimeError("No PDF file was created in the temporary directory", file)
 
 
 def extract_fill(shape: BaseShape):

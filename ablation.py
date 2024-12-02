@@ -9,7 +9,6 @@ from presentation import GroupShape, ShapeElement, SlidePage, TextFrame
 from utils import get_slide_content
 
 
-# todo only old data, not element name and other info
 class PPTCrew_wo_Decoupling(PPTCrew):
     roles: list[str] = ["agent", "typographer"]
 

@@ -19,8 +19,11 @@ code_executor = CodeExecutor(0)
 
 def rebuild_pptx(agent_steps: str, prs: Presentation):
     slides = []
-    steps = jsonlines.open(agent_steps)
-    if len(steps) == 0 or steps[-1][0] != HistoryMark.API_CALL_CORRECT:
+    steps = list(jsonlines.open(agent_steps))
+    if len(steps) == 0:
+        os.remove(agent_steps)
+        raise ValueError(f"Jump {agent_steps} as no steps")
+    if steps[-1][0] != HistoryMark.API_CALL_CORRECT:
         raise ValueError(f"Jump {agent_steps} as last step is failed")
     for mark, slide_idx, actions in steps:
         if mark != HistoryMark.API_CALL_CORRECT:
@@ -52,17 +55,20 @@ if __name__ == "__main__":
     if len(sys.argv) != 1:
         func_argparse.main(rebuild_all)
 
-    shutil.rmtree("./test", ignore_errors=True)
-    os.makedirs("./test", exist_ok=True)
+    else:
+        shutil.rmtree("./test", ignore_errors=True)
+        os.makedirs("./test", exist_ok=True)
 
-    source_folder = "data/culture/pptx/ChemBio-in-the-HUB-public/"
-    setting = "ablation_typographer"
-    pdf = "20190810_BearTrap_Grave01"
+        source_folder = (
+            "data/education/pptx/Open Science - PhD Human Rights - 2021 - module 3"
+        )
+        setting = "PPTCrew-Qwen2.5+Qwen2.5+Qwen2-VL"
+        pdf = "37-105-1-PB (3)"
 
-    prs = Presentation.from_file(pjoin(source_folder, "source.pptx"), config)
-    container = deepcopy(prs)
-    container.slides = rebuild_pptx(
-        pjoin(source_folder, setting, pdf, "agent_steps.jsonl"), prs
-    )
-    container.save("./test/final.pptx")
-    ppt_to_images("./test/final.pptx", "./test")
+        prs = Presentation.from_file(pjoin(source_folder, "source.pptx"), config)
+        container = deepcopy(prs)
+        container.slides = rebuild_pptx(
+            pjoin(source_folder, setting, pdf, "agent_steps.jsonl"), prs
+        )
+        container.save("./test/final.pptx")
+        ppt_to_images("./test/final.pptx", "./test")
