@@ -10,7 +10,7 @@ from utils import get_slide_content
 
 
 class PPTCrew_wo_Decoupling(PPTCrew):
-    roles: list[str] = ["agent", "typographer"]
+    roles: list[str] = ["agent"]
 
     def synergize(
         self,

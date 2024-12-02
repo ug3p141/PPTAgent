@@ -95,9 +95,14 @@ def eval_experiment(
     ppt_eval: bool = True,
     fid_eval: bool = True,
 ):
+    # 这里会设置模型
     s = get_setting(agent_class, setting_id)
     setting = setting_name or s
-    eval_file = pjoin("data", "eval", setting + ".json")
+    llms.language_model = llms.gpt4o
+    llms.vision_model = llms.gpt4o
+    judge_name = "gpt4o+gpt4o"
+
+    eval_file = pjoin("data", "eval", f"{setting}_{judge_name}.json")
     if pexists(eval_file):
         eval_stats = json.load(open(eval_file))
     else:
@@ -113,14 +118,8 @@ def eval_experiment(
     if general_eval:
         eval_general(presentations, eval_stats["general"])
 
-    if ppt_eval:
-        if "ppteval" not in eval_stats:
-            eval_stats["ppteval"] = defaultdict(dict)
-        slide_image_folders = glob(f"data/*/pptx/*/final_images/{setting}/*")
-        eval_ppt(presentations, slide_image_folders, eval_stats["ppteval"])
-
-    with ThreadPoolExecutor(thread_num) as executor:
-        if fid_eval:
+    if fid_eval:
+        with ThreadPoolExecutor(thread_num) as executor:
             fid_folders = [i for i in source_folders if i not in eval_stats["fid"]]
             fid_splits = [
                 fid_folders[i : i + len(fid_folders) // thread_num]
@@ -133,6 +132,13 @@ def eval_experiment(
                 range(thread_num),
             ):
                 eval_stats["fid"] |= fid_scores
+
+    if ppt_eval:
+        if "ppteval" not in eval_stats:
+            eval_stats["ppteval"] = defaultdict(dict)
+        slide_image_folders = glob(f"data/*/pptx/*/final_images/{setting}/*")
+        eval_ppt(presentations, slide_image_folders, eval_stats["ppteval"])
+
     json.dump(eval_stats, open(eval_file, "w"), indent=4)
 
 
@@ -215,24 +221,17 @@ if __name__ == "__main__":
         # setting dimension file: eval
         llms.language_model = llms.gpt4o
         llms.vision_model = llms.gpt4o
-
         config = Config("/tmp")
-        eval_file = "human_eval/eval.json"
+        judge_name = "gpt4o+gpt4o"
+        eval_file = f"human_eval/ppt_eval_{judge_name}.json"
+        evals = defaultdict(dict)
         if os.path.exists(eval_file):
-            evals = json.load(open(eval_file))
-        else:
-            evals = {}
+            evals |= json.load(open(eval_file))
         for setting in ["baseline-gpt", "pptagent-real"]:  # os.listdir("human_eval"):
-            if setting not in evals:
-                evals[setting] = defaultdict(lambda: defaultdict(list))
             test_folders = sorted(glob(f"human_eval/{setting}/*"))[:3]
             presentations = [
                 Presentation.from_file(pjoin(i, "final.pptx"), config)
                 for i in test_folders
             ]
-            eval_ppt(presentations, test_folders, evals[setting])
-            print(setting, ":")
-            for dimension, evals in evals[setting].items():
-                scores = [i["score"] for i in evals.values() if isinstance(i, dict)]
-                print(dimension, ":", sum(scores) / len(scores))
-            json.dump(evals, open(eval_file, "w"), indent=4, ensure_ascii=False)
+            eval_ppt(presentations, test_folders, evals)
+        json.dump(evals, open(eval_file, "w"), indent=4, ensure_ascii=False)

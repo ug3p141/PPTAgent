@@ -222,7 +222,7 @@ class PPTGen(ABC):
 
 
 class PPTCrew(PPTGen):
-    roles: list[str] = ["editor", "coder", "typographer"]
+    roles: list[str] = ["editor", "coder"]
 
     # 还是把它加上
     def synergize(

@@ -317,85 +317,6 @@ def clone_paragraph(slide: SlidePage, div_id: int, paragraph_id: int):
     )
 
 
-def set_font_style(
-    slide: SlidePage,
-    element_id: int,
-    bold: bool = None,
-    font_size_delta: int = None,
-    horizontal_align: Literal["left", "center", "right"] = None,
-    vertical_align: Literal["top", "center", "bottom"] = None,
-):
-    """
-    Set the font style of an element.
-    Args:
-        font_size_delta: The delta of the font size, the unit is pt, positive for larger, negative for smaller. The range is [-8, 8].
-        horizontal_align: The horizontal alignment of the text, can be "left", "center" or "right".
-        vertical_align: The vertical alignment of the text, can be "top", "center" or "bottom".
-    Example:
-    >>> set_font_style(1, bold=True, font_size_delta=4)
-    >>> set_font_style(2, horizontal_align="center")
-    >>> set_font_style(3, vertical_align="bottom")
-    """
-    if isinstance(element_id, str):
-        element_id = int(element_id)
-    assert (
-        font_size_delta is None or abs(font_size_delta) < 8
-    ), "The font size delta is too large, please check the font size delta."
-    if font_size_delta is not None:
-        font_size_delta = Pt(font_size_delta)
-    shape = element_index(slide, element_id)
-    assert (
-        shape.text_frame.is_textframe
-    ), "The element does not have a text frame, please check the element id and type of element."
-    shape._closures["style"].append(
-        Closure(
-            partial(
-                set_font,
-                bold,
-                font_size_delta,
-                horizontal_align,
-                vertical_align,
-            ),
-        )
-    )
-
-
-def set_element_layout(
-    slide: SlidePage,
-    element_id: int,
-    left_delta: int = None,
-    right_delta: int = None,
-    top_delta: int = None,
-    bottom_delta: int = None,
-):
-    """
-    Adjust the size or position of a shape using percentages of the page dimensions, the range of delta is [-30, 30].
-    Example:
-    >>> set_element_layout(1, left_delta=5, right_delta=5)  # Move left and right by 5% of page width
-    >>> set_element_layout(2, top_delta=10, bottom_delta=10)  # Move top and bottom by 10% of page height
-    """
-    if isinstance(element_id, str):
-        element_id = int(element_id)
-    slide_width, slide_height = slide.slide_width, slide.slide_height
-    for width_delta in [left_delta, right_delta]:
-        assert (
-            width_delta is None or abs(width_delta) < 30
-        ), "The width delta is too large, please check the width delta."
-        if width_delta is not None:
-            width_delta = (width_delta / 100) * slide_width
-    for height_delta in [top_delta, bottom_delta]:
-        assert (
-            height_delta is None or abs(height_delta) < 30
-        ), "The height delta is too large, please check the height delta."
-        if height_delta is not None:
-            height_delta = (height_delta / 100) * slide_height
-
-    shape = element_index(slide, element_id)
-    shape._closures["style"].append(
-        Closure(partial(set_size, left_delta, right_delta, top_delta, bottom_delta))
-    )
-
-
 class API_TYPES(Enum):
     Agent = [
         del_span,
@@ -403,11 +324,6 @@ class API_TYPES(Enum):
         clone_paragraph,
         replace_span,
         replace_image,
-    ]
-
-    Typographer = [
-        set_font_style,
-        set_element_layout,
     ]
 
     @classmethod
