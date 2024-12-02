@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
-from functools import partial
 
 import jsonlines
 import PIL.Image
@@ -18,16 +17,8 @@ from rich import print
 from apis import API_TYPES, CodeExecutor
 from llms import Role
 from model_utils import get_text_embedding
-from presentation import Closure, Presentation, SlidePage
-from utils import (
-    Config,
-    get_slide_content,
-    pexists,
-    pjoin,
-    ppt_to_images,
-    prepare_shape_label,
-    tenacity,
-)
+from presentation import Presentation, SlidePage
+from utils import Config, get_slide_content, pexists, pjoin, tenacity
 
 
 @dataclass
@@ -270,49 +261,8 @@ class PPTCrew(PPTGen):
                     f"Failed to generate slide, tried too many times at editing\ntraceback: {feedback[1]}"
                 )
             edit_actions = self.staffs["coder"].retry(*feedback, error_idx + 1)
-        edited_image = self._build_slide(edited_slide, temp_dir.name)
-        return self.style_adjusting(edited_slide, edited_image, code_executor)
-
-    def style_adjusting(
-        self, edited_slide: SlidePage, edited_image: str, code_executor: CodeExecutor
-    ):
-        if "typographer" not in self.staffs:
-            return edited_slide
-
-        assert pexists(edited_image), "Edited image not found"
-        typography_actions = self.staffs["typographer"](
-            api_docs=code_executor.get_apis_docs(API_TYPES.Typographer.value),
-            images=edited_image,
-        )
-        for error_idx in range(self.retry_times):
-            styled_slide = deepcopy(edited_slide)
-            feedback = code_executor.execute_actions(
-                typography_actions, styled_slide, found_code=True
-            )
-            if feedback is None:
-                return styled_slide
-            if error_idx == self.retry_times - 1:
-                raise Exception(
-                    f"Failed to generate slide, tried too many times at styling\ntraceback: {feedback[1]}"
-                )
-            typography_actions = self.staffs["typographer"].retry(
-                *feedback, error_idx + 1
-            )
-
-    def _build_slide(self, slide: SlidePage, temp_dir: str):
-        self.empty_prs.clear_slides()
-        for shape in slide:
-            shape._closures["style"].append(
-                Closure(partial(prepare_shape_label, shape.shape_idx))
-            )
-        self.empty_prs.build_slide(slide)
-        for shape in slide:
-            shape._closures["style"].clear()
-        if "typographer" in self.staffs:
-            self.empty_prs.prs.save(temp_dir + "/temp.pptx")
-            ppt_to_images(temp_dir + "/temp.pptx", temp_dir)
-            assert len(os.listdir(temp_dir)) == 2
-            return temp_dir + "/slide_0001.jpg"
+        self.empty_prs.build_slide(edited_slide)
+        return edited_slide
 
     def _prepare_schema(self, content_schema: dict):
         old_data = {}

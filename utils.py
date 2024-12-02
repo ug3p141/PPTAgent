@@ -11,9 +11,6 @@ import Levenshtein
 from lxml import etree
 from pdf2image import convert_from_path
 from pptx.dml.color import RGBColor
-from pptx.dml.fill import _NoFill, _NoneFill
-from pptx.enum.shapes import MSO_SHAPE_TYPE
-from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml import parse_xml
 from pptx.shapes.base import BaseShape
 from pptx.shapes.group import GroupShape
@@ -36,27 +33,6 @@ FONT_LEN = Pt(20)
 def get_font_pptcstyle(font: dict):
     font = SimpleNamespace(**font)
     return f"Font Style: bold={font.bold}, italic={font.italic}, underline={font.underline}, size={font.size}pt, color={font.color}, font style={font.name}\n"
-
-
-def prepare_shape_label(shape_idx: int, shape: BaseShape):
-    shape.line.color.rgb = BLACK
-    shape.line.width = BORDER_LEN
-    left = shape.left - BORDER_LEN + BORDER_OFFSET
-    top = shape.top + shape.height + BORDER_LEN - LABEL_LEN - BORDER_OFFSET * 2
-    textbox = shape._parent.add_textbox(left, top, LABEL_LEN, LABEL_LEN)
-    textbox.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
-    textbox.fill.solid()
-    textbox.fill.fore_color.rgb = (
-        YELLOW if shape.shape_type != MSO_SHAPE_TYPE.PICTURE else BLUE
-    )
-
-    p = textbox.text_frame.paragraphs[0]
-    p.text = str(shape_idx)
-    p.alignment = PP_ALIGN.CENTER
-    p.font.size = FONT_LEN
-    p.font.bold = True
-    p.font.fill.solid()
-    p.font.fill.fore_color.rgb = BLACK
 
 
 def get_font_style(font: dict):

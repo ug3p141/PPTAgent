@@ -17,7 +17,6 @@ from rich import print
 import llms
 from crawler import topics
 from experiments import get_setting
-from pptgen import get_slide_content
 from presentation import Picture, Presentation
 from utils import Config, older_than, pexists, pjoin, ppt_to_images
 

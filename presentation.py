@@ -1,10 +1,8 @@
 import traceback
 from dataclasses import dataclass
-from types import SimpleNamespace
-from typing import Callable, Literal
+from typing import Callable
 
 from pptx import Presentation as PPTXPre
-from pptx.chart.chart import Chart as PPTXChart
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.oxml import parse_xml
 from pptx.shapes.autoshape import Shape as PPTXAutoShape
@@ -14,7 +12,6 @@ from pptx.shapes.group import GroupShape as PPTXGroupShape
 from pptx.shapes.picture import Picture as PPTXPicture
 from pptx.shapes.placeholder import PlaceholderPicture, SlidePlaceholder
 from pptx.slide import Slide as PPTXSlide
-from pptx.table import Table as PPTXTable
 from pptx.text.text import _Paragraph, _Run
 from rich import print
 

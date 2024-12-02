@@ -3,18 +3,16 @@ import os
 from copy import deepcopy
 
 import numpy as np
-import pypdfium2  # noqa
 import torch
 import torchvision.transforms as T
 from FlagEmbedding import BGEM3FlagModel
-from jinja2 import Template
 from marker.convert import convert_single_pdf
 from PIL import Image
 from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoFeatureExtractor, AutoModel
 
 from presentation import Presentation
-from utils import IMAGE_EXTENSIONS, pjoin, tenacity
+from utils import IMAGE_EXTENSIONS, pjoin
 
 device_count = torch.cuda.device_count()
 
