@@ -33,7 +33,7 @@ EVAL_MODELS = [
 # 1: w/o schema induction: 只提供old data 的值，别的都不提供
 # 2. w/o decoupling: pptagent
 # 3: w/o html: use pptc
-# 5. w/o comman generation? 给他新旧的值的对比
+# 4. w/o comman generation? 给他新旧的值的对比
 
 AGENT_CLASS = {
     -1: PPTCrew,

@@ -1,8 +1,6 @@
 __pycache__
 data
 .vscode
-*.ppt*
-*.html*
 *DS_Store*
 *test*
 *egg-info
