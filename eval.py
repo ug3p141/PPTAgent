@@ -21,15 +21,18 @@ from presentation import Picture, Presentation
 from utils import Config, older_than, pexists, pjoin, ppt_to_images
 
 fid.tqdm = lambda x: x
+judges = [
+    (llms.qwen2_5, llms.qwen_vl, "qwen"),
+    (llms.gpt4omini, llms.gpt4omini, "gpt4omini"),
+    (llms.gpt4o, llms.gpt4o, "gpt4o"),
+]
 
 
 def eval_general(presentations: list[Presentation], evals: dict[str, list[int]]):
     for prs in presentations:
         if prs.source_file not in evals:
             pages = len(prs)
-            character = sum(
-                [len(slide.to_text(show_image=False)) for slide in prs.slides]
-            )
+            character = sum([len(slide.to_text()) for slide in prs.slides])
             figures = sum(
                 [len(list(slide.shape_filter(Picture))) for slide in prs.slides]
             )
@@ -62,23 +65,34 @@ def eval_ppt(
 ):
     vision_scorer = open("prompts/ppteval_style.txt", "r").read()
     text_scorer = open("prompts/ppteval_content.txt", "r").read()
+    logic_scorer = Template(open("prompts/ppteval_coherence.txt", "r").read())
+    ppt_extractor = Template(open("prompts/ppteval_extract.txt", "r").read())
+
     for slide_image_folder in slide_images_folders:
         for slide_image in glob(pjoin(slide_image_folder, "slide_*.jpg")):
             if slide_image not in evals["vision"]:
                 evals["vision"][slide_image] = llms.vision_model(
                     vision_scorer, slide_image, return_json=True
                 )
+
             if slide_image not in evals["content"]:
                 evals["content"][slide_image] = llms.vision_model(
                     text_scorer, slide_image, return_json=True
                 )
 
-    # 可以尝试改成使用多轮来得到一个最终分数
-    logic_scorer = Template(open("prompts/ppteval_logic.txt", "r").read())
     for presentation in presentations:
         if presentation.source_file not in evals["logic"]:
+            dst = pjoin(os.path.dirname(presentation.source_file), "extracted.json")
+            if not pexists(dst):
+                extracted = llms.language_model(
+                    ppt_extractor.render(presentation=presentation.to_text()),
+                    return_json=True,
+                )
+                json.dump(extracted, open(dst, "w"), indent=4)
+            else:
+                extracted = json.load(open(dst))
             evals["logic"][presentation.source_file] = llms.language_model(
-                logic_scorer.render(presentation=presentation.to_text()),
+                logic_scorer.render(presentation=extracted),
                 return_json=True,
             )
 
@@ -87,20 +101,19 @@ def eval_ppt(
 
 # ppt eval
 def eval_experiment(
-    agent_class: str,
     setting_id: int,
-    setting_name: str,
+    judge_idx: int,
+    ablation_id: int = -1,
+    setting_name: str = None,
     thread_num: int = 8,
     general_eval: bool = True,
     ppt_eval: bool = True,
     fid_eval: bool = True,
 ):
     # 这里会设置模型
-    s = get_setting(agent_class, setting_id)
+    s = get_setting(setting_id, ablation_id)
     setting = setting_name or s
-    llms.language_model = llms.gpt4o
-    llms.vision_model = llms.gpt4o
-    judge_name = "gpt4o+gpt4o"
+    llms.language_model, llms.vision_model, judge_name = judges[judge_idx]
 
     eval_file = pjoin("data", "eval", f"{setting}_{judge_name}.json")
     if pexists(eval_file):
@@ -218,20 +231,36 @@ if __name__ == "__main__":
             pptx2images,
         )
     else:
-        # setting dimension file: eval
-        llms.language_model = llms.gpt4o
-        llms.vision_model = llms.gpt4o
+        shutil.rmtree("human_eval/scores", ignore_errors=True)
         config = Config("/tmp")
-        judge_name = "gpt4o+gpt4o"
+        judge_idx = 0
+        llms.language_model, llms.vision_model, judge_name = judges[judge_idx]
         eval_file = f"human_eval/ppt_eval_{judge_name}.json"
         evals = defaultdict(dict)
         if os.path.exists(eval_file):
             evals |= json.load(open(eval_file))
-        for setting in ["baseline-gpt", "pptagent-real"]:  # os.listdir("human_eval"):
-            test_folders = sorted(glob(f"human_eval/{setting}/*"))[:3]
+        for setting in [
+            "baseline-gpt",
+            "pptagent-qwen",
+            "pptagent-real",
+        ]:  # os.listdir("human_eval"):
+            slide_folders = sorted(glob(f"human_eval/{setting}/*"))
             presentations = [
                 Presentation.from_file(pjoin(i, "final.pptx"), config)
-                for i in test_folders
+                for i in slide_folders
             ]
-            eval_ppt(presentations, test_folders, evals)
-        json.dump(evals, open(eval_file, "w"), indent=4, ensure_ascii=False)
+            eval_ppt(presentations, slide_folders, evals)
+        json.dump(evals, open(eval_file, "w"), indent=4)
+        for dimension, scores in evals.items():
+            for filename, score in scores.items():
+                try:
+                    dst = pjoin(
+                        f"human_eval/scores_{judge_name}",
+                        dimension,
+                        str(score["score"]),
+                    )
+                except:
+                    print(dimension, filename, score)
+                os.makedirs(dst, exist_ok=True)
+                new_filename = filename.replace("human_eval/", "").replace("/", "_")
+                shutil.copy(filename, pjoin(dst, new_filename))

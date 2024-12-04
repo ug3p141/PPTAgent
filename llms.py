@@ -88,7 +88,13 @@ class LLM:
             result = run_async(self._run_batch(system + history + message, delay_batch))
             if delay_batch:
                 return
-            response = result.to_dict()["result"][0]["choices"][0]["message"]["content"]
+            try:
+                response = result.to_dict()["result"][0]["choices"][0]["message"][
+                    "content"
+                ]
+            except Exception as e:
+                print("Failed to get response from batch")
+                raise e
         elif self._use_openai:
             completion = self.client.chat.completions.create(
                 model=self.model, messages=system + history + message
@@ -337,6 +343,7 @@ class Role:
 
 
 gpt4o = LLM(model="gpt-4o-2024-08-06", use_batch=True)
+gpt4omini = LLM(model="gpt-4o-mini-2024-07-18", use_batch=True)
 qwen2_5 = LLM(model="Qwen2.5-72B-Instruct", api_base="http://127.0.0.1:8000/v1")
 qwen_coder = LLM(
     model="Qwen2.5-Coder-32B-Instruct", api_base="http://124.16.138.143:8008/v1"

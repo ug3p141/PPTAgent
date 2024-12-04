@@ -1,13 +1,13 @@
 __pycache__
 data
 .vscode
+*_cn.txt
 *DS_Store*
 *test*
 *egg-info
 runs
 resource
 node_modules
-*txt
 frontend/.yarn
 frontend/.pnp.loader.mjs
 frontend/.pnp.cjs

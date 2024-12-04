@@ -42,8 +42,8 @@ def rm_folder(folder: str):
                 pass
 
 
-def process_filetype(file_type: str, func: callable, thread_num: int):
-    folders = glob.glob(f"data/*/{file_type}/*")
+def process_filetype(file_type: str, func: callable, thread_num: int, topic="*"):
+    folders = glob.glob(f"data/{topic}/{file_type}/*")
     progress_bar = tqdm(total=len(folders), desc=f"processing {file_type}")
 
     def process_folder(folder, *args, **kwargs):

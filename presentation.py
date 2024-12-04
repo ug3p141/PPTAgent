@@ -766,18 +766,21 @@ class SlidePage:
         return "\n".join([shape.to_pptc() for shape in self.shapes])
 
     def to_text(self, show_image: bool = True) -> str:
-        return "\n".join(
+        text_content = "\n".join(
             [
                 shape.text_frame.text.strip()
                 for shape in self.shapes
                 if shape.text_frame.is_textframe
             ]
-            + [
-                "Image: " + shape.caption
-                for shape in self.shape_filter(Picture)
-                if show_image
-            ]
         )
+        if show_image:
+            for image in self.shape_filter(Picture):
+                if not image.caption:
+                    raise ValueError(
+                        f"caption not found for picture {image.shape_idx} of slide {image.slide_idx}"
+                    )
+                text_content += "\n" + "Image: " + image.caption
+        return text_content
 
     @property
     def text_length(self):
@@ -847,7 +850,9 @@ class Presentation:
             except Exception as e:
                 error_history.append((slide_idx, str(e)))
                 if config.DEBUG:
-                    print(f"Warning in slide {slide_idx}: {traceback.format_exc()}")
+                    print(
+                        f"Warning in slide {slide_idx} of {file_path}: {traceback.format_exc()}"
+                    )
 
         return cls(
             slides, error_history, slide_width, slide_height, file_path, num_pages

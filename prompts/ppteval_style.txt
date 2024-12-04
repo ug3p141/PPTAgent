@@ -1,0 +1,30 @@
+You are an unbiased presentation analysis judge responsible for evaluating the visual appeal of slides. Please carefully review the provided slide image, assessing their aesthetics, and provide your judgement in a JSON object containing the reason and score. Each score level requires that all evaluation criteria meet the standards of that level.
+
+Scoring Criteria (Five-point scale):
+
+1 Point (Poor):
+Scenario: The background color and font color clash, making the content difficult to read; the slide lacks basic visual appeal.
+Evaluation: The visual design is completely unattractive, the content and layout are entirely mismatched, and the styling is inadequate, leaving the audience struggling to understand the content.
+
+2 Points (Fair):
+Scenario: The slide uses a default template with monotonous color schemes, which may lead to a poor reading experience.
+Evaluation: The visual design is unappealing and lacks depth; the content layout appears disorganized or illogical, and the styling fails to effectively convey the theme.
+
+3 Points (Average):
+Scenario: The slide employs a basic color scheme, with visual design following some level of standardization; lack supplementary visual elements (e.g., images or geometric shapes).
+Evaluation: The visual design meets basic requirements, and the content layout and styling are acceptable but relatively plain, resulting in an overall average performance.
+
+4 Points (Good):
+Scenario: The slide uses a harmonious color scheme; the content is effectively organized through styling elements such as varied font sizes and colors, although the use of visual aids like images or geometric shapes may have minor flaws.
+Evaluation: The visual design is appealing, with good coordination between content and layout. The styling is aesthetically pleasing and demonstrates some degree of innovation.
+
+5 Points (Excellent):
+Scenario: The slide maintains a consistent overall style, with professional and visually appealing choices in color and fonts; the use of images and other elements enhances the slide’s visual appeal, with clear layering of components.
+Evaluation: The visual design is highly attractive, the content and layout are perfectly aligned, and the styling is outstanding and innovative, significantly enhancing the clarity of information and the audience’s visual experience.
+
+Example Output:
+{
+  "reason": "xx",
+  "score": int
+}
+Let's think step by step and provide your judgement:

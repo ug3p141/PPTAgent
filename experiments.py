@@ -38,7 +38,7 @@ EVAL_MODELS = [
 AGENT_CLASS = {
     -1: PPTCrew,
     0: PPTCrew_wo_LayoutInduction,
-    1: PPTCrew_wo_SchemaInduction,
+    1: PPTCrew_wo_SchemaInduction,  # 好像有点问题
     2: PPTCrew_wo_Decoupling,
     3: PPTCrew_wo_HTML,
 }
@@ -109,6 +109,7 @@ def generate_pres(
     setting_name: str = None,
     thread_num: int = 16,
     debug: bool = False,
+    topic: str = "*",
 ):
     agent_class, s = get_setting(setting_id, ablation_id)
     print("generating slides using:", s)
@@ -119,7 +120,7 @@ def generate_pres(
         setting,
         debug,
     )
-    process_filetype("pptx", generate, thread_num)
+    process_filetype("pptx", generate, thread_num, topic)
 
 
 if __name__ == "__main__":

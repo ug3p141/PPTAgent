@@ -75,10 +75,10 @@ def runs_merge(paragraph: _Paragraph):
 def older_than(filepath, seconds: int = 10, wait: bool = False):
     if not os.path.exists(filepath):
         while wait:
+            print("waiting for:", filepath)
             sleep(1)
             if os.path.exists(filepath):
-                print("waiting for:", filepath)
-                sleep(60)
+                sleep(seconds)
                 return True
         return False
     file_creation_time = os.path.getctime(filepath)
