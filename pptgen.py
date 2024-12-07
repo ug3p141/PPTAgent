@@ -1,6 +1,5 @@
 import json
 import os
-import tempfile
 import traceback
 from abc import ABC, abstractmethod
 from copy import deepcopy
@@ -218,6 +217,7 @@ class PPTGen(ABC):
             )
         except Exception as e:
             print(f"generate slide {slide_idx} failed: {e}")
+            print(traceback.format_exc())
             print(self.config.RUN_DIR)
 
 
@@ -225,6 +225,7 @@ class PPTCrew(PPTGen):
     roles: list[str] = ["editor", "coder"]
 
     # 还是把它加上
+    # layout 的名字应该也要输入
     def synergize(
         self,
         template: dict,
@@ -232,7 +233,6 @@ class PPTCrew(PPTGen):
         code_executor: CodeExecutor,
         images_info: str,
     ) -> SlidePage:
-        temp_dir = tempfile.TemporaryDirectory()
         content_schema = template["content_schema"]
         old_data = self._prepare_schema(content_schema)
         editor_output = self.staffs["editor"](

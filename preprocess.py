@@ -199,9 +199,8 @@ def prepare_ppt_folder(ppt_folder: str, text_model: BGEM3FlagModel, image_model)
 def prepare_induction(induct_id: int, wait: bool = False):
     induct_llms = [
         (llms.qwen2_5, llms.qwen_vl),
-        (llms.qwen2_5, llms.gpt4o),
-        (llms.gpt4o, llms.qwen_vl),
         (llms.gpt4o, llms.gpt4o),
+        (llms.gpt4omini, llms.gpt4omini),
     ]
 
     def do_induct(llm: list[llms.LLM], ppt_folder: str, rank: int):

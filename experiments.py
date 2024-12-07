@@ -25,7 +25,9 @@ from utils import Config, older_than, pbasename, pexists, pjoin
 EVAL_MODELS = [
     (llms.qwen2_5, llms.qwen2_5, llms.qwen_vl),
     (llms.gpt4o, llms.gpt4o, llms.gpt4o),
+    (llms.gpt4omini, llms.gpt4omini, llms.gpt4omini),
     (llms.qwen2_5, llms.qwen_coder, llms.qwen_vl),
+    # smaller models
 ]
 
 # ablation
@@ -45,15 +47,18 @@ AGENT_CLASS = {
 
 
 def get_setting(setting_id: int, ablation_id: int):
+    assert ablation_id in AGENT_CLASS, f"ablation_id {ablation_id} not in {AGENT_CLASS}"
+    assert (
+        ablation_id == -1 or setting_id == 0
+    ), "ablation_id == -1 only when setting_id != 0"
     language_model, code_model, vision_model = EVAL_MODELS[setting_id]
     agent_class = AGENT_CLASS.get(ablation_id)
     llms.language_model = language_model
     llms.code_model = code_model
     llms.vision_model = vision_model
     if ablation_id == -1:
-        setting_name = "PPTCrew-" + "+".join(
-            re.search(r"^(.*?)-\d{2}", llm.model).group(1)
-            for llm in [language_model, code_model, vision_model]
+        setting_name = "PPTCrew-" + llms.get_simple_modelname(
+            [language_model, code_model, vision_model]
         )
     else:
         setting_name = agent_class.__name__
@@ -75,11 +80,8 @@ def do_generate(
         app_config,
     )
     ImageLabler(presentation, app_config).caption_images()
-    model_identifier = "+".join(
-        (
-            llms.language_model.model.split("-")[0],
-            llms.vision_model.model.split("-")[0],
-        )
+    model_identifier = llms.get_simple_modelname(
+        [llms.language_model, llms.vision_model]
     )
     induct_cache = pjoin(
         app_config.RUN_DIR, "template_induct", model_identifier, "induct_cache.json"

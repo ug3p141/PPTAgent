@@ -765,7 +765,7 @@ class SlidePage:
     def to_pptc(self):
         return "\n".join([shape.to_pptc() for shape in self.shapes])
 
-    def to_text(self, show_image: bool = True) -> str:
+    def to_text(self, show_image: bool = False) -> str:
         text_content = "\n".join(
             [
                 shape.text_frame.text.strip()

@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import re
 from dataclasses import asdict, dataclass
 from math import ceil
 
@@ -340,6 +341,12 @@ class Role:
         if self.return_json:
             response = get_json_from_response(response)
         return response
+
+
+def get_simple_modelname(llms: list[LLM]):
+    if isinstance(llms, LLM):
+        llms = [llms]
+    return "+".join(re.search(r"^(.*?)-\d{2}", llm.model).group(1) for llm in llms)
 
 
 gpt4o = LLM(model="gpt-4o-2024-08-06", use_batch=True)

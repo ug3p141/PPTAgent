@@ -1,5 +1,4 @@
 import random
-import tempfile
 from copy import deepcopy
 
 from apis import API_TYPES, CodeExecutor
@@ -19,7 +18,6 @@ class PPTCrew_wo_Decoupling(PPTCrew):
         code_executor: CodeExecutor,
         image_info: str,
     ) -> SlidePage:
-        temp_dir = tempfile.TemporaryDirectory()
         schema = template["content_schema"]
         edit_actions = self.staffs["agent"](
             schema=schema,
@@ -42,8 +40,8 @@ class PPTCrew_wo_Decoupling(PPTCrew):
                     f"Failed to generate slide, tried too many times at editing\ntraceback: {feedback[1]}"
                 )
             edit_actions = self.staffs["agent"].retry(*feedback, error_idx + 1)
-        edited_image = self._build_slide(edited_slide, temp_dir.name)
-        return self.style_adjusting(edited_slide, edited_image, code_executor)
+        self.empty_prs.build_slide(edited_slide)
+        return edited_slide
 
 
 class PPTCrew_wo_SchemaInduction(PPTCrew):
@@ -60,9 +58,11 @@ class PPTCrew_wo_SchemaInduction(PPTCrew):
         code_executor: CodeExecutor,
         images_info: str,
     ) -> SlidePage:
-        temp_dir = tempfile.TemporaryDirectory()
         content_schema = template["content_schema"]
-        new_schema = {k: v["data"] for k, v in enumerate(content_schema.values())}
+        new_schema = {}
+        for k, v in enumerate(content_schema.values()):
+            v.pop("description")
+            new_schema[str(k)] = v
         old_data = self._prepare_schema(new_schema)
         editor_output = self.staffs["editor"](
             schema=old_data,
@@ -71,12 +71,8 @@ class PPTCrew_wo_SchemaInduction(PPTCrew):
             text=slide_content,
             images_info=images_info,
         )
-        new_editor_output = {
-            k: v["data"] for k, v in zip(content_schema.keys(), editor_output)
-        }
-        command_list = self._generate_commands(
-            new_editor_output, content_schema, old_data
-        )
+        new_editor_output = {str(k): {"data": v} for k, v in editor_output.items()}
+        command_list = self._generate_commands(new_editor_output, new_schema, old_data)
 
         edit_actions = self.staffs["coder"](
             api_docs=code_executor.get_apis_docs(API_TYPES.Agent.value),
@@ -95,8 +91,8 @@ class PPTCrew_wo_SchemaInduction(PPTCrew):
                     f"Failed to generate slide, tried too many times at editing\ntraceback: {feedback[1]}"
                 )
             edit_actions = self.staffs["coder"].retry(*feedback, error_idx + 1)
-        edited_image = self._build_slide(edited_slide, temp_dir.name)
-        return self.style_adjusting(edited_slide, edited_image, code_executor)
+        self.empty_prs.build_slide(edited_slide)
+        return edited_slide
 
 
 # random layout

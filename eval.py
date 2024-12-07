@@ -3,7 +3,7 @@ import os
 import shutil
 import sys
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from glob import glob
 from tempfile import TemporaryDirectory
 from time import sleep
@@ -62,25 +62,29 @@ def eval_ppt(
     presentations: list[Presentation],
     slide_images_folders: list[str],
     evals: dict[str, dict[str, list[dict]]],
+    thread_num: int,
 ):
     vision_scorer = open("prompts/ppteval_style.txt", "r").read()
     text_scorer = open("prompts/ppteval_content.txt", "r").read()
     logic_scorer = Template(open("prompts/ppteval_coherence.txt", "r").read())
     ppt_extractor = Template(open("prompts/ppteval_extract.txt", "r").read())
 
+    slide_images = []
     for slide_image_folder in slide_images_folders:
-        for slide_image in glob(pjoin(slide_image_folder, "slide_*.jpg")):
-            if slide_image not in evals["vision"]:
-                evals["vision"][slide_image] = llms.vision_model(
-                    vision_scorer, slide_image, return_json=True
-                )
+        slide_images.extend(glob(pjoin(slide_image_folder, "slide_*.jpg")))
 
-            if slide_image not in evals["content"]:
-                evals["content"][slide_image] = llms.vision_model(
-                    text_scorer, slide_image, return_json=True
-                )
+    def score_slide(slide_image):
+        if slide_image not in evals["vision"]:
+            evals["vision"][slide_image] = llms.vision_model(
+                vision_scorer, slide_image, return_json=True
+            )
 
-    for presentation in presentations:
+        if slide_image not in evals["content_5"]:
+            evals["content_5"][slide_image] = llms.vision_model(
+                text_scorer, slide_image, return_json=True
+            )
+
+    def score_logic(presentation):
         if presentation.source_file not in evals["logic"]:
             dst = pjoin(os.path.dirname(presentation.source_file), "extracted.json")
             if not pexists(dst):
@@ -95,6 +99,15 @@ def eval_ppt(
                 logic_scorer.render(presentation=extracted),
                 return_json=True,
             )
+
+    with ThreadPoolExecutor(thread_num) as executor:
+        futures = [
+            executor.submit(score_slide, slide_image) for slide_image in slide_images
+        ]
+        futures.extend(
+            executor.submit(score_logic, presentation) for presentation in presentations
+        )
+        wait(futures)
 
     return evals
 
@@ -150,7 +163,7 @@ def eval_experiment(
         if "ppteval" not in eval_stats:
             eval_stats["ppteval"] = defaultdict(dict)
         slide_image_folders = glob(f"data/*/pptx/*/final_images/{setting}/*")
-        eval_ppt(presentations, slide_image_folders, eval_stats["ppteval"])
+        eval_ppt(presentations, slide_image_folders, eval_stats["ppteval"], thread_num)
 
     json.dump(eval_stats, open(eval_file, "w"), indent=4)
 
@@ -178,7 +191,7 @@ def dataset_stat():
         num_ppts = 10
         for ppt_folder in glob(f"data/{topic}/pptx/*"):
             presentation = Presentation.from_file(
-                pjoin(ppt_folder, "original.pptx"), config
+                pjoin(ppt_folder, "source.pptx"), config
             )
             ppt_stat[ppt_folder] = sum(
                 [len(slide.to_text()) for slide in presentation.slides]
@@ -192,10 +205,20 @@ def dataset_stat():
         avg_ppt_text_len = ppt_text_len / num_ppts
         avg_ppt_images = ppt_images / num_ppts
         print(
+            "topic",
+            "avg_pdf_text_len",
+            "avg_pdf_images",
+            "avg_ppt_pages",
+            "avg_ppt_images",
+            "avg_ppt_text_len",
+        )
+        print(
             f"{topic}: {avg_pdf_text_len:.2f}, {avg_pdf_images:.2f}, {avg_ppt_pages:.2f}, {avg_ppt_images:.2f}, {avg_ppt_text_len:.2f}"
         )
 
-    json.dump({"pdf": pdf_stat, "ppt": ppt_stat}, open("data/stat.json", "w"), indent=4)
+    json.dump(
+        {"pdf": pdf_stat, "ppt": ppt_stat}, open("data/eval/stat.json", "w"), indent=4
+    )
 
 
 def pptx2images(settings: str = "*"):
@@ -231,9 +254,8 @@ if __name__ == "__main__":
             pptx2images,
         )
     else:
-        shutil.rmtree("human_eval/scores", ignore_errors=True)
         config = Config("/tmp")
-        judge_idx = 0
+        judge_idx = 1
         llms.language_model, llms.vision_model, judge_name = judges[judge_idx]
         eval_file = f"human_eval/ppt_eval_{judge_name}.json"
         evals = defaultdict(dict)
@@ -244,13 +266,15 @@ if __name__ == "__main__":
             "pptagent-qwen",
             "pptagent-real",
         ]:  # os.listdir("human_eval"):
-            slide_folders = sorted(glob(f"human_eval/{setting}/*"))
+            print(f"evaluating {setting} under {judge_name}")
+            slide_folders = sorted(glob(f"human_eval/{setting}/*"))[:5]
             presentations = [
                 Presentation.from_file(pjoin(i, "final.pptx"), config)
                 for i in slide_folders
             ]
-            eval_ppt(presentations, slide_folders, evals)
-        json.dump(evals, open(eval_file, "w"), indent=4)
+            eval_ppt(presentations, slide_folders, evals, 1)
+            json.dump(evals, open(eval_file, "w"), indent=4)
+        shutil.rmtree(f"human_eval/scores_{judge_name}", ignore_errors=True)
         for dimension, scores in evals.items():
             for filename, score in scores.items():
                 try:
@@ -263,4 +287,11 @@ if __name__ == "__main__":
                     print(dimension, filename, score)
                 os.makedirs(dst, exist_ok=True)
                 new_filename = filename.replace("human_eval/", "").replace("/", "_")
-                shutil.copy(filename, pjoin(dst, new_filename))
+                if dimension == "logic":
+                    filedir = os.path.dirname(filename)
+                    shutil.copy(
+                        pjoin(filedir, "extracted.json"),
+                        pjoin(dst, new_filename.replace(".pptx", ".json")),
+                    )
+                else:
+                    shutil.copy(filename, pjoin(dst, new_filename))
