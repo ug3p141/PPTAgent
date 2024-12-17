@@ -125,7 +125,7 @@ def element_index(slide: SlidePage, element_id: int):
     for shape in slide:
         if shape.shape_idx == element_id:
             return shape
-    raise ValueError(f"Cannot find element {element_id}, is it deleted or not exist?")
+    raise IndexError(f"Cannot find element {element_id}, is it deleted or not exist?")
 
 
 def replace_run(paragraph_id: int, run_id: int, new_text: str, shape: BaseShape):
@@ -141,7 +141,7 @@ def clone_para(paragraph_id: int, shape: BaseShape):
 
 def del_run(paragraph_id: int, run_id: int, shape: BaseShape):
     para = shape.text_frame.paragraphs[paragraph_id]
-    run = para.runs[run_id]
+    run = runs_merge(para)[run_id]
     run._r.getparent().remove(run._r)
     if len(para.runs) == 0:
         para._element.getparent().remove(para._element)

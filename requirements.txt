@@ -1,5 +1,3 @@
-# conda install -c conda-forge poppler
-# binary: libreoffice
 git+https://github.com/Force1ess/python-pptx
 python-Levenshtein
 python-multipart
@@ -16,6 +14,7 @@ oaib
 json_repair
 timm
 einops
+evaluate
 vllm
 pillow
 googlesearch-python

@@ -13,6 +13,7 @@ from ablation import (
     PPTCrew_wo_HTML,
     PPTCrew_wo_LayoutInduction,
     PPTCrew_wo_SchemaInduction,
+    PPTCrew_wo_Structure,
 )
 from model_utils import get_text_model
 from multimodal import ImageLabler
@@ -21,11 +22,14 @@ from preprocess import process_filetype
 from presentation import Presentation
 from utils import Config, older_than, pbasename, pexists, pjoin
 
-# language_model vision_model code_model
+# language_model code_model vision_model
 EVAL_MODELS = [
     (llms.qwen2_5, llms.qwen2_5, llms.qwen_vl),
     (llms.gpt4o, llms.gpt4o, llms.gpt4o),
-    (llms.gpt4omini, llms.gpt4omini, llms.gpt4omini),
+    # gpt4o excel as MLLM
+    (llms.qwen_vl, llms.qwen_vl, llms.qwen_vl),
+    # code ability
+    (llms.qwen2_5, llms.qwen2_5_32, llms.qwen_vl),
     (llms.qwen2_5, llms.qwen_coder, llms.qwen_vl),
     # smaller models
 ]
@@ -35,14 +39,19 @@ EVAL_MODELS = [
 # 1: w/o schema induction: 只提供old data 的值，别的都不提供
 # 2. w/o decoupling: pptagent
 # 3: w/o html: use pptc
-# 4. w/o comman generation? 给他新旧的值的对比
+# 4: with gpt4o template
+# 5. w/o structure information
+# 6. retry 5 times
 
 AGENT_CLASS = {
     -1: PPTCrew,
     0: PPTCrew_wo_LayoutInduction,
-    1: PPTCrew_wo_SchemaInduction,  # 好像有点问题
+    1: PPTCrew_wo_SchemaInduction,
     2: PPTCrew_wo_Decoupling,
     3: PPTCrew_wo_HTML,
+    4: PPTCrew,
+    5: PPTCrew_wo_Structure,
+    6: PPTCrew,
 }
 
 
@@ -60,15 +69,25 @@ def get_setting(setting_id: int, ablation_id: int):
         setting_name = "PPTCrew-" + llms.get_simple_modelname(
             [language_model, code_model, vision_model]
         )
+    elif ablation_id == 6:
+        setting_name = "PPTCrew_retry_5"
+        agent_class = partial(agent_class, retry_times=5)
     else:
         setting_name = agent_class.__name__
-    return agent_class, setting_name
+    model_identifier = llms.get_simple_modelname(
+        [llms.language_model, llms.vision_model]
+    )
+    if ablation_id == 4:
+        setting_name = "PPTCrew_with_gpt4o"
+        model_identifier = "gpt-4o+gpt-4o"
+    return agent_class, setting_name, model_identifier
 
 
 # 所有template要重新prepare一遍，除了qwen2.5+qwen_vl
 def do_generate(
     genclass: Type[PPTCrew],
     setting: str,
+    model_identifier: str,
     debug: bool,
     ppt_folder: str,
     thread_id: int,
@@ -80,9 +99,6 @@ def do_generate(
         app_config,
     )
     ImageLabler(presentation, app_config).caption_images()
-    model_identifier = llms.get_simple_modelname(
-        [llms.language_model, llms.vision_model]
-    )
     induct_cache = pjoin(
         app_config.RUN_DIR, "template_induct", model_identifier, "induct_cache.json"
     )
@@ -107,19 +123,20 @@ def do_generate(
 
 def generate_pres(
     setting_id: int = 0,
-    ablation_id: int = -1,
     setting_name: str = None,
-    thread_num: int = 16,
+    ablation_id: int = -1,
+    thread_num: int = 8,
     debug: bool = False,
     topic: str = "*",
 ):
-    agent_class, s = get_setting(setting_id, ablation_id)
-    print("generating slides using:", s)
-    setting = setting_name or s
+    agent_class, setting, model_identifier = get_setting(setting_id, ablation_id)
+    setting = setting_name or setting
+    print("generating slides using:", setting)
     generate = partial(
         do_generate,
         agent_class,
         setting,
+        model_identifier,
         debug,
     )
     process_filetype("pptx", generate, thread_num, topic)

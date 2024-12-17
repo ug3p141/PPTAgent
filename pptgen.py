@@ -208,9 +208,10 @@ class PPTGen(ABC):
         slide_content = f"Slide-{slide_idx+1} " + get_slide_content(
             self.doc_json, slide_title, slide
         )
+        template = deepcopy(self.slide_induction[slide["layout"]])
         try:
             return self.synergize(
-                deepcopy(self.slide_induction[slide["layout"]]),
+                template,
                 slide_content,
                 code_executor,
                 images_info,
@@ -256,12 +257,14 @@ class PPTCrew(PPTGen):
             feedback = code_executor.execute_actions(edit_actions, edited_slide)
             if feedback is None:
                 break
-            if error_idx == self.retry_times - 1:
+            if error_idx == self.retry_times:
                 raise Exception(
                     f"Failed to generate slide, tried too many times at editing\ntraceback: {feedback[1]}"
                 )
             edit_actions = self.staffs["coder"].retry(*feedback, error_idx + 1)
-        self.empty_prs.build_slide(edited_slide)
+        self.empty_prs.build_slide(
+            edited_slide
+        )  # if no three consecutive errors, means it error here
         return edited_slide
 
     def _prepare_schema(self, content_schema: dict):

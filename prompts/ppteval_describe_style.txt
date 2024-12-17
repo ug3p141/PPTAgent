@@ -1,0 +1,9 @@
+Please describe the input slide based on the following three dimensions:
+	1.	Visual Consistency
+Describe whether any style diminished the readability, like overlapping or low contrast.
+	2.	Color Scheme
+Analyze the use of colors in the slide, identifying the colors used and determining whether the design is monochromatic (black and white) or colorful (gray counts in).
+	3.	Use of Visual Elements
+Describe whether the slide include supporting visual elements, such as icons, backgrounds, images, or geometric shapes (rectangles, circles, etc.).
+
+Provide an objective and concise description without comments, focusing exclusively on the dimensions outlined above.

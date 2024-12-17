@@ -14,7 +14,7 @@ from tqdm import tqdm
 from transformers import CLIPModel, CLIPProcessor
 
 import llms
-from eval import eval_general, eval_ppt
+from evals import eval_general, eval_ppt
 from presentation import Presentation
 from utils import Config, edit_distance, ppt_to_images
 

@@ -22,3 +22,5 @@ Example Output:
   "reason": "xx",
   "score": int
 }
+Input: {{descr}}
+Please evaluate the slide step by step, ensuring your judgment strictly adheres to the scoring criteria.

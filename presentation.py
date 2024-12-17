@@ -91,6 +91,7 @@ class Paragraph:
         self.font = merge_dict(
             object_to_dict(paragraph.font), [run.font for run in self.runs]
         )
+        self.text = paragraph.text
 
     def to_html(self, style_args: StyleArg):
         if len(self.runs) == 0:

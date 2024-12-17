@@ -1,3 +1,4 @@
+import json
 import random
 from copy import deepcopy
 
@@ -5,7 +6,66 @@ from apis import API_TYPES, CodeExecutor
 from llms import Role
 from pptgen import PPTCrew
 from presentation import GroupShape, ShapeElement, SlidePage, TextFrame
-from utils import get_slide_content
+from utils import get_slide_content, pexists, pjoin, tenacity
+
+
+# random layout
+class PPTCrew_wo_Structure(PPTCrew):
+    def _hire_staffs(self, record_cost: bool, **kwargs) -> dict[str, Role]:
+        new_planner = "planner_wo_structure"
+        self.roles.append(new_planner)
+        super()._hire_staffs(record_cost, **kwargs)
+        self.staffs["planner"] = self.staffs.pop(new_planner)
+
+    @tenacity
+    def _generate_outline(self, num_slides: int):
+        outline_file = pjoin(self.config.RUN_DIR, "presentation_outline.json")
+        if pexists(outline_file):
+            outline = json.load(open(outline_file, "r"))
+        else:
+            outline = self.staffs["planner"](
+                num_slides=num_slides,
+                layouts="\n".join(
+                    set(self.slide_induction.keys()).difference(self.functional_keys)
+                ),
+                json_content=self.doc_json,
+                image_information=self.image_information,
+            )
+            outline = self._valid_outline(outline)
+            json.dump(
+                outline,
+                open(outline_file, "w"),
+                ensure_ascii=False,
+                indent=4,
+            )
+        return outline
+
+
+# random layout
+class PPTCrew_wo_LayoutInduction(PPTCrew):
+    def _generate_slide(self, slide_data, code_executor: CodeExecutor) -> SlidePage:
+        slide_idx, (slide_title, slide) = slide_data
+        images_info = "No Images"
+        if any(
+            [
+                i in slide["layout"]
+                for i in ["picture", "chart", "table", "diagram", "freeform"]
+            ]
+        ):
+            images_info = self.image_information
+        slide_content = f"Slide-{slide_idx+1} " + get_slide_content(
+            self.doc_json, slide_title, slide
+        )
+        try:
+            return self.synergize(
+                deepcopy(self.slide_induction[random.choice(self.layout_names)]),
+                slide_content,
+                code_executor,
+                images_info,
+            )
+        except Exception as e:
+            print(f"generate slide {slide_idx} failed: {e}")
+            return None
 
 
 class PPTCrew_wo_Decoupling(PPTCrew):
@@ -65,14 +125,13 @@ class PPTCrew_wo_SchemaInduction(PPTCrew):
             new_schema[str(k)] = v
         old_data = self._prepare_schema(new_schema)
         editor_output = self.staffs["editor"](
-            schema=old_data,
+            schema=new_schema,
             outline=self.simple_outline,
             metadata=self.metadata,
             text=slide_content,
             images_info=images_info,
         )
-        new_editor_output = {str(k): {"data": v} for k, v in editor_output.items()}
-        command_list = self._generate_commands(new_editor_output, new_schema, old_data)
+        command_list = self._generate_commands(editor_output, new_schema, old_data)
 
         edit_actions = self.staffs["coder"](
             api_docs=code_executor.get_apis_docs(API_TYPES.Agent.value),
@@ -93,33 +152,6 @@ class PPTCrew_wo_SchemaInduction(PPTCrew):
             edit_actions = self.staffs["coder"].retry(*feedback, error_idx + 1)
         self.empty_prs.build_slide(edited_slide)
         return edited_slide
-
-
-# random layout
-class PPTCrew_wo_LayoutInduction(PPTCrew):
-    def _generate_slide(self, slide_data, code_executor: CodeExecutor) -> SlidePage:
-        slide_idx, (slide_title, slide) = slide_data
-        images_info = "No Images"
-        if any(
-            [
-                i in slide["layout"]
-                for i in ["picture", "chart", "table", "diagram", "freeform"]
-            ]
-        ):
-            images_info = self.image_information
-        slide_content = f"Slide-{slide_idx+1} " + get_slide_content(
-            self.doc_json, slide_title, slide
-        )
-        try:
-            return self.synergize(
-                deepcopy(self.slide_induction[random.choice(self.layout_names)]),
-                slide_content,
-                code_executor,
-                images_info,
-            )
-        except Exception as e:
-            print(f"generate slide {slide_idx} failed: {e}")
-            return None
 
 
 def monkeypatch_render():

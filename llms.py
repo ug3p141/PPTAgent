@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import os
 import re
 from dataclasses import asdict, dataclass
 from math import ceil
@@ -57,11 +58,13 @@ class LLM:
         use_openai: bool = True,
         use_batch: bool = False,
     ) -> None:
-        if use_openai:
+        if use_openai and "OPENAI_API_KEY" in os.environ:
             self.client = OpenAI(base_url=api_base)
-        if use_batch:
+        if use_batch and "OPENAI_API_KEY" in os.environ:
             assert use_openai, "use_batch must be used with use_openai"
             self.oai_batch = Auto(loglevel=0)
+        if "OPENAI_API_KEY" not in os.environ:
+            print("Warning: no API key found")
         self.model = model
         self.api_base = api_base
         self._use_openai = use_openai
@@ -352,16 +355,20 @@ def get_simple_modelname(llms: list[LLM]):
 gpt4o = LLM(model="gpt-4o-2024-08-06", use_batch=True)
 gpt4omini = LLM(model="gpt-4o-mini-2024-07-18", use_batch=True)
 qwen2_5 = LLM(model="Qwen2.5-72B-Instruct", api_base="http://127.0.0.1:8000/v1")
+qwen2_5_32 = LLM(model="Qwen2.5-32B-Instruct", api_base="http://127.0.0.1:8000/v1")
+qwen_vl = LLM(model="Qwen2-VL-72B-Instruct", api_base="http://127.0.0.1:7999/v1")
 qwen_coder = LLM(
-    model="Qwen2.5-Coder-32B-Instruct", api_base="http://124.16.138.143:8008/v1"
+    model="Qwen2.5-Coder-32B-Instruct", api_base="http://127.0.0.1:8008/v1"
 )
-qwen_vl = LLM(model="Qwen2-VL-72B-Instruct", api_base="http://124.16.138.147:7999/v1")
+# intern_vl = LLM(model="InternVL2_5-78B", api_base="http://127.0.0.1:8009/v1")
+intern_vl = LLM(model="InternVL2_5-78B", api_base="http://124.16.138.144:8009/v1")
 
-language_model = gpt4o
-code_model = gpt4o
+language_model = qwen2_5
+code_model = qwen2_5
 vision_model = qwen_vl
 
 if __name__ == "__main__":
+    gpt4o = LLM(model="gpt-4o-2024-08-06")
     print(
         gpt4o(
             "who r u",
