@@ -1,7 +1,9 @@
 import json
-import re
+import os
+import shutil
 from functools import partial
 from glob import glob
+from time import sleep
 from typing import Type
 
 import func_argparse
@@ -20,7 +22,7 @@ from multimodal import ImageLabler
 from pptgen import PPTCrew
 from preprocess import process_filetype
 from presentation import Presentation
-from utils import Config, older_than, pbasename, pexists, pjoin
+from utils import Config, older_than, pbasename, pexists, pjoin, ppt_to_images
 
 # language_model code_model vision_model
 EVAL_MODELS = [
@@ -142,7 +144,33 @@ def generate_pres(
     process_filetype("pptx", generate, thread_num, topic)
 
 
+def pptx2images(settings: str = "*"):
+    while True:
+        for folder in glob(f"data/*/pptx/*/{settings}/*/history"):
+            folder = os.path.dirname(folder)
+            pptx = pjoin(folder, "final.pptx")
+            ppt_folder, setting, pdf = folder.rsplit("/", 2)
+            dst = pjoin(ppt_folder, "final_images", setting, pdf)
+
+            if not pexists(pptx):
+                if pexists(dst):
+                    print(f"remove {dst}")
+                    shutil.rmtree(dst)
+                continue
+
+            older_than(pptx)
+            if pexists(dst):
+                continue
+            try:
+                ppt_to_images(pptx, dst)
+            except:
+                print("pptx to images failed")
+        sleep(60)
+        print("keep scanning for new pptx")
+
+
 if __name__ == "__main__":
     func_argparse.main(
         generate_pres,
+        pptx2images,
     )

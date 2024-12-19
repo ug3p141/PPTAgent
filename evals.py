@@ -7,9 +7,6 @@ import tempfile
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from glob import glob
-from itertools import product
-from tempfile import TemporaryDirectory
-from time import sleep
 
 import func_argparse
 import pytorch_fid.fid_score as fid
@@ -20,10 +17,9 @@ from tqdm import tqdm
 from transformers import GPT2LMHeadModel, GPT2TokenizerFast
 
 import llms
-from crawler import topics
 from faster_pytorch_fid.fid_score_gpu import compute_statistics_of_path
 from presentation import Picture, Presentation, SlidePage
-from utils import Config, older_than, pexists, pjoin, ppt_to_images
+from utils import Config, older_than, pexists, pjoin
 
 fid.tqdm = lambda x: x
 judges = [
@@ -234,84 +230,6 @@ def eval_experiment(
     json.dump(eval_stats, open(eval_file, "w"), indent=4)
 
 
-def dataset_stat():
-    pdf_stat = {}
-    ppt_stat = {}
-    tempdir = TemporaryDirectory()
-    config = Config()
-    config.set_rundir(tempdir.name)
-    for topic in topics:
-        markdown_contents = {
-            f: len(open(f, "r").read()) for f in glob(f"data/{topic}/pdf/*/*.md")
-        }
-        pdf_stat |= markdown_contents
-        avg_pdf_text_len = sum(markdown_contents.values()) / len(markdown_contents)
-        num_images = 0
-        for pdf_folder in glob(f"data/{topic}/pdf/*"):
-            images = json.load(open(pjoin(pdf_folder, "image_caption.json")))
-            num_images += len(images)
-        avg_pdf_images = num_images / len(markdown_contents)
-        ppt_text_len = 0
-        ppt_pages = 0
-        ppt_images = 0
-        num_ppts = 10
-        for ppt_folder in glob(f"data/{topic}/pptx/*"):
-            presentation = Presentation.from_file(
-                pjoin(ppt_folder, "source.pptx"), config
-            )
-            ppt_stat[ppt_folder] = sum(
-                [len(slide.to_text()) for slide in presentation.slides]
-            )
-
-            ppt_text_len += ppt_stat[ppt_folder]
-            ppt_pages += len(presentation)
-            ppt_images += len(os.listdir(pjoin(ppt_folder, "images")))
-
-        avg_ppt_pages = ppt_pages / num_ppts
-        avg_ppt_text_len = ppt_text_len / num_ppts
-        avg_ppt_images = ppt_images / num_ppts
-        print(
-            "topic",
-            "avg_pdf_text_len",
-            "avg_pdf_images",
-            "avg_ppt_pages",
-            "avg_ppt_images",
-            "avg_ppt_text_len",
-        )
-        print(
-            f"{topic}: {avg_pdf_text_len:.2f}, {avg_pdf_images:.2f}, {avg_ppt_pages:.2f}, {avg_ppt_images:.2f}, {avg_ppt_text_len:.2f}"
-        )
-
-    json.dump(
-        {"pdf": pdf_stat, "ppt": ppt_stat}, open("data/eval/stat.json", "w"), indent=4
-    )
-
-
-def pptx2images(settings: str = "*"):
-    while True:
-        for folder in glob(f"data/*/pptx/*/{settings}/*/history"):
-            folder = os.path.dirname(folder)
-            pptx = pjoin(folder, "final.pptx")
-            ppt_folder, setting, pdf = folder.rsplit("/", 2)
-            dst = pjoin(ppt_folder, "final_images", setting, pdf)
-
-            if not pexists(pptx):
-                if pexists(dst):
-                    print(f"remove {dst}")
-                    shutil.rmtree(dst)
-                continue
-
-            older_than(pptx)
-            if pexists(dst):
-                continue
-            try:
-                ppt_to_images(pptx, dst)
-            except:
-                print("pptx to images failed")
-        sleep(60)
-        print("keep scanning for new pptx")
-
-
 def eval_baseline(setting: str):
     config = Config("/tmp")
     evals = defaultdict(dict)
@@ -327,9 +245,7 @@ if __name__ == "__main__":
     llms.vision_model = llms.gpt4o
     if len(sys.argv) > 1:
         func_argparse.main(
-            dataset_stat,
             eval_experiment,
-            pptx2images,
             eval_baseline,
             eval_ppt,
         )

@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import os
 import shutil
 import sys
@@ -7,6 +8,7 @@ import tempfile
 import time
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
+from glob import glob
 from itertools import product
 from time import sleep
 
@@ -305,6 +307,59 @@ def check_files_md5_parallel(directory: str, num_workers: int = 8):
         for i in result:
             if i is not None:
                 writer.write(i)
+
+
+def dataset_stat():
+    pdf_stat = {}
+    ppt_stat = {}
+    tempdir = tempfile.TemporaryDirectory()
+    config = Config()
+    config.set_rundir(tempdir.name)
+    for topic in topics:
+        markdown_contents = {
+            f: len(open(f, "r").read()) for f in glob(f"data/{topic}/pdf/*/*.md")
+        }
+        pdf_stat |= markdown_contents
+        avg_pdf_text_len = sum(markdown_contents.values()) / len(markdown_contents)
+        num_images = 0
+        for pdf_folder in glob(f"data/{topic}/pdf/*"):
+            images = json.load(open(os.path.join(pdf_folder, "image_caption.json")))
+            num_images += len(images)
+        avg_pdf_images = num_images / len(markdown_contents)
+        ppt_text_len = 0
+        ppt_pages = 0
+        ppt_images = 0
+        num_ppts = 10
+        for ppt_folder in glob(f"data/{topic}/pptx/*"):
+            presentation = Presentation.from_file(
+                os.path.join(ppt_folder, "source.pptx"), config
+            )
+            ppt_stat[ppt_folder] = sum(
+                [len(slide.to_text()) for slide in presentation.slides]
+            )
+
+            ppt_text_len += ppt_stat[ppt_folder]
+            ppt_pages += len(presentation)
+            ppt_images += len(os.listdir(os.path.join(ppt_folder, "images")))
+
+        avg_ppt_pages = ppt_pages / num_ppts
+        avg_ppt_text_len = ppt_text_len / num_ppts
+        avg_ppt_images = ppt_images / num_ppts
+        print(
+            "topic",
+            "avg_pdf_text_len",
+            "avg_pdf_images",
+            "avg_ppt_pages",
+            "avg_ppt_images",
+            "avg_ppt_text_len",
+        )
+        print(
+            f"{topic}: {avg_pdf_text_len:.2f}, {avg_pdf_images:.2f}, {avg_ppt_pages:.2f}, {avg_ppt_images:.2f}, {avg_ppt_text_len:.2f}"
+        )
+
+    json.dump(
+        {"pdf": pdf_stat, "ppt": ppt_stat}, open("data/eval/stat.json", "w"), indent=4
+    )
 
 
 if __name__ == "__main__":

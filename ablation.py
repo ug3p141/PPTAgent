@@ -9,7 +9,6 @@ from presentation import GroupShape, ShapeElement, SlidePage, TextFrame
 from utils import get_slide_content, pexists, pjoin, tenacity
 
 
-# random layout
 class PPTCrew_wo_Structure(PPTCrew):
     def _hire_staffs(self, record_cost: bool, **kwargs) -> dict[str, Role]:
         new_planner = "planner_wo_structure"
