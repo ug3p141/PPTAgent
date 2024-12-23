@@ -211,15 +211,6 @@ def parse_groupshape(groupshape: GroupShape):
 
 
 def is_primitive(obj):
-    """
-    判断对象或该集合包含的所有对象是否是基本类型。
-
-    参数:
-    obj: 要判断的对象
-
-    返回:
-    如果对象是基本类型，返回True，否则返回False
-    """
     if isinstance(obj, (list, tuple, set, frozenset)):
         return all(is_primitive(item) for item in obj)
     return isinstance(
@@ -231,15 +222,6 @@ DEFAULT_EXCLUDE = set(["element", "language_id", "ln", "placeholder_format"])
 
 
 def object_to_dict(obj, result=None, exclude=None):
-    """
-    将对象的非隐藏属性拷贝到一个字典中。
-
-    参数:
-    obj: 要拷贝属性的对象
-
-    返回:
-    包含对象非隐藏属性的字典
-    """
     if result is None:
         result = {}
     exclude = DEFAULT_EXCLUDE.union(exclude or set())
@@ -277,16 +259,6 @@ def merge_dict(d1: dict, d2: list[dict]):
 
 
 def dict_to_object(dict: dict, obj: object, exclude=None):
-    """
-    从字典中恢复对象的属性。
-
-    参数:
-    d: 包含对象属性的字典
-    obj: 要恢复属性的对象
-
-    返回:
-    恢复属性后的对象
-    """
     if exclude is None:
         exclude = set()
     for key, value in dict.items():

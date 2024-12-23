@@ -152,7 +152,6 @@ def check_consistency(slides: list[SlidePage], ppt_folder: str, image_model):
     return True
 
 
-# 计算rebuild 的embedding是否一致
 def prepare_ppt_folder(ppt_folder: str, text_model: BGEM3FlagModel, image_model):
     if pexists(ppt_folder + "/source.pptx") or not older_than(
         ppt_folder + "/original.pptx"

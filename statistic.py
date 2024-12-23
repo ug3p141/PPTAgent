@@ -2,6 +2,7 @@ import json
 import os
 from collections import defaultdict
 from contextlib import contextmanager
+from glob import glob
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,46 +10,134 @@ import pandas as pd
 import seaborn as sns
 from scipy.stats import pearsonr, spearmanr
 
-# 读取 Excel 文件
-file_path = "./human_eval/final_ppt评分标注结果_2024-12-13.xlsx"
-human_eval = pd.read_excel(file_path).to_dict("records")
-llm_eval = json.load(open("./ppt_eval_12-16_qwen+intern.json"))
+
+@contextmanager
+def science_plot(font_size=16):
+    import scienceplots
+
+    with plt.style.context(["ieee", "grid", "no-latex", "light"]):
+        plt.rcParams.update({"font.size": font_size})
+        yield
 
 
-def plot_correlation(data, x, y, title):
-
-    corr_data = defaultdict(dict)
-    eval_file = "data/evals/PPTCrew-gpt-4o+gpt-4o+gpt-4o.json"
-    setting = os.path.basename(eval_file).removesuffix(".json")
-    eval_stats = json.load(open(eval_file))
-    for dimension in ["ppl", "fid", "content", "vision", "logic"]:
-        pairs = eval_stats[dimension]
-        for pptx, score in pairs.items():
-            if isinstance(score, list):
-                score = score[0]
-                print(eval_file, score)
-            if isinstance(score, dict):
-                score = score["score"]
-            if isinstance(score, str):
+def statistic_humaneval(eval_file: str):
+    llm_eval = json.load(open(eval_file))
+    llm_data = []
+    for dimension, files in llm_eval.items():
+        for filename, values in files.items():
+            try:
+                setting, basename = filename.split("/", 2)[1:]
+                basename = basename.split("/")[0]
+                if not isinstance(values["score"], int):
+                    raise ValueError(f"score is not int: {values['score']}")
+                llm_data.append(
+                    {
+                        "setting": setting,
+                        "sample": basename,
+                        "dimension": dimension,
+                        "score": values["score"],
+                    }
+                )
+            except:
                 continue
-            if score > 5000:
-                continue
-            if dimension == "logic":
-                dimension = "coherence"
+
+    file_path = "human_eval/human_scores_2024-12-13.xlsx"
+    human_eval = pd.read_excel(file_path).to_dict("records")
+    human_data = []
+    for record in human_eval:
+        setting = record.get("setting")
+        score = record[dimension]
+        basename = record["PPT"]
+        try:
+            score = int(score)
+        except:
+            continue
+        human_data.append(
+            {
+                "setting": setting,
+                "sample": basename,
+                "dimension": dimension,
+                "score": score,
+            }
+        )
+
+    # Merge to keep only records present in both human and llm
+    merged = pd.merge(
+        pd.DataFrame(llm_data),
+        pd.DataFrame(human_data),
+        on=["setting", "sample", "dimension"],
+        suffixes=("_human", "_llm"),
+    )
+    dimensions = merged["dimension"].unique()
+
+    # print avg of each dimension on setting
+    for setting in merged["setting"].unique():
+        for dimension in dimensions:
+            scores_human = merged[
+                (merged["setting"] == setting) & (merged["dimension"] == dimension)
+            ]["score_human"]
+            scores_llm = merged[
+                (merged["setting"] == setting) & (merged["dimension"] == dimension)
+            ]["score_llm"]
+            print(
+                f"{setting}, {dimension}, avg_human: {scores_human.mean()}, avg_llm: {scores_llm.mean()}"
+            )
+
+    for dimension in dimensions:
+        scores_human = merged[merged["dimension"] == dimension]["score_human"]
+        scores_llm = merged[merged["dimension"] == dimension]["score_llm"]
+        pearson_correlation = pearsonr(scores_human, scores_llm)
+        spearman_correlation = spearmanr(scores_human, scores_llm)
+        print(
+            f"{dimension}, pearson: {pearson_correlation}, spearman: {spearman_correlation}"
+        )
+
+    return merged
+
+
+def statistic_ppteval():
+    data = []
+    eval_files = glob("./data/evals/PPTCrew*")
+    for eval_file in eval_files:
+        setting = eval_file.split("/")[-1].removesuffix(".json")
+        eval_stats = json.load(open(eval_file))
+        for dimension, files in eval_stats.items():
             if dimension == "vision":
                 dimension = "design"
-            print(pptx, dimension, score)
-            corr_data[pptx][dimension] = score
-    data = list(corr_data.values())
-    new_data = []
-    for i in data:
-        if len(i) != 4:
-            continue
-        new_data.append(i)
-    numeric_df = pd.DataFrame(new_data)
+            for filename, score in files.items():
+                domain = filename.split("/")[1]
+                if isinstance(score, dict):
+                    score = score["score"]
+                if isinstance(score, str):
+                    continue
+                if score > 5000 or score < 0:
+                    continue
+                data.append(
+                    {
+                        "setting": setting,
+                        "dimension": dimension,
+                        "sample": filename,
+                        "score": score,
+                        "domain": domain,
+                    }
+                )
+    return pd.DataFrame(data)
 
-    # Calculate the correlation matrix
-    correlation_matrix = numeric_df.corr()
+
+def setting_perfomance(df: pd.DataFrame):
+    df = df.drop(columns=["domain"])
+    for setting, dimension in df[["setting", "dimension"]].drop_duplicates().values:
+        avg_score = df[(df["setting"] == setting) & (df["dimension"] == dimension)][
+            "score"
+        ].mean()
+        print(f"{setting}, {dimension}, {avg_score}")
+
+
+def plot_correlation(df: pd.DataFrame):
+    df = df.drop(columns=["domain"])
+    correlation_matrix = df[df["setting"] == "PPTCrew-gpt-4o+gpt-4o+gpt-4o"][
+        ["ppl", "fid", "content", "design"]
+    ].corr()
     # Plot the heatmap with axis limits set from -1 to 1
     plt.figure(figsize=(10, 8))
     sns.heatmap(
@@ -67,103 +156,11 @@ def plot_correlation(data, x, y, title):
     plt.show()
 
 
-def organize():
-    data = []
-    for dimension, files in llm_eval.items():
-        scores_llm = []
-        scores_human = []
-        setting_scores = defaultdict(
-            lambda: {"llm": defaultdict(list), "human": defaultdict(list)}
-        )
-        outlierset = set()
-        for filename, values in files.items():
-            try:
-                setting, basename = filename.split("/", 2)[1:]
-                basename = basename.split("/")[0]
-                if isinstance(values["score"], int):
-                    setting_scores[setting]["llm"][basename].append(values["score"])
-            except:
-                continue
-
-        for record in human_eval:
-            setting = record.get("模型")
-            score = record[dimension]
-            basename = record["PPT"]
-            try:
-                score = int(score)
-            except:
-                continue
-            if basename in setting_scores[setting]["llm"]:
-                setting_scores[setting]["human"][basename].append(score)
-
-        for setting, scores_data in sorted(setting_scores.items(), key=lambda x: x[0]):
-            sorted_keys = sorted(scores_data["llm"].keys())
-            scores_llm = [
-                sum(scores_data["llm"][k]) / len(scores_data["llm"][k])
-                for k in sorted_keys
-            ]
-            scores_human = [
-                sum(scores_data["human"][k]) / len(scores_data["human"][k])
-                for k in sorted_keys
-            ]
-            for k, v1 in zip(sorted_keys, scores_llm):
-                data.append(
-                    {
-                        "setting": setting,
-                        "sample": k,
-                        "dimension": dimension,
-                        "score": v1,
-                        "source": "llm",
-                    }
-                )
-            for k, v2 in zip(sorted_keys, scores_human):
-                data.append(
-                    {
-                        "setting": setting,
-                        "sample": k,
-                        "dimension": dimension,
-                        "score": v2,
-                        "source": "human",
-                    }
-                )
-        print(setting, dimension, sum(scores_llm) / len(scores_llm))
-        pearson_corr, _ = pearsonr(scores_llm, scores_human)
-        spearman_corr, _ = spearmanr(scores_llm, scores_human)
-        print(f"{dimension}, at a length of {len(scores_llm)}")
-        print(f"pearson: {pearson_corr}, spearman: {spearman_corr}")
-    df = pd.DataFrame(data)
+def domain_perfomance(df: pd.DataFrame):
+    df = df[df["setting"] == "PPTCrew-gpt-4o+gpt-4o+gpt-4o"]
+    for domain, scores in df.groupby("domain")["score"]:
+        print(f"{domain}, {scores.mean()}")
 
 
-def setting_corr():
-    data_human = df[df["source"] == "human"][df["dimension"] == "logic"]
-    data_llm = df[df["source"] == "llm"][df["dimension"] == "logic"]
-
-    # 按 setting, sample, dimension 对齐
-    merged = pd.merge(
-        data_human,
-        data_llm,
-        on=["setting", "sample", "dimension"],
-        suffixes=("_human", "_llm"),
-    )
-
-    # 提取 score 列
-    scores_human = merged["score_human"]
-    scores_llm = merged["score_llm"]
-
-    # 计算 Pearson 相关系数
-    if len(scores_human) > 1:  # 确保样本数足够
-        pearson_correlation = pearsonr(scores_human, scores_llm)
-        spearman_correlation = spearmanr(scores_human, scores_llm)
-
-    # 输出结果
-    print(f"Pearson correlation between human and llm: {pearson_correlation}")
-    print(f"Spearman correlation between human and llm: {spearman_correlation}")
-
-
-@contextmanager
-def science_plot(font_size=16):
-    import scienceplots
-
-    with plt.style.context(["ieee", "grid", "no-latex", "light"]):
-        plt.rcParams.update({"font.size": font_size})
-        yield
+if __name__ == "__main__":
+    statistic_humaneval("./resource/ppt_eval_12-16_qwen+intern.json")

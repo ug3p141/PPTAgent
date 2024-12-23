@@ -127,6 +127,8 @@ def kctv_gen_ppt(doc_dir):
 if __name__ == "__main__":
     from concurrent.futures import ThreadPoolExecutor
 
+    llms.language_model = llms.gpt4o
+
     def process_pdf_folder(pdf_folder):
         try:
             kctv_gen_ppt(pdf_folder)

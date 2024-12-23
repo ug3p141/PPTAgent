@@ -225,8 +225,6 @@ class PPTGen(ABC):
 class PPTCrew(PPTGen):
     roles: list[str] = ["editor", "coder"]
 
-    # 还是把它加上
-    # layout 的名字应该也要输入
     def synergize(
         self,
         template: dict,
@@ -293,7 +291,6 @@ class PPTCrew(PPTGen):
         self, editor_output: dict, content_schema: dict, old_data: dict, retry: int = 0
     ):
         command_list = []
-        # 这里可以加一个长度control
         for el_info in editor_output.values():
             if "data" not in el_info:
                 if retry < self.retry_times:
@@ -315,7 +312,6 @@ class PPTCrew(PPTGen):
                     raise ValueError(f"data not found in editor_output: {el_info}")
 
         for el_name, old_content in old_data.items():
-            # 教会它不要生成不该生成的
             if not isinstance(old_content, list):
                 old_content = [old_content]
 

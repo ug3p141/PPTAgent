@@ -3,7 +3,7 @@ eval_folder:
 		python evals.py eval_ppt -p "$line" & \
 	done
 clean:
-	rm -f final.*
+	rm -f *.log final.*
 describe_slide:
 	ls
 extract_prs:

@@ -6,7 +6,6 @@ import numpy as np
 import torch
 import torchvision.transforms as T
 from FlagEmbedding import BGEM3FlagModel
-from marker.convert import convert_single_pdf
 from PIL import Image
 from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoFeatureExtractor, AutoModel
@@ -65,6 +64,9 @@ def parse_pdf(
     model_lst: list,
     batch_size: int = 2,
 ):
+
+    from marker.convert import convert_single_pdf
+
     os.makedirs(output_path, exist_ok=True)
     full_text, images, metadata = convert_single_pdf(
         pdf_path, model_lst, batch_multiplier=batch_size, ocr_all_pages=False

@@ -2,11 +2,10 @@ import json
 import os
 import random
 import shutil
-import sys
 import tempfile
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from glob import glob
+from typing import Literal
 
 import func_argparse
 import pytorch_fid.fid_score as fid
@@ -19,7 +18,7 @@ from transformers import GPT2LMHeadModel, GPT2TokenizerFast
 import llms
 from faster_pytorch_fid.fid_score_gpu import compute_statistics_of_path
 from presentation import Picture, Presentation, SlidePage
-from utils import Config, older_than, pexists, pjoin
+from utils import Config, pexists, pjoin
 
 fid.tqdm = lambda x: x
 judges = [
@@ -123,15 +122,45 @@ def merge_evals(folders: list[str], evals: dict):
     return evals
 
 
-def eval_ppt(
-    prs_source: str = None,
-    slide_folder: str = None,
-):
-    if prs_source is None:
-        slide_folder = os.path.dirname(slide_folder)
-    if slide_folder is None:
+def slide_score(slide_folder: str):
+    eval_file = pjoin(slide_folder, "evals.json")
+    evals = defaultdict(dict)
+    if pexists(eval_file):
+        evals |= json.load(open(eval_file))
+    text_scorer = Template(open("prompts/ppteval_content.txt", "r").read())
+    vision_scorer = Template(open("prompts/ppteval_style.txt", "r").read())
+    style_descriptor = open("prompts/ppteval_describe_style.txt", "r").read()
+    content_descriptor = open("prompts/ppteval_describe_content.txt", "r").read()
+    for slide_image in glob(pjoin(slide_folder, "slide_*.jpg")):
+        slide_descr = slide_image.replace(".jpg", ".json")
+        if not os.path.exists(slide_descr):
+            style_descr = llms.vision_model(style_descriptor, slide_image)
+            content_descr = llms.vision_model(content_descriptor, slide_image)
+            json.dump(
+                {"content": content_descr, "style": style_descr},
+                open(slide_descr, "w"),
+                indent=4,
+            )
+        else:
+            descr = json.load(open(slide_descr))
+            style_descr = descr["style"]
+            content_descr = descr["content"]
+        if slide_image not in evals["vision"]:
+            evals["vision"][slide_image] = llms.language_model(
+                vision_scorer.render(descr=style_descr), return_json=True
+            )
+        if slide_image not in evals["content"]:
+            evals["content"][slide_image] = llms.language_model(
+                text_scorer.render(descr=content_descr), return_json=True
+            )
+
+
+def pres_score(prs_source: str):
+    if "/pptx/" in prs_source:  # ours
         source, setting, pdf, _ = prs_source.rsplit("/", 3)
         slide_folder = os.path.join(source, "final_images", setting, pdf)
+    else:  # baseline
+        slide_folder = os.path.dirname(prs_source)
     eval_file = pjoin(slide_folder, "evals.json")
     evals = defaultdict(dict)
     if pexists(eval_file):
@@ -139,42 +168,13 @@ def eval_ppt(
             evals |= json.load(open(eval_file))
         except:
             pass
-    evals.pop("logic", None)
-    config = Config("/tmp")
-    presentation = Presentation.from_file(prs_source, config)
-    # text_scorer = Template(open("prompts/ppteval_content.txt", "r").read())
-    # vision_scorer = Template(open("prompts/ppteval_style.txt", "r").read())
-    # style_descriptor = open("prompts/ppteval_describe_style.txt", "r").read()
-    # content_descriptor = open("prompts/ppteval_describe_content.txt", "r").read()
-    ppt_extractor = Template(open("prompts/ppteval_extract.txt", "r").read())
-    logic_scorer = Template(open("ppteval_coherence.txt", "r").read())
+    evals.pop("logic", None)  # ? debug
 
-    # for slide_image in glob(pjoin(slide_folder, "slide_*.jpg")):
-    #     slide_descr = slide_image.replace(".jpg", ".json")
-    #     if not os.path.exists(slide_descr):
-    #         style_descr = llms.vision_model(style_descriptor, slide_image)
-    #         content_descr = llms.vision_model(content_descriptor, slide_image)
-    #         json.dump(
-    #             {"content": content_descr, "style": style_descr},
-    #             open(slide_descr, "w"),
-    #             indent=4,
-    #         )
-    #     else:
-    #         descr = json.load(open(slide_descr))
-    #         style_descr = descr["style"]
-    #         content_descr = descr["content"]
-    #     if slide_image not in evals["vision"]:
-    #         evals["vision"][slide_image] = llms.language_model(
-    #             vision_scorer.render(descr=style_descr), return_json=True
-    #         )
-    #     if slide_image not in evals["content"]:
-    #         evals["content"][slide_image] = llms.language_model(
-    #             text_scorer.render(descr=content_descr), return_json=True
-    #         )
-
-    slide_descr = pjoin(os.path.dirname(presentation.source_file), "extracted.json")
-    older_than(slide_descr, wait=True)
+    slide_descr = pjoin(slide_folder, "extracted.json")
     if not pexists(slide_descr):
+        config = Config("/tmp")
+        presentation = Presentation.from_file(prs_source, config)
+        ppt_extractor = Template(open("prompts/ppteval_extract.txt", "r").read())
         extracted = llms.language_model(
             ppt_extractor.render(presentation=presentation.to_text()),
             return_json=True,
@@ -183,6 +183,7 @@ def eval_ppt(
     else:
         extracted = json.load(open(slide_descr))
     if presentation.source_file not in evals["logic"]:
+        logic_scorer = Template(open("ppteval_coherence.txt", "r").read())
         evals["logic"][presentation.source_file] = llms.language_model(
             logic_scorer.render(
                 background_information=extracted.pop("metadata"),
@@ -196,7 +197,6 @@ def eval_ppt(
 # ppt eval
 def eval_experiment(
     setting: str,
-    thread_num: int = 2,
     general_eval: bool = False,
     feature_eval: bool = False,
     ppt_eval: bool = False,
@@ -213,9 +213,11 @@ def eval_experiment(
     if pexists(eval_file):
         eval_stats |= json.load(open(eval_file))
     config = Config("/tmp")
-    presentations = glob(f"data/*/pptx/*/{setting}/*/final.pptx")
+    prs_files = glob(f"data/*/pptx/*/{setting}/*/final.pptx")
     # filename dimension score
     print("start evaluation")
+    if general_eval or feature_eval:
+        presentations = [Presentation.from_file(i, config) for i in prs_files]
     if general_eval:
         eval_general(presentations, eval_stats)
 
@@ -224,38 +226,45 @@ def eval_experiment(
 
     if ppt_eval:
         slide_image_folders = glob(f"data/*/pptx/*/final_images/{setting}/*")
-        for presentation in presentations:
-            eval_ppt(presentation)
+        for presentation in prs_files:
+            pres_score(presentation)
         eval_stats = merge_evals(slide_image_folders, eval_stats)
     json.dump(eval_stats, open(eval_file, "w"), indent=4)
 
 
-def eval_baseline(setting: str):
-    config = Config("/tmp")
+def eval_baseline(
+    setting: str,
+    model: Literal["Qwen2.5", "gpt-4o"],
+    general_eval: bool = False,
+    feature_eval: bool = False,
+    ppt_eval: bool = False,
+):
     evals = defaultdict(dict)
-    presentations = [
-        Presentation.from_file(i, config)
-        for i in glob(f"data/*/pdf/*/baseline_{setting}.pptx")
-    ]
-    eval_feature(presentations, evals, setting, fid_eval=False)
-    json.dump(evals, open(f"data/evals/baseline_{setting}.json", "w"), indent=4)
+    prs_files = glob(f"data/*/pdf/*/{setting}/{model}/final.pptx")
+    slide_folders = [os.path.dirname(i) for i in prs_files]
+
+    if general_eval or feature_eval:
+        config = Config("/tmp")
+        presentations = [Presentation.from_file(i, config) for i in prs_files]
+
+    if general_eval:
+        eval_general(presentations, evals)
+    if feature_eval:
+        eval_feature(presentations, evals, setting, fid_eval=False)
+    if ppt_eval:
+        for slide_folder in slide_folders:
+            slide_score(slide_folder)
+        for presentation in prs_files:
+            pres_score(presentation)
+
+    merge_evals(slide_folders, evals)
+    json.dump(evals, open(f"data/evals/{setting}_{model}.json", "w"), indent=4)
 
 
 if __name__ == "__main__":
-    llms.vision_model = llms.gpt4o
-    if len(sys.argv) > 1:
-        func_argparse.main(
-            eval_experiment,
-            eval_baseline,
-            eval_ppt,
-        )
-    else:
-        judge_idx = 1
-        llms.language_model, llms.vision_model, judge_name = judges[judge_idx]
-        eval_file = "test-logic.json"
-        evals = defaultdict(dict)
-        prs = glob("human_eval/*/*/final.pptx")
-        with ThreadPoolExecutor(max_workers=24) as executor:
-            executor.map(eval_ppt, prs, [os.path.dirname(i) for i in prs])
-        evals = merge_evals([os.path.dirname(i) for i in prs], evals)
-        json.dump(evals, open(eval_file, "w"), indent=4)
+    func_argparse.main(
+        eval_experiment,
+        eval_baseline,
+        pres_score,
+        slide_score,
+    )

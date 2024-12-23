@@ -37,13 +37,13 @@ EVAL_MODELS = [
 ]
 
 # ablation
-# 0: w/o layout induction: random layout
-# 1: w/o schema induction: 只提供old data 的值，别的都不提供
-# 2. w/o decoupling: pptagent
-# 3: w/o html: use pptc
+# 0: w/o layout induction
+# 1: w/o schema induction
+# 2: w/o decoupling
+# 3: w/o html
 # 4: with gpt4o template
-# 5. w/o structure information
-# 6. retry 5 times
+# 5: w/o structure information
+# 6: retry 5 times
 
 AGENT_CLASS = {
     -1: PPTCrew,
@@ -85,7 +85,6 @@ def get_setting(setting_id: int, ablation_id: int):
     return agent_class, setting_name, model_identifier
 
 
-# 所有template要重新prepare一遍，除了qwen2.5+qwen_vl
 def do_generate(
     genclass: Type[PPTCrew],
     setting: str,

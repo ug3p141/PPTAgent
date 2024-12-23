@@ -14,9 +14,8 @@ from tqdm import tqdm
 from transformers import CLIPModel, CLIPProcessor
 
 import llms
-from evals import eval_general, eval_ppt
 from presentation import Presentation
-from utils import Config, edit_distance, ppt_to_images
+from utils import edit_distance, ppt_to_images
 
 outline_template = Template(
     """
@@ -110,13 +109,14 @@ def generate_content(source_text: str, bird_eye: dict, max_bullet: int):
 
 
 def generate_slides(
-    output_file: str,
+    output_dir: str,
     source_text: str,
     bird_eye: dict,
     images: list[str],
     model: CLIPModel,
     processor: CLIPProcessor,
 ):
+    os.makedirs(output_dir, exist_ok=True)
     images = filter_aspect_ratio(images)
     slides = generate_content(source_text, bird_eye, 7)
     image_embeddings = model.get_image_features(
@@ -155,9 +155,10 @@ def generate_slides(
             para = text_frame.add_paragraph()
             para.text = bullet
             para.level = 1
-    with jsonlines.open(output_file + ".jsonl", "w") as writer:
+    with jsonlines.open(output_dir + "/final.jsonl", "w") as writer:
         writer.write_all(slides)
-    pptx.save(output_file + ".pptx")
+    pptx.save(output_dir + "/final.pptx")
+    ppt_to_images(output_dir + "/final.pptx", output_dir + "/slide_images")
 
 
 def generate(model: Literal["Qwen2.5", "gpt"]):
@@ -167,7 +168,7 @@ def generate(model: Literal["Qwen2.5", "gpt"]):
         llms.language_model = llms.gpt4o
 
     print("Generating slides on baseline with ", llms.language_model.model)
-
+    llm_name = llms.get_simple_modelname(llms.language_model)
     model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14").to("cuda").eval()
     processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")
     folders = list(glob("data/*/pdf/*"))
@@ -177,14 +178,14 @@ def generate(model: Literal["Qwen2.5", "gpt"]):
         source_text = open(f"{pdf_folder}/source.md").read()
         bird_eye = json.load(open(f"{pdf_folder}/refined_doc.json"))
         images = json.load(open(f"{pdf_folder}/image_caption.json")).keys()
-        output_file = f"{pdf_folder}/baseline_{llms.language_model.model.split('-')[0]}"
-        if os.path.exists(output_file + ".jsonl"):
+        output_dir = f"{pdf_folder}/docpres/{llm_name}"
+        if os.path.exists(output_dir + "/final.jsonl"):
             progress.write(f"Skipping {pdf_folder}")
             progress.update(1)
             return
         try:
             generate_slides(
-                output_file,
+                output_dir,
                 source_text,
                 bird_eye,
                 list(images),
@@ -202,29 +203,5 @@ def generate(model: Literal["Qwen2.5", "gpt"]):
         list(executor.map(lambda f: process_folder(f, model, processor), folders))
 
 
-def evaluate(model: Literal["Qwen2.5", "gpt"]):
-    config = Config("/tmp")
-    pptx_files = glob(f"data/*/pdf/*/baseline_{model}.pptx")[:1]
-    presentations = [
-        Presentation.from_file(pptx_file, config) for pptx_file in pptx_files
-    ]
-    slide_image_folders = [
-        pptx_file.replace(".pptx", "_slide_images") for pptx_file in pptx_files
-    ]
-    for prs_idx, pptx_file in enumerate(tqdm(pptx_files)):
-        if not os.path.exists(slide_image_folders[prs_idx]):
-            ppt_to_images(pptx_file, slide_image_folders[prs_idx])
-
-    stats = eval_general(presentations)
-    stats |= eval_ppt(presentations, slide_image_folders)
-
-    print(stats)
-
-
 if __name__ == "__main__":
-    eval_ppt(
-        [Presentation.from_file("./test_ppt/original.pptx", Config("/tmp"))],
-        ["./test_ppt/slide_images"],
-    )
-    evaluate("gpt")
-    func_argparse.main([generate, evaluate])
+    func_argparse.main([generate])

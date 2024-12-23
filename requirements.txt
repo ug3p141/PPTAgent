@@ -1,6 +1,7 @@
 git+https://github.com/Force1ess/python-pptx
 python-Levenshtein
 python-multipart
+scienceplots
 jinja2
 openai
 aiohttp
