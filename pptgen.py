@@ -67,7 +67,7 @@ class PPTGen(ABC):
             [f"{k}: {v}" for k, v in self.doc_json.get("metadata", {}).items()]
         )
         self.metadata = (
-            f"{meta_data}\nCurrent Time: {datetime.now().strftime('%Y-%m-%d')}\n"
+            f"{meta_data}\nPresentation Time: {datetime.now().strftime('%Y-%m-%d')}\n"
         )
         self.image_information = ""
         for k, v in images.items():

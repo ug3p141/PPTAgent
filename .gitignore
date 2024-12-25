@@ -6,6 +6,7 @@ data
 *DS_Store*
 *test*
 *egg-info
+.yarn
 runs
 resource
 node_modules

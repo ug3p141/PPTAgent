@@ -1,4 +1,5 @@
 git+https://github.com/Force1ess/python-pptx
+marker-pdf==1.1.0
 python-Levenshtein
 python-multipart
 scienceplots

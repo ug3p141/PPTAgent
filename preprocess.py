@@ -63,9 +63,9 @@ def process_filetype(file_type: str, func: callable, thread_num: int, topic="*")
 
 def parse_pdfs(pdf_folders: list[str], idx: int):
     # require numpy==1.26.0, which is conflict with other packages
-    from marker.models import load_all_models
+    from marker.models import create_model_dict
 
-    model = load_all_models(device=idx % device_count, dtype=torch.float16)
+    model = create_model_dict(device=idx % device_count, dtype=torch.float16)
     for pdf_folder in pdf_folders:
         if not older_than(pdf_folder + "/original.pdf"):
             continue

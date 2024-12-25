@@ -6,6 +6,9 @@ import numpy as np
 import torch
 import torchvision.transforms as T
 from FlagEmbedding import BGEM3FlagModel
+from marker.config.parser import ConfigParser
+from marker.converters.pdf import PdfConverter
+from marker.output import text_from_rendered
 from PIL import Image
 from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoFeatureExtractor, AutoModel
@@ -62,22 +65,28 @@ def parse_pdf(
     pdf_path: str,
     output_path: str,
     model_lst: list,
-    batch_size: int = 2,
 ):
-
-    from marker.convert import convert_single_pdf
-
     os.makedirs(output_path, exist_ok=True)
-    full_text, images, metadata = convert_single_pdf(
-        pdf_path, model_lst, batch_multiplier=batch_size, ocr_all_pages=False
+    config_parser = ConfigParser(
+        {
+            "output_format": "markdown",
+        }
     )
+    converter = PdfConverter(
+        config=config_parser.generate_config_dict(),
+        artifact_dict=model_lst,
+        processor_list=config_parser.get_processors(),
+        renderer=config_parser.get_renderer(),
+    )
+    rendered = converter(pdf_path)
+    full_text, _, images = text_from_rendered(rendered)
     with open(pjoin(output_path, "source.md"), "w+", encoding="utf-8") as f:
         f.write(full_text)
     for filename, image in images.items():
         image_filepath = os.path.join(output_path, filename)
-        image.save(image_filepath, "PNG")
+        image.save(image_filepath, "JPEG")
     with open(pjoin(output_path, "meta.json"), "w+") as f:
-        f.write(json.dumps(metadata, indent=4))
+        f.write(json.dumps(rendered.metadata, indent=4))
 
     return full_text
 
