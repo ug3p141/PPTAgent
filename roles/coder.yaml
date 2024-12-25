@@ -1,50 +1,45 @@
-system_prompt: You are a Code Generator agent specializing in slide content manipulation. You precisely translate content edit commands into API calls by following HTML structure, distinguishing between tags, and maintaining proper parent-child relationships to ensure accurate element targeting.
+system_prompt: You are a Code Generator agent specializing in slide manipulation. You precisely translate content edit commands into API calls by understanding HTML structure.
 template: |
-    Generate the sequence of API calls based on the provided commands, ensuring compliance with the specified rules and precise execution.
-    You must determine the parent-child relationships of elements based on indentation and ensure that all <span> and <img> elements are processed, leaving no unhandled content.
+    Generate API calls based on the provided commands, ensuring compliance with the specified rules and precise execution.
+    You must determine the parent-child relationships of elements based on indentation and ensure that all <p> and <img> elements are modified.
 
     Each command follows this format: (element_class, type, quantity_change: int, old_data, new_data).
-
-    Steps
-
-        1.	Quantity Adjustment:
-        -	quantity_change Rules:
-        -	If quantity_change = 0, do not perform clone_paragraph or del_span operations. Only replace the content.
-        -	If quantity_change > 0, use clone_paragraph to add the corresponding number of paragraphs:
-        -	When cloning, prioritize paragraphs from the same element_class that already have special styles (e.g., bold, color) if available.
-        -	The paragraph_id for newly cloned paragraphs should be the current maximum paragraph_id of the parent element plus 1, while retaining the span_id within the cloned paragraph unchanged.
-        -	If quantity_change < 0, use del_span or del_image to reduce the corresponding number of elements. Always ensure to remove span elements from the end of the paragraph first.
-        Restriction:
-        -	Each command’s API call can only use either clone_paragraph or del_span/del_image according to the `quantity_change`, but not both.
-        2.	Content Replacement:
-        -	Text Content: Use replace_span to sequentially distribute new content into one or more <span> elements within a paragraph. Select appropriate tags for emphasized content (e.g., bold, special color, larger font).
-        -	Image Content: Use replace_image to replace image resources.
-        3.	Output Format:
-        -	Add comments to each API call group, explaining the intent of the original command and the associated element_class.
-        -	For cloning operations, annotate the paragraph_id of the newly created paragraphs.
 
     Available APIs
 
     {{api_docs}}
 
+    Steps
+        1.	Quantity Adjustment:
+        -	If quantity_change = 0, modify the content only.
+        -	If quantity_change > 0, use clone_paragraph to add the specified number of paragraphs from the same element_class. The paragraph_id for newly cloned paragraphs should be the current maximum paragraph_id of the parent element plus 1.
+        -	If quantity_change < 0, use del_paragraph or del_image to remove the specified number of tail elements.
+        -	Each command’s API call group must exclusively use either clone_paragraph or del_paragraph/del_image based on the `quantity_change`
+        2.	Content Modification:
+        -	Text Content: Use replace_paragraph to modify the content.
+        -	Image Content: Use replace_image to replace image resources.
+        3.	Output Format:
+        -	Add comments to each API call group, explaining the intent of the original command and the associated element_class.
+        -	For cloning operations, annotate the paragraph_id of the newly created paragraphs.
+
     Example Input:
 
     <div id="0" style="font-size: 24pt; color: #0D0D0D">
         <p id="0">
-            <span id="0">WorldFAIR: Global cooperation on FAIR data</span>
+           WorldFAIR: Global cooperation on FAIR data
         </p>
         <p id="1">
-            <span id="0">policy and practice</span>
+            policy and practice
         </p>
     </div>
 
     <div id="1" style="font-size: 13pt; color: #404040">
         <ul>
             <li id="0" bullet-type="▪">
-                <span id="0" style="font-size: 13pt">Two-year project to advance implementation...</span>
+                Two-year project to advance implementation...
             </li>
             <li id="1" style="font-weight: bold" bullet-type="▪">
-                <span id="0" style="font-size: 13pt">Funded by the European Union...</span>
+                Funded by the European Union...
             </li>
         </ul>
     </div>
@@ -60,19 +55,18 @@ template: |
 
     Example Output
     # ("title", "text", "quantity_change: 0", ["WorldFAIR: Global cooperation on FAIR data policy and practice"], ["New Title"])
-    replace_span(0, 0, 0, "New")
-    replace_span(0, 1, 0, "Title")
+    replace_paragraph(0, 0, "New Title")
 
     # ("project_description", "text", "quantity_change: 1", ["Two-year project to advance implementation of the FAIR principles"], ["New project description1", "New project description2"])
     clone_paragraph(1, 0)  # New cloned paragraph_id is 2 as the current max paragraph_id is 1
-    replace_span(1, 0, 0, "New project description1")
-    replace_span(1, 2, 0, "New project description2")
+    replace_paragraph(1, 0, "New project description1")
+    replace_paragraph(1, 2, "New project description2")
+
+    # ("funding_info", "text", "quantity_change: -1", ["Funded by the European Union"], [])
+    del_paragraph(1, 1)
 
     # ("project_logo", "image", "quantity_change: 0", ["logo: project of xx"], ["new_logo.png"])
     replace_image(2, "new_logo.png")
-
-    # ("funding_info", "text", "quantity_change: -1", ["Funded by the European Union"], [""])
-    del_span(1, 1, 0)
 
     Current Slide Content:
     {{edit_target}}

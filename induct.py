@@ -84,21 +84,13 @@ class SlideInducter:
             split = json.load(open(self.split_cache))
             return set(split["content_slides_index"]), split["functional_cluster"]
         category_split_template = Template(open("prompts/category_split.txt").read())
-        category_cluster = llms.language_model(
+        functional_cluster = llms.language_model(
             category_split_template.render(slides=self.prs.to_text()),
             return_json=True,
         )
+        functional_slides = set(sum(functional_cluster.values(), []))
+        content_slides_index = set(range(1, len(self.prs) + 1)) - functional_slides
 
-        if "content" in category_cluster:
-            content_slides_index, functional_cluster = (
-                set(map(int, category_cluster.pop("content"))),
-                {
-                    k: list(map(int, v))
-                    for k, v in category_cluster["functional"].items()
-                },
-            )
-        else:
-            raise Exception(f"Unknown category cluster: {category_cluster}")
         json.dump(
             {
                 "content_slides_index": list(content_slides_index),
@@ -153,7 +145,9 @@ class SlideInducter:
             if "template_id" in cluster and "content_schema" not in cluster:
                 schema = llms.language_model(
                     content_induct_prompt.render(
-                        slide=self.prs.slides[cluster["template_id"] - 1].to_html()
+                        slide=self.prs.slides[cluster["template_id"] - 1].to_html(
+                            element_id=False, paragraph_id=False
+                        )
                     ),
                     return_json=True,
                 )

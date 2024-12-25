@@ -1,3 +1,4 @@
+import re
 import traceback
 from dataclasses import dataclass
 from typing import Callable
@@ -29,6 +30,7 @@ from utils import (
     pexists,
     pjoin,
     runs_merge,
+    wmf_to_images,
 )
 
 # slide, (group), shape, textframe, (ul), li/p, run
@@ -40,7 +42,6 @@ INDENT = "\t"
 # run: font, hyperlink, text
 @dataclass
 class StyleArg:
-    run_id: bool = True
     paragraph_id: bool = True
     element_id: bool = True
     font_style: bool = True
@@ -54,7 +55,6 @@ class StyleArg:
 class Closure:
     closure: Callable
     paragraph_id: int = -1
-    span_id: int = -1
 
     def apply(self, shape: BaseShape):
         self.closure(shape)
@@ -62,57 +62,35 @@ class Closure:
     def __gt__(self, other):
         if self.paragraph_id != other.paragraph_id:
             return self.paragraph_id > other.paragraph_id
-        return self.span_id > other.span_id
-
-
-class Run:
-    def __init__(self, run: _Run, idx: int):
-        self.idx = idx
-        self.text = run.text
-        self.font = object_to_dict(run.font)
-
-    def to_html(self, style_args: StyleArg):
-        id_str = f" id='{self.idx}'" if style_args.run_id else ""
-        font_style = get_font_style(self.font)
-        style = f" style='{font_style}'" if style_args.font_style and font_style else ""
-        return f"<span{id_str}{style}>{self.text}</span>"
-
-    def __repr__(self):
-        return f"Run-{self.idx}: {self.text}"
 
 
 class Paragraph:
     def __init__(self, paragraph: _Paragraph, idx: int):
-        runs = runs_merge(paragraph)
-        self.runs = [Run(r, idx) for idx, r in enumerate(runs)]
+        run = runs_merge(paragraph)
         self.idx = idx
         self.real_idx = idx
         self.bullet = paragraph.bullet
+        if run is None:
+            self.idx = -1
+            return
         self.font = merge_dict(
-            object_to_dict(paragraph.font), [run.font for run in self.runs]
+            object_to_dict(paragraph.font), [object_to_dict(run.font)]
         )
-        self.text = paragraph.text
+        self.text = re.sub(r"(_x000B_|\\x0b)", " ", paragraph.text)
 
     def to_html(self, style_args: StyleArg):
-        if len(self.runs) == 0:
-            return []
+        if self.idx == -1:
+            return ""
         tag = "li" if self.bullet else "p"
         id_str = f" id='{self.idx}'" if style_args.paragraph_id else ""
         font_style = get_font_style(self.font)
         style_str = (
             f" style='{font_style}'" if style_args.font_style and font_style else ""
         )
-        repr_list = []
-        for run in self.runs:
-            repr_list.append(run.to_html(style_args))
-        return (
-            [f"<{tag}{id_str}{style_str}>"]
-            + [INDENT + repr for repr in repr_list]
-            + [f"</{tag}>"]
-        )
+        return f"<{tag}{id_str}{style_str}>{self.text}</{tag}>"
 
     def __repr__(self):
-        return f"Paragraph-{self.idx}: {self.runs}"
+        return f"Paragraph-{self.idx}: {self.text}"
 
 
 class TextFrame:
@@ -126,9 +104,8 @@ class TextFrame:
         ]
         para_offset = 0
         for para in self.paragraphs:
-            if len(para.runs) == 0:
+            if para.idx == -1:
                 para_offset += 1
-                para.idx = -1
             else:
                 para.idx = para.idx - para_offset
         if len(self.paragraphs) == 0:
@@ -139,7 +116,7 @@ class TextFrame:
         self.is_textframe = True
         self.font = merge_dict(
             object_to_dict(shape.text_frame.font),
-            [para.font for para in self.paragraphs],
+            [para.font for para in self.paragraphs if para.idx != -1],
         )
 
     def to_html(self, style_args: StyleArg):
@@ -150,11 +127,11 @@ class TextFrame:
         for para in self.paragraphs + [None]:
             if pre_bullet is not None and (para is None or para.bullet != pre_bullet):
                 repr_list.append("</ul>")
-            if para is None:
+            if para is None or para.idx == -1:
                 continue
-            if pre_bullet != para.bullet:
-                repr_list.append(f"<ul bullet-type='{para.bullet}'>")
-            repr_list.extend(para.to_html(style_args))
+            if para.bullet is not None and pre_bullet != para.bullet:
+                repr_list.append(f"<ul>")  # bullet-type='{para.bullet}'>")
+            repr_list.append(para.to_html(style_args))
             pre_bullet = para.bullet
         return "\n".join([INDENT * self.level + repr for repr in repr_list])
 
@@ -173,14 +150,12 @@ class TextFrame:
             return ""
         s = f"[Text id={father_idx}]"
         for para in self.paragraphs:
+            if para.idx == -1:
+                continue
             s += f"\n"
             s += f"[Paragraph id={para.idx}]"
-            s += get_font_pptcstyle(para.font)
-            for run in para.runs:
-                s += f"\n"
-                s += f"[Run id={run.idx}]"
-                s += get_font_pptcstyle(run.font)
-                s += run.text + "\n"
+            s += get_font_pptcstyle(para.font) + f"\n"
+            s += para.text + "\n"
         return s
 
 
@@ -251,7 +226,8 @@ class ShapeElement:
             level,
         )
         obj.xml = shape._element.xml
-        # ? obj.shape = shape
+        # ? for debug, mask to enable pickling
+        # obj.shape = shape
         return obj
 
     def build(self, slide: PPTXSlide):
@@ -407,12 +383,16 @@ class Picture(ShapeElement):
         slide_area: float,
         level: int,
     ):
-        if shape.image.ext not in IMAGE_EXTENSIONS:
-            raise ValueError(f"unsupported image type {shape.image.ext}")
         img_path = pjoin(
             config.IMAGE_DIR,
             f"{shape.image.sha1}.{shape.image.ext}",
         )
+        if shape.image.ext == "wmf":
+            img_path = img_path.replace(".wmf", ".jpg")
+            if not pexists(img_path):
+                wmf_to_images(shape.image.blob, img_path)
+        elif shape.image.ext not in IMAGE_EXTENSIONS:
+            raise ValueError(f"unsupported image type {shape.image.ext}")
         if not pexists(img_path):
             with open(img_path, "wb") as f:
                 f.write(shape.image.blob)
@@ -750,9 +730,9 @@ class SlidePage:
             return "picture"
         return "text"
 
-    def to_html(self, style_args: StyleArg = None) -> str:
+    def to_html(self, style_args: StyleArg = None, **kwargs) -> str:
         if style_args is None:
-            style_args = StyleArg()
+            style_args = StyleArg(**kwargs)
         return "".join(
             [
                 "<!DOCTYPE html>\n<html>\n",
@@ -920,3 +900,17 @@ SHAPECAST: dict[int, ShapeElement] = {
     MSO_SHAPE_TYPE.TEXT_BOX: TextBox,
     MSO_SHAPE_TYPE.LINE: Connector,
 }
+
+if __name__ == "__main__":
+    from copy import deepcopy
+    from glob import glob
+
+    config = Config("/tmp")
+    presentation = deepcopy(
+        Presentation.from_file("runs/pptx/cip_default_template/source.pptx", config)
+    )
+    for pptx in glob("data/*/pptx/*/source.pptx"):
+        presentation = deepcopy(Presentation.from_file(pptx, config))
+        for slide in presentation.slides:
+            print(slide.to_html(show_image=False))
+            print("\033c", end="")

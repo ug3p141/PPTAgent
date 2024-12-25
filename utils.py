@@ -56,20 +56,17 @@ def runs_merge(paragraph: _Paragraph):
             _Run(r, paragraph)
             for r in parse_xml(paragraph._element.xml.replace("fld", "r")).r_lst
         ]
-    if len(runs) < 1:
-        return runs
-    pre_run = runs[0]
-    new_runs = [pre_run]
-    pre_font = runs[0].font
-    for run in runs[1:]:
-        if run.font != pre_font:
-            new_runs.append(run)
-            pre_run = run
-            pre_font = run.font
-        else:
-            pre_run.text += run.text
-            run._r.getparent().remove(run._r)
-    return new_runs
+    if len(runs) == 1:
+        return runs[0]
+    if len(runs) == 0:
+        return None
+    run = max(runs, key=lambda x: len(x.text))
+    run.text = paragraph.text
+
+    for r in runs:
+        if r != run:
+            r._r.getparent().remove(r._r)
+    return run
 
 
 def older_than(filepath, seconds: int = 10, wait: bool = False):
@@ -92,13 +89,21 @@ def edit_distance(text1: str, text2: str):
 
 def get_slide_content(doc_json: dict, slide_title: str, slide: dict):
     slide_desc = slide.get("description", "")
-    slide_content = f"Title: {slide_title}\nSlide Description: {slide_desc}\n"
+    slide_content = f"Slide Purpose: {slide_title}\nSlide Description: {slide_desc}\n"
     for key in slide.get("subsection_keys", []):
-        slide_content += "Slide Reference: "
+        slide_content += "Slide Content Source: "
         for section in doc_json["sections"]:
-            for subsection in section.get("subsections", []):
-                if edit_distance(key, subsection["title"]) > 0.9:
-                    slide_content += f"# {key} \n{subsection['content']}\n"
+            subsections = section.get("subsections", [])
+            if isinstance(subsections, dict) and len(subsections) == 1:
+                subsections = [
+                    {"title": k, "content": v} for k, v in subsections.items()
+                ]
+            for subsection in subsections:
+                try:
+                    if edit_distance(key, subsection["title"]) > 0.9:
+                        slide_content += f"# {key} \n{subsection['content']}\n"
+                except:
+                    pass
     return slide_content
 
 
@@ -153,6 +158,29 @@ def ppt_to_images(file: str, output_dir: str, warning: bool = False):
             return
 
         raise RuntimeError("No PDF file was created in the temporary directory", file)
+
+
+@tenacity
+def wmf_to_images(blob: bytes, filepath: str):
+    if not filepath.endswith(".jpg"):
+        raise ValueError("filepath must end with .jpg")
+    dirname = os.path.dirname(filepath)
+    basename = os.path.basename(filepath).removesuffix(".jpg")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        with open(pjoin(temp_dir, f"{basename}.wmf"), "wb") as f:
+            f.write(blob)
+        command_list = [
+            "soffice",
+            "--headless",
+            "--convert-to",
+            "jpg",
+            pjoin(temp_dir, f"{basename}.wmf"),
+            "--outdir",
+            dirname,
+        ]
+        subprocess.run(command_list, check=True, stdout=subprocess.DEVNULL)
+
+    assert pexists(filepath), f"File {filepath} does not exist"
 
 
 def extract_fill(shape: BaseShape):

@@ -24,10 +24,12 @@ Example Output:
             "title": "title of section1",
             "subsections": [
                 {
-                    "title of subsection1.1": "content of subsection1.1"
+                    "title": "title of subsection1.1",
+                    "content": "content of subsection1.1"
                 },
                 {
-                    "title of subsection1.2": "content of subsection1.2"
+                    "title": "title of subsection1.2",
+                    "content": "content of subsection1.2"
                 }
             ]
         },
@@ -35,7 +37,8 @@ Example Output:
             "title": "title of section2",
             "subsections": [
                 {
-                    "title of subsection2.1": "content of subsection2.1"
+                    "title": "title of subsection2.1",
+                    "content": "content of subsection2.1"
                 }
             ]
         }

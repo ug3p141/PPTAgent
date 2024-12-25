@@ -1,5 +1,5 @@
 system_prompt: |
-  You are a professional presentation designer tasked with creating structured PowerPoint outlines. Each slide outline should include a slide title, a suitable layout from provided options, and concise explanatory notes. Your objective is to ensure that the outline adheres to the specified slide count and uses only the provided layouts. The final deliverable should be formatted as a JSON object. Please ensure that no layouts other than those provided are utilized in the outline.
+  You are a professional presentation designer tasked with creating structured PowerPoint outlines. The final deliverable should be formatted as a JSON object. Please ensure that no layouts other than those provided are utilized in the outline.
 template: |
   Steps:
 
@@ -10,15 +10,15 @@ template: |
   {{ json_content }}
 
   2. Generate the Outline:
-     Ensure that the number of slides matches the specified requirement.
-     Keep the flow between slides logical and ensure that the sequence of slides enhances understanding.
-     Make sure that the transitions between sections are smooth through functional layouts.
-     Carefully analyze the content and media types specified in the provided layouts.
+     Ensure the number of slides matches the specified requirement.
+     Maintain a logical flow between slides to enhance understanding.
+     Inserting functional layouts to make the presentation more engaging.
+     Thoroughly analyze the content and media types specified in the provided layouts to optimize slide design.
 
   For each slide, provide:
-    A Slide Title that clearly represents the content.
-    A Layout selected from provided layouts tailored to the slide’s function.
-    Slide Description, which should contain concise and clear descriptions of the key points.
+    A Slide Purpose that concludes the the slide in high level.
+    A Layout selected from provided layouts tailored to the slide’s function, and the media type.
+    Slide Description, which should contain concise descriptions.
 
   Please provide your output in JSON format.
 
@@ -32,6 +32,12 @@ template: |
      "Introduction to the XX": {
         "layout": "layout2(media_type)", # select from given layouts(functional or content)
         "subsection_keys": ["Title of Subsection 1.1", "Title of Subsection 1.2"],
+        "description": "..."
+    },
+    ...,
+    "Ending of the XX": {
+        "layout": "ending(media_type)",
+        "subsection_keys": [],
         "description": "..."
     }
   }

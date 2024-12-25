@@ -128,10 +128,9 @@ def element_index(slide: SlidePage, element_id: int):
     raise IndexError(f"Cannot find element {element_id}, is it deleted or not exist?")
 
 
-def replace_run(paragraph_id: int, run_id: int, new_text: str, shape: BaseShape):
+def replace_para(paragraph_id: int, new_text: str, shape: BaseShape):
     para = shape.text_frame.paragraphs[paragraph_id]
-    run = runs_merge(para)[run_id]
-    run.text = new_text
+    runs_merge(para).text = new_text
 
 
 def clone_para(paragraph_id: int, shape: BaseShape):
@@ -139,99 +138,29 @@ def clone_para(paragraph_id: int, shape: BaseShape):
     shape.text_frame.paragraphs[-1]._element.addnext(parse_xml(para._element.xml))
 
 
-def del_run(paragraph_id: int, run_id: int, shape: BaseShape):
+def del_para(paragraph_id: int, shape: BaseShape):
     para = shape.text_frame.paragraphs[paragraph_id]
-    run = runs_merge(para)[run_id]
-    run._r.getparent().remove(run._r)
-    if len(para.runs) == 0:
-        para._element.getparent().remove(para._element)
-
-
-HORIZONTAL_ALIGN = {
-    "left": PP_ALIGN.LEFT,
-    "center": PP_ALIGN.CENTER,
-    "right": PP_ALIGN.RIGHT,
-}
-VERTICAL_ALIGN = {
-    "top": MSO_ANCHOR.TOP,
-    "center": MSO_ANCHOR.MIDDLE,
-    "bottom": MSO_ANCHOR.BOTTOM,
-}
-DEFAULT_FONT_SIZE = Pt(12)
-
-
-def set_font(
-    bold: bool,
-    font_size_delta: int | None,
-    horizontal_align: Literal["left", "center", "right", None],
-    vertical_align: Literal["top", "center", "bottom", None],
-    text_shape: BaseShape | None,
-):
-    horizontal_align = HORIZONTAL_ALIGN.get(horizontal_align, None)
-    vertical_align = VERTICAL_ALIGN.get(vertical_align, None)
-    if bold is not None:
-        text_shape.text_frame.font.bold = bold
-
-    textframe_font_size = text_shape.text_frame.font.size or Pt(12)
-
-    for paragraph in text_shape.text_frame.paragraphs:
-        if horizontal_align is not None:
-            paragraph.alignment = horizontal_align
-        if vertical_align is not None:
-            paragraph.vertical_anchor = vertical_align
-        if font_size_delta is None:
-            continue
-        para_font_size = (paragraph.font.size or textframe_font_size) + font_size_delta
-        for run in paragraph.runs:
-            if run.font.size is not None:
-                run.font.size = run.font.size + font_size_delta
-        paragraph.font.size = para_font_size
-
-
-def set_size(
-    left_delta: int,
-    right_delta: int,
-    top_delta: int,
-    bottom_delta: int,
-    shape: BaseShape,
-):
-    if left_delta is not None:
-        shape.left = Pt(shape.left.pt + left_delta)
-    if right_delta is not None:
-        shape.width = Pt(shape.width.pt + right_delta)
-    if bottom_delta is not None:
-        shape.height = Pt(shape.height.pt + bottom_delta)
-    if top_delta is not None:
-        shape.top = Pt(shape.top.pt + top_delta)
+    para._element.getparent().remove(para._element)
 
 
 # api functions
-def del_span(slide: SlidePage, div_id: int, paragraph_id: int, span_id: int):
+def del_paragraph(slide: SlidePage, div_id: int, paragraph_id: int):
     shape = element_index(slide, div_id)
     assert (
         shape.text_frame.is_textframe
     ), "The element does not have a text frame, please check the element id and type of element."
-    for paragraph in shape.text_frame.paragraphs:
-        if paragraph.idx == paragraph_id:
-            para = paragraph
-            break
+    for para in shape.text_frame.paragraphs:
+        if para.idx == paragraph_id:
+            shape.text_frame.paragraphs.remove(para)
+            shape._closures["delete"].append(
+                Closure(partial(del_para, para.real_idx), para.real_idx)
+            )
+            return
     else:
         raise IndexError(
             f"Cannot find the paragraph {paragraph_id} of the element {div_id},"
             "may refer to a non-existed paragraph or you haven't cloned enough paragraphs beforehand."
         )
-    for run in para.runs:
-        if run.idx == span_id:
-            para.runs.remove(run)
-            shape._closures["delete"].append(
-                Closure(
-                    partial(del_run, para.real_idx, span_id), para.real_idx, span_id
-                )
-            )
-            return
-    raise IndexError(
-        f"Cannot find the span {span_id} in the paragraph {paragraph_id} of the element {div_id}, may refer to a non-existent span."
-    )
 
 
 def del_image(slide: SlidePage, figure_id: int):
@@ -240,40 +169,28 @@ def del_image(slide: SlidePage, figure_id: int):
     slide.shapes.remove(shape)
 
 
-def replace_span(
-    slide: SlidePage, div_id: int, paragraph_id: int, span_id: int, text: str
-):
+def replace_paragraph(slide: SlidePage, div_id: int, paragraph_id: int, text: str):
     shape = element_index(slide, div_id)
     assert (
         shape.text_frame.is_textframe
     ), "The element does not have a text frame, please check the element id and type of element."
-    for paragraph in shape.text_frame.paragraphs:
-        if paragraph.idx == paragraph_id:
-            para = paragraph
-            break
-    else:
-        raise IndexError(
-            f"Cannot find the paragraph {paragraph_id} of the element {div_id},"
-            "may refer to a non-existed paragraph or you haven't cloned enough paragraphs beforehand."
-        )
-    for run in para.runs:
-        if run.idx == span_id:
-            run.text = text
+    for para in shape.text_frame.paragraphs:
+        if para.idx == paragraph_id:
+            para.text = text
             shape._closures["replace"].append(
                 Closure(
-                    partial(replace_run, para.real_idx, span_id, text),
+                    partial(replace_para, para.real_idx, text),
                     para.real_idx,
-                    span_id,
                 )
             )
             return
-    raise IndexError(
-        f"Cannot find the span {span_id} in the paragraph {paragraph_id} of the element {div_id},"
-        "Please: "
-        "1. check if you refer to a non-existed span."
-        "2. check if you already deleted it, ensure to remove span elements from the end of the paragraph first"
-        "3. consider merging adjacent replace_span operations."
-    )
+    else:
+        raise IndexError(
+            f"Cannot find the paragraph {paragraph_id} of the element {div_id},"
+            "Please: "
+            "1. check if you refer to a non-existed paragraph."
+            "2. check if you already deleted it."
+        )
 
 
 def replace_image(slide: SlidePage, img_id: int, image_path: str):
@@ -319,11 +236,11 @@ def clone_paragraph(slide: SlidePage, div_id: int, paragraph_id: int):
 
 class API_TYPES(Enum):
     Agent = [
-        del_span,
+        replace_image,
         del_image,
         clone_paragraph,
-        replace_span,
-        replace_image,
+        replace_paragraph,
+        del_paragraph,
     ]
 
     @classmethod
