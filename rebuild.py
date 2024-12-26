@@ -70,5 +70,3 @@ if __name__ == "__main__":
         container.slides = rebuild_pptx(
             pjoin(source_folder, setting, pdf, "agent_steps.jsonl"), prs
         )
-        container.save("./test/final.pptx")
-        ppt_to_images("./test/final.pptx", "./test")

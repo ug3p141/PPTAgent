@@ -20,7 +20,7 @@ def science_plot(font_size=16):
         yield
 
 
-def statistic_humaneval(eval_file: str):
+def statistic_humaneval(eval_file: str, print_diff: bool = False):
     llm_eval = json.load(open(eval_file))
     llm_data = []
     for dimension, files in llm_eval.items():
@@ -61,38 +61,39 @@ def statistic_humaneval(eval_file: str):
             }
         )
 
-    # Merge to keep only records present in both human and llm
+    # Compare and output differences between human and llm evaluations
+    llm_df = pd.DataFrame(llm_data)
+    human_df = pd.DataFrame(human_data)
     merged = pd.merge(
-        pd.DataFrame(llm_data),
-        pd.DataFrame(human_data),
+        llm_df,
+        human_df,
         on=["setting", "sample", "dimension"],
-        suffixes=("_human", "_llm"),
+        suffixes=("_llm", "_human"),
+        how="outer",
+        indicator=True,
     )
-    dimensions = merged["dimension"].unique()
-
-    # print avg of each dimension on setting
-    for setting in merged["setting"].unique():
-        for dimension in dimensions:
-            scores_human = merged[
-                (merged["setting"] == setting) & (merged["dimension"] == dimension)
-            ]["score_human"]
-            scores_llm = merged[
-                (merged["setting"] == setting) & (merged["dimension"] == dimension)
-            ]["score_llm"]
-            print(
-                f"{setting}, {dimension}, avg_human: {scores_human.mean()}, avg_llm: {scores_llm.mean()}"
-            )
+    # Calculate and print correlation coefficients for common records
+    common_records = merged[merged["_merge"] == "both"].drop(columns=["_merge"])
+    dimensions = common_records["dimension"].unique()
 
     for dimension in dimensions:
-        scores_human = merged[merged["dimension"] == dimension]["score_human"]
-        scores_llm = merged[merged["dimension"] == dimension]["score_llm"]
+        scores_human = common_records[common_records["dimension"] == dimension][
+            "score_human"
+        ]
+        scores_llm = common_records[common_records["dimension"] == dimension][
+            "score_llm"
+        ]
         pearson_correlation = pearsonr(scores_human, scores_llm)
         spearman_correlation = spearmanr(scores_human, scores_llm)
         print(
             f"{dimension}, pearson: {pearson_correlation}, spearman: {spearman_correlation}"
         )
-
-    return merged
+        if print_diff:
+            difference_df = common_records[
+                common_records["score_human"] != common_records["score_llm"]
+            ]
+            for _, row in difference_df.iterrows():
+                print(row)
 
 
 def statistic_ppteval():
@@ -163,4 +164,4 @@ def domain_perfomance(df: pd.DataFrame):
 
 
 if __name__ == "__main__":
-    statistic_humaneval("./resource/ppt_eval_12-16_qwen+intern.json")
+    statistic_humaneval("./test-logic.json")

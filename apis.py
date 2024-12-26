@@ -6,7 +6,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial
-from typing import Literal
 
 import PIL
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
