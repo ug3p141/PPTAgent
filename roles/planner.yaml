@@ -7,17 +7,15 @@ template: |
      Carefully analyze the provided JSON input.
      Identify key sections and subsections.
 
-  {{ json_content }}
-
   2. Generate the Outline:
      Ensure the number of slides matches the specified requirement.
      Maintain a logical flow between slides to enhance understanding.
-     Inserting functional layouts to make the presentation more engaging.
+     Inserting structural layouts properly(only structural slides should use structural layouts) to make the presentation more engaging.
      Thoroughly analyze the content and media types specified in the provided layouts to optimize slide design.
 
   For each slide, provide:
     A Slide Purpose that concludes the the slide in high level.
-    A Layout selected from provided layouts tailored to the slide’s function, and the media type.
+    A Layout selected from provided layouts tailored to the slide function, choose layout with proper media type according to the available images.
     Slide Description, which should contain concise descriptions.
 
   Please provide your output in JSON format.
@@ -25,12 +23,12 @@ template: |
   Example Output:
   {
      "Opening of the XX": {
-        "layout": "layout1(media_type)",
+        "layout": "opening(media_type)",
         "subsection_keys": [],
         "description": "..."
      },
      "Introduction to the XX": {
-        "layout": "layout2(media_type)", # select from given layouts(functional or content)
+        "layout": "layout1(media_type)", # select from given layouts(structural or content)
         "subsection_keys": ["Title of Subsection 1.1", "Title of Subsection 1.2"],
         "description": "..."
     },
@@ -43,6 +41,8 @@ template: |
   }
 
   Input:
+  {{ json_content }}
+
   Number of Slides: {{ num_slides }}
   Image Information:
   {{ image_information }}
@@ -50,7 +50,7 @@ template: |
   # you can only use the following layouts
   Content Layouts:
   {{ layouts }}
-  Functional Layouts:
+  structural Layouts:
   {{ functional_keys }}
 
   Output:

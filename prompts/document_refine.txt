@@ -13,8 +13,8 @@ Step-by-Step Instructions:
 5. Refine Text: Appropriately remove unnecessary(like citations) or trivial(repetitive or non-important information) text to make the content more concise and focused.
 Example Output:
 {
-    "title": "title of document",
     "metadata": {
+        "title": "title of document",
         "author": "name of authors",
         "publish date": "date of publication",
         "organization": "name of organization"

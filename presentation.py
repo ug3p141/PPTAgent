@@ -80,13 +80,15 @@ class Paragraph:
 
     def to_html(self, style_args: StyleArg):
         if self.idx == -1:
-            return ""
+            raise ValueError(f"paragraph {self.idx} is not valid")
         tag = "li" if self.bullet else "p"
         id_str = f" id='{self.idx}'" if style_args.paragraph_id else ""
         font_style = get_font_style(self.font)
         style_str = (
             f" style='{font_style}'" if style_args.font_style and font_style else ""
         )
+        if self.bullet:
+            style_str += f" bullet-type='{self.bullet}'"
         return f"<{tag}{id_str}{style_str}>{self.text}</{tag}>"
 
     def __repr__(self):
@@ -122,17 +124,9 @@ class TextFrame:
     def to_html(self, style_args: StyleArg):
         if not self.is_textframe:
             return ""
-        repr_list = []
-        pre_bullet = None
-        for para in self.paragraphs + [None]:
-            if pre_bullet is not None and (para is None or para.bullet != pre_bullet):
-                repr_list.append("</ul>")
-            if para is None or para.idx == -1:
-                continue
-            if para.bullet is not None and pre_bullet != para.bullet:
-                repr_list.append(f"<ul>")  # bullet-type='{para.bullet}'>")
-            repr_list.append(para.to_html(style_args))
-            pre_bullet = para.bullet
+        repr_list = [
+            para.to_html(style_args) for para in self.paragraphs if para.idx != -1
+        ]
         return "\n".join([INDENT * self.level + repr for repr in repr_list])
 
     def __repr__(self):
@@ -908,7 +902,7 @@ if __name__ == "__main__":
     config = Config("/tmp")
     presentation = deepcopy(
         Presentation.from_file("runs/pptx/cip_default_template/source.pptx", config)
-    )
+    ).save("./test.pptx")
     for pptx in glob("data/*/pptx/*/source.pptx"):
         presentation = deepcopy(Presentation.from_file(pptx, config))
         for slide in presentation.slides:

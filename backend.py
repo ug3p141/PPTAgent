@@ -31,7 +31,6 @@ from fastapi.responses import FileResponse
 from FlagEmbedding import BGEM3FlagModel
 from jinja2 import Template
 from marker.models import create_model_dict
-from md2pdf.core import md2pdf
 
 import induct
 import llms
@@ -437,8 +436,8 @@ if __name__ == "__main__":
 
     import uvicorn
 
-    # if len(sys.argv) == 1:
-    #     ppt_gen("2024-11-14|9edf8d8b-5ad4-4ebd-a9a0-71a0a0c0c84e", True)
+    if len(sys.argv) == 1:
+        ppt_gen("2024-12-27|5215990c-9d9e-4f50-b7bc-d8633f072e6b", True)
     ip = (
         subprocess.check_output(
             "hostname -I | tr ' ' '\n' | grep '^124\\.'", shell=True

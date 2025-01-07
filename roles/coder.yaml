@@ -26,10 +26,7 @@ template: |
 
     <div id="0" style="font-size: 24pt; color: #0D0D0D">
         <p id="0">
-           WorldFAIR: Global cooperation on FAIR data
-        </p>
-        <p id="1">
-            policy and practice
+           WorldFAIR: Global cooperation on FAIR data policy and practice
         </p>
     </div>
 

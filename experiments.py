@@ -28,12 +28,7 @@ from utils import Config, older_than, pbasename, pexists, pjoin, ppt_to_images
 EVAL_MODELS = [
     (llms.qwen2_5, llms.qwen2_5, llms.qwen_vl),
     (llms.gpt4o, llms.gpt4o, llms.gpt4o),
-    # gpt4o excel as MLLM
     (llms.qwen_vl, llms.qwen_vl, llms.qwen_vl),
-    # code ability
-    (llms.qwen2_5, llms.qwen2_5_32, llms.qwen_vl),
-    (llms.qwen2_5, llms.qwen_coder, llms.qwen_vl),
-    # smaller models
 ]
 
 # ablation

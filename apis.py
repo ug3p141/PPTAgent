@@ -97,7 +97,7 @@ class CodeExecutor:
                         self.command_history[-1][-1] = tag
                     else:
                         raise ValueError(
-                            "Invalid command: Both 'clone_paragraph' and 'del_span'/'del_image' are used within a single command. "
+                            "Invalid command: Both 'clone_paragraph' and 'del_paragraph'/'del_image' are used within a single command. "
                             "Each command must only perform one of these operations based on the quantity_change."
                         )
                 self.code_history.append([HistoryMark.CODE_RUN_ERROR, line, None])

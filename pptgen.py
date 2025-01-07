@@ -291,25 +291,34 @@ class PPTCrew(PPTGen):
         self, editor_output: dict, content_schema: dict, old_data: dict, retry: int = 0
     ):
         command_list = []
-        for el_info in editor_output.values():
-            if "data" not in el_info:
-                if retry < self.retry_times:
-                    new_output = self.staffs["editor"].retry(
-                        """please give your output as a dict like
+        try:
+            for el_name, el_data in editor_output.items():
+                assert (
+                    "data" in el_data
+                ), """key `data` not found in output
+                        please give your output as a dict like
                         {
                             "element1": {
                                 "data": ["text1", "text2"] for text elements
                                 or ["/path/to/image", "..."] for image elements
                             },
-                        }""",
-                        "key `data` not found in your output, please give your output as a dict like the example",
-                        retry + 1,
+                        }"""
+                charater_counts = [len(i) for i in el_data["data"]]
+                max_charater_count = max([len(old_data[el_name])])
+                if max(charater_counts) > max_charater_count * 1.5:
+                    raise ValueError(
+                        f"The content for '{el_name}' exceeds the allowed character limit. Please ensure the content is concise and adheres to the slide style."
                     )
-                    return self._generate_commands(
-                        new_output, content_schema, old_data, retry + 1
-                    )
-                else:
-                    raise ValueError(f"data not found in editor_output: {el_info}")
+        except Exception as e:
+            if retry < self.retry_times:
+                new_output = self.staffs["editor"].retry(
+                    e,
+                    traceback.format_exc(),
+                    retry + 1,
+                )
+                return self._generate_commands(
+                    new_output, content_schema, old_data, retry + 1
+                )
 
         for el_name, old_content in old_data.items():
             if not isinstance(old_content, list):
