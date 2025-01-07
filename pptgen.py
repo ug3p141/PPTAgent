@@ -260,9 +260,7 @@ class PPTCrew(PPTGen):
                     f"Failed to generate slide, tried too many times at editing\ntraceback: {feedback[1]}"
                 )
             edit_actions = self.staffs["coder"].retry(*feedback, error_idx + 1)
-        self.empty_prs.build_slide(
-            edited_slide
-        )  # if no three consecutive errors, means it error here
+        self.empty_prs.build_slide(edited_slide)
         return edited_slide
 
     def _prepare_schema(self, content_schema: dict):

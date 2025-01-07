@@ -188,12 +188,6 @@ def extract_fill(shape: BaseShape):
         return None
     else:
         return shape.fill._xPr.xml
-    # fill_dict = {
-    #     "fill_xml": shape.fill._xPr.xml,
-    # } | {k: v for k, v in object_to_dict(shape.fill).items() if "color" in k}
-    # if not isinstance(shape.fill._fill, (_NoneFill, _NoFill)):
-    #     fill_dict["type"] = shape.fill.type.name.lower()
-    # return fill_dict
 
 
 def apply_fill(shape: BaseShape, fill_xml: str):

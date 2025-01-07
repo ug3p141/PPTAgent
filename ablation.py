@@ -40,7 +40,6 @@ class PPTCrew_wo_Structure(PPTCrew):
         return outline
 
 
-# random layout
 class PPTCrew_wo_LayoutInduction(PPTCrew):
     def _generate_slide(self, slide_data, code_executor: CodeExecutor) -> SlidePage:
         slide_idx, (slide_title, slide) = slide_data

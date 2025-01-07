@@ -180,7 +180,6 @@ class LLM:
         self.history = []
 
 
-# by type, by relevance, by time
 @dataclass
 class Turn:
     id: int
@@ -248,7 +247,6 @@ class Role:
             self.input_tokens += turn.input_tokens
             self.output_tokens += turn.output_tokens
         self.input_tokens += self.system_tokens
-        # every reply is primed with <|start|>assistant<|message|>
         self.output_tokens += 3
 
     def get_history(self, similar: int, recent: int, prompt: str):
@@ -362,7 +360,6 @@ qwen_vl = LLM(model="Qwen2-VL-72B-Instruct", api_base="http://124.16.138.150:799
 qwen_coder = LLM(
     model="Qwen2.5-Coder-32B-Instruct", api_base="http://127.0.0.1:8008/v1"
 )
-# intern_vl = LLM(model="InternVL2_5-78B", api_base="http://127.0.0.1:8009/v1")
 intern_vl = LLM(model="InternVL2_5-78B", api_base="http://124.16.138.144:8009/v1")
 
 language_model = qwen2_5

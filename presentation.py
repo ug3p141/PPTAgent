@@ -33,7 +33,6 @@ from utils import (
     wmf_to_images,
 )
 
-# slide, (group), shape, textframe, (ul), li/p, run
 INDENT = "\t"
 
 
