@@ -1,4 +1,5 @@
 __pycache__
+olddata
 data
 *ipynb
 .vscode
@@ -8,7 +9,7 @@ data
 *egg-info
 .yarn
 runs
-resource
+Makefile
 node_modules
 frontend/.yarn
 frontend/.pnp.loader.mjs

@@ -11,12 +11,12 @@ import func_argparse
 import pytorch_fid.fid_score as fid
 import torch
 from jinja2 import Template
+from pytorch_fid.fid_score import compute_statistics_of_path
 from rich import print
 from tqdm import tqdm
 from transformers import GPT2LMHeadModel, GPT2TokenizerFast
 
 import llms
-from faster_pytorch_fid.fid_score_gpu import compute_statistics_of_path
 from presentation import Picture, Presentation, SlidePage
 from utils import Config, pexists, pjoin
 
