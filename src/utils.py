@@ -30,6 +30,12 @@ LABEL_LEN = Pt(24)
 FONT_LEN = Pt(20)
 
 
+def is_image_path(file: str):
+    if file.split(".")[-1].lower() in IMAGE_EXTENSIONS:
+        return True
+    return False
+
+
 def get_font_pptcstyle(font: dict):
     font = SimpleNamespace(**font)
     return f"Font Style: bold={font.bold}, italic={font.italic}, underline={font.underline}, size={font.size}pt, color={font.color}, font style={font.name}\n"
@@ -90,7 +96,7 @@ def edit_distance(text1: str, text2: str):
 def get_slide_content(doc_json: dict, slide_title: str, slide: dict):
     slide_desc = slide.get("description", "")
     slide_content = f"Slide Purpose: {slide_title}\nSlide Description: {slide_desc}\n"
-    for key in slide.get("subsection_keys", []):
+    for key in slide.get("subsections", []):
         slide_content += "Slide Content Source: "
         for section in doc_json["sections"]:
             subsections = section.get("subsections", [])

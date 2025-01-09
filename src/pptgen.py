@@ -120,6 +120,9 @@ class PPTGen(ABC):
     @tenacity
     def _generate_outline(self, num_slides: int):
         outline_file = pjoin(self.config.RUN_DIR, "presentation_outline.json")
+        doc_overview = deepcopy(self.doc_json)
+        for section in doc_overview["sections"]:
+            [sub.pop("content") for sub in section["subsections"]]
         if pexists(outline_file):
             outline = json.load(open(outline_file, "r"))
         else:
@@ -129,7 +132,7 @@ class PPTGen(ABC):
                     set(self.slide_induction.keys()).difference(self.functional_keys)
                 ),
                 functional_keys="\n".join(self.functional_keys),
-                json_content=self.doc_json,
+                json_content=doc_overview,
                 image_information=self.image_information,
             )
             outline = self._valid_outline(outline)
@@ -154,15 +157,14 @@ class PPTGen(ABC):
                     )
                 slide["layout"] = self.layout_names[layout_sim.argmax().item()]
             if any(
-                not {"layout", "subsection_keys", "description"}.issubset(
-                    set(slide.keys())
-                )
+                not {"layout", "subsections", "description"}.issubset(set(slide.keys()))
                 for slide in outline.values()
             ):
                 raise ValueError(
-                    "Invalid outline structure, must be a dict with layout, subsection_keys, description"
+                    "Invalid outline structure, must be a dict with layout, subsections, description"
                 )
         except ValueError as e:
+            print(outline, e)
             if retry < self.retry_times:
                 new_outline = self.staffs["planner"].retry(
                     str(e), traceback.format_exc(), retry + 1
@@ -222,6 +224,7 @@ class PPTGen(ABC):
             print(self.config.RUN_DIR)
 
 
+# 价格scale factor
 class PPTCrew(PPTGen):
     roles: list[str] = ["editor", "coder"]
 
@@ -302,10 +305,12 @@ class PPTCrew(PPTGen):
                             },
                         }"""
                 charater_counts = [len(i) for i in el_data["data"]]
-                max_charater_count = max([len(old_data[el_name])])
+                max_charater_count = max([len(i) for i in old_data[el_name]])
                 if max(charater_counts) > max_charater_count * 1.5:
                     raise ValueError(
-                        f"The content for '{el_name}' exceeds the allowed character limit. Please ensure the content is concise and adheres to the slide style."
+                        f"Content for '{el_name}' exceeds character limit ({max(charater_counts)} > {max_charater_count}). "
+                        f"Please reduce the content length to maintain slide readability and visual balance. "
+                        f"Current text: '{el_data['data']}'"
                     )
         except Exception as e:
             if retry < self.retry_times:

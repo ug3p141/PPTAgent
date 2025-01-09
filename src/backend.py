@@ -38,7 +38,7 @@ import pptgen
 from model_utils import get_image_model, parse_pdf
 from multimodal import ImageLabler
 from presentation import Presentation
-from utils import IMAGE_EXTENSIONS, Config, pjoin, ppt_to_images, tenacity
+from utils import Config, is_image_path, pjoin, ppt_to_images, tenacity
 
 # constants
 DEBUG = True if len(sys.argv) == 1 else False
@@ -366,7 +366,7 @@ def ppt_gen(task_id: str, rerun=False):
             caption_prompt = open("prompts/caption.txt").read()
             images = {}
             for k in os.listdir(parsedpdf_dir):
-                if k.split(".")[-1] in IMAGE_EXTENSIONS:
+                if is_image_path(k):
                     try:
                         images[pjoin(parsedpdf_dir, k)] = [
                             llms.vision_model(

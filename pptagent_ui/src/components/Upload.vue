@@ -57,8 +57,8 @@ export default {
       models: ['Qwen2.5-72B-Instruct'],
       selectedPages: 6,
       pagesOptions: Array.from({ length: 12 }, (_, i) => i + 3),
-      topic: '', // New data property for topic
-      isPptxEnabled: false,
+      topic: '',
+      isPptxEnabled:true
     }
   },
   methods: {
@@ -71,21 +71,21 @@ export default {
         this.pdfFile = file  // {{ edit: Assign single pdfFile }}
       }
     },
-    handlePptxClick(event) {
-      if (!this.isPptxEnabled) {
-        event.preventDefault();
-        const password = prompt('请输入密码以启用PPTX上传');
-        if (password === 'zhongwenxinxi') {
-          this.isPptxEnabled = true;
-          // 延迟触发文件选择框，等待状态更新
-          setTimeout(() => {
-            document.getElementById('pptx-upload').click();
-          }, 0);
-        } else {
-          alert('密码错误, 使用中文信息默认模板');
-        }
-      }
-    },
+    // handlePptxClick(event) {
+    //   if (!this.isPptxEnabled) {
+    //     event.preventDefault();
+    //     const password = prompt('请输入密码以启用PPTX上传');
+    //     if (password === 'zhongwenxinxi') {
+    //       this.isPptxEnabled = true;
+    //       // 延迟触发文件选择框，等待状态更新
+    //       setTimeout(() => {
+    //         document.getElementById('pptx-upload').click();
+    //       }, 0);
+    //     } else {
+    //       alert('密码错误, 使用中文信息默认模板');
+    //     }
+    //   }
+    // },
     async goToGenerate() { // Renamed method from goToDoc to goToGenerate
       this.$axios.get('/')
         .then(response => {

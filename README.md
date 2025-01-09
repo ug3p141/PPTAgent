@@ -1,21 +1,27 @@
 # PPTAgent: Generating and Evaluating Presentations Beyond Text-to-Slides
 
-> The code and data are coming soon...
+> **Note**: Code and data will be publicly available soon!
 
-We propose **PPTAgent**, a system for automatically generating presentations from documents. It follows a two-step process inspired by how people create slides, ensuring high-quality content, clear structure, and visually appealing design. To evaluate the generated presentations, we also introduce **PPTEval**, a framework that measures the quality of presentations in terms of content, design, and coherence.
+We present **PPTAgent**, an innovative system that automatically generating presentations from documents. Drawing inspiration from human presentation creation methods, our system employs a two-step process to ensure excellence in content quality, visual design, and structural coherence. Additionally, we introduce **PPTEval**, a comprehensive evaluation framework that assesses presentations across multiple dimensions.
+
+## Demo Video🎥
+
+Watch the demo video to see PPTAgent in action:
+
 
 ## Distinctive Features✨
-- Dynamically generate slides that incorporate both text and images.
-- Leverage existing presentations as references without the need for prior annotation.
-- Comprehensively evaluated the quality of presentations from multiple perspectives.
+- **Dynamic Content Generation**: Creates slides with seamlessly integrated text and images
+- **Smart Reference Learning**: Leverages existing presentations without requiring manual annotation
+- **Comprehensive Quality Assessment**: Evaluates presentations through multiple quality metrics
 
 ## PPTAgent🤖
 
-PPTAgent generates presentations in two steps:
-1. **Analyze**: Studies reference presentations to identify patterns in structure and content.
-2. **Generate**: Creates outlines and completes slides with consistent and aligned formatting.
+PPTAgent follows a two-phase approach:
+1. **Analysis Phase**: Extracts and learns from patterns in reference presentations
+2. **Generation Phase**: Develops structured outlines and produces visually cohesive slides
 
-The workflow of PPTAgent is shown below:
+Our system's workflow is illustrated below:
+
 
 ![PPTAgent Workflow](resource/fig2.jpg)
 

@@ -14,7 +14,7 @@ from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoFeatureExtractor, AutoModel
 
 from presentation import Presentation
-from utils import IMAGE_EXTENSIONS, pjoin
+from utils import is_image_path, pjoin
 
 device_count = torch.cuda.device_count()
 
@@ -116,9 +116,7 @@ def get_image_embedding(image_dir: str, extractor, model, batchsize: int = 16):
 
     inputs = []
     embeddings = []
-    images = [
-        i for i in sorted(os.listdir(image_dir)) if i.split(".")[-1] in IMAGE_EXTENSIONS
-    ]
+    images = [i for i in sorted(os.listdir(image_dir)) if is_image_path(i)]
     for file in images:
         image = Image.open(pjoin(image_dir, file)).convert("RGB")
         inputs.append(transform(image))
