@@ -1,5 +1,11 @@
 # PPTAgent: Generating and Evaluating Presentations Beyond Text-to-Slides
 
+<p align="center">
+  📄 <a href="https://arxiv.org/abs/2501.03936" target="_blank">Paper</a> &nbsp; | &nbsp;
+  🤗 <a href="https://huggingface.co/datasets/Forceless/Zenodo10K" target="_blank">Dataset</a> &nbsp; | &nbsp;
+   📰 <a href="#citation" target="_blank">Citation</a>
+</p>
+
 We present **PPTAgent**, an innovative system that automatically generating presentations from documents. Drawing inspiration from human presentation creation methods, our system employs a two-step process to ensure excellence in content quality, visual design, and structural coherence. Additionally, we introduce **PPTEval**, a comprehensive evaluation framework that assesses presentations across multiple dimensions.
 
 ## Demo Video🎥
